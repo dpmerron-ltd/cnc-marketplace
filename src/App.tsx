@@ -359,12 +359,31 @@ function App() {
 
   async function startMfaEnrollment() {
     if (!supabase) return
+    const client = supabase
     setMfaBusy(true)
     setMfaError(undefined)
-    const result = await supabase.auth.mfa.enroll({
+
+    const factorsResult = await client.auth.mfa.listFactors()
+    const staleTotpFactors = ((factorsResult.data?.all ?? []) as MfaFactor[]).filter(
+      (factor) => factor.factor_type === 'totp' && factor.status === 'unverified',
+    )
+
+    for (const factor of staleTotpFactors) {
+      await client.auth.mfa.unenroll({ factorId: factor.id })
+    }
+
+    let result = await client.auth.mfa.enroll({
       factorType: 'totp',
       friendlyName: 'Microsoft Authenticator',
     })
+
+    if (result.error?.message.toLowerCase().includes('friendly name')) {
+      result = await client.auth.mfa.enroll({
+        factorType: 'totp',
+        friendlyName: `Microsoft Authenticator ${new Date().toISOString().slice(0, 19)}`,
+      })
+    }
+
     setMfaBusy(false)
 
     if (result.error || !result.data) {
