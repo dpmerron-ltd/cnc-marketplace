@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { originalFinalDepth } from './gcode/depthOverride'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
 import { instanceBounds } from './gcode/transform'
@@ -211,6 +212,25 @@ function sheetCountFor(sheet: Sheet): number {
   return Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
 }
 
+function formatSetting(value: number | undefined, suffix = ''): string {
+  if (value === undefined || !Number.isFinite(value)) return 'Not set'
+  return `${Number.isInteger(value) ? value : Number(value.toFixed(3))}${suffix}`
+}
+
+function deepestConfiguredCut(parts: Part[], sheet: Sheet): number | undefined {
+  if (sheet.gcodeSettings.finalCutDepth && sheet.gcodeSettings.finalCutDepth > 0) return sheet.gcodeSettings.finalCutDepth
+
+  let deepest: number | undefined
+  for (const instance of sheet.instances) {
+    const part = parts.find((candidate) => candidate.id === instance.partId)
+    if (!part) continue
+    const partDepth = originalFinalDepth(part)
+    if (partDepth === undefined) continue
+    deepest = deepest === undefined ? partDepth : Math.max(deepest, partDepth)
+  }
+  return deepest
+}
+
 function newInstance(partId: string, x: number, y: number, sheetIndex: number): PartInstance {
   return {
     id: crypto.randomUUID(),
@@ -250,6 +270,36 @@ interface MfaFactor {
   factor_type: string
   status: string
   friendly_name?: string
+}
+
+interface PendingExportFile {
+  filename: string
+  gcode: string
+}
+
+interface ExportSummary {
+  sheetName: string
+  physicalSheets: number
+  placedParts: number
+  uniqueComponents: number
+  deepestCutMm?: number
+  finalCutDepthMm?: number
+  maxDepthOfCutMm?: number
+  safeZ: number
+  cuttingFeedMmPerSecond?: number
+  plungeFeedMmPerSecond?: number
+  rampFeedMmPerSecond?: number
+  reachCheckEnabled: boolean
+  spindleStartEnabled: boolean
+  validationErrors: number
+  validationWarnings: number
+  exportWarnings: string[]
+}
+
+interface PendingExport {
+  mode: 'combined' | 'sheets'
+  files: PendingExportFile[]
+  summary: ExportSummary
 }
 
 function projectToAppState(project: Project | undefined): AppPersistenceState {
@@ -353,6 +403,7 @@ function App() {
   const [selectedPartId, setSelectedPartId] = useState<string>()
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>()
   const [preview, setPreview] = useState<string>()
+  const [pendingExport, setPendingExport] = useState<PendingExport>()
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
   const [mfaReady, setMfaReady] = useState(!supabase)
@@ -836,7 +887,28 @@ function App() {
     setStatus(result.errors.length > 0 ? `Preview generated with ${result.errors.length} export error(s).` : 'Preview generated from transformed G-code.')
   }
 
-  async function exportGCode() {
+  function exportSummary(exportWarnings: string[]): ExportSummary {
+    return {
+      sheetName: sheet.name.trim() || defaultSheet.name,
+      physicalSheets: sheetCount,
+      placedParts: sheet.instances.length,
+      uniqueComponents: new Set(sheet.instances.map((instance) => instance.partId)).size,
+      deepestCutMm: deepestConfiguredCut(parts, sheet),
+      finalCutDepthMm: sheet.gcodeSettings.finalCutDepth,
+      maxDepthOfCutMm: sheet.gcodeSettings.maxDepthOfCut,
+      safeZ: sheet.gcodeSettings.safeZ,
+      cuttingFeedMmPerSecond: sheet.gcodeSettings.cuttingFeedRateMmPerSecond,
+      plungeFeedMmPerSecond: sheet.gcodeSettings.plungeFeedRateMmPerSecond,
+      rampFeedMmPerSecond: sheet.gcodeSettings.rampFeedRateMmPerSecond,
+      reachCheckEnabled: Boolean(sheet.gcodeSettings.reachCheckEnabled),
+      spindleStartEnabled: sheet.gcodeSettings.spindleStartGcode.trim().length > 0,
+      validationErrors: errors.length,
+      validationWarnings: warnings.length,
+      exportWarnings,
+    }
+  }
+
+  function prepareCombinedExport() {
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
@@ -849,14 +921,15 @@ function App() {
       return
     }
 
-    const saved = await saveCurrentProject()
-    if (!saved) return
     const filename = `${filenameSafe(sheet.name)}.nc`
-    downloadText(filename, result.gcode, 'application/x-gcode')
-    setStatus(`Saved sheet and exported ${filename}.`)
+    setPendingExport({
+      mode: 'combined',
+      files: [{ filename, gcode: result.gcode }],
+      summary: exportSummary(result.warnings),
+    })
   }
 
-  async function exportAllSheetGCodes() {
+  function prepareSheetExports() {
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
@@ -870,15 +943,30 @@ function App() {
       return
     }
 
+    const base = filenameSafe(sheet.name)
+    setPendingExport({
+      mode: 'sheets',
+      files: results.map((result) => ({ filename: `${base}-sheet-${result.sheetIndex + 1}.nc`, gcode: result.gcode })),
+      summary: exportSummary(results.flatMap((result) => result.warnings)),
+    })
+  }
+
+  async function confirmPendingExport() {
+    if (!pendingExport) return
     const saved = await saveCurrentProject()
     if (!saved) return
-    const base = filenameSafe(sheet.name)
-    results.forEach((result, index) => {
+
+    pendingExport.files.forEach((file, index) => {
       window.setTimeout(() => {
-        downloadText(`${base}-sheet-${result.sheetIndex + 1}.nc`, result.gcode, 'application/x-gcode')
+        downloadText(file.filename, file.gcode, 'application/x-gcode')
       }, index * 150)
     })
-    setStatus(`Saved sheet and exported ${results.length} sheet G-code file(s).`)
+    setStatus(
+      pendingExport.mode === 'combined'
+        ? `Saved sheet and exported ${pendingExport.files[0].filename}.`
+        : `Saved sheet and exported ${pendingExport.files.length} sheet G-code file(s).`,
+    )
+    setPendingExport(undefined)
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
@@ -969,8 +1057,8 @@ function App() {
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
           <button type="button" onClick={previewGCode}>Preview</button>
-          <button type="button" onClick={() => void exportAllSheetGCodes()}>Export Sheets</button>
-          <button type="button" className="primary" onClick={() => void exportGCode()}>Export Combined</button>
+          <button type="button" onClick={prepareSheetExports}>Export Sheets</button>
+          <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div>
       </header>
@@ -1076,6 +1164,114 @@ function App() {
               }}
             />
           </div>
+        </div>
+      )}
+
+      {pendingExport && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-review-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="export-review-title">Review G-code Export</h2>
+                <p>
+                  {pendingExport.mode === 'combined'
+                    ? 'Export Combined creates one G-code file for the full job.'
+                    : 'Export Sheets creates one G-code file for each physical sheet.'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setPendingExport(undefined)}>Close</button>
+            </div>
+
+            <div className="export-summary-grid">
+              <div>
+                <span>Sheet</span>
+                <strong>{pendingExport.summary.sheetName}</strong>
+              </div>
+              <div>
+                <span>Files</span>
+                <strong>{pendingExport.files.length}</strong>
+              </div>
+              <div>
+                <span>Physical sheets</span>
+                <strong>{pendingExport.summary.physicalSheets}</strong>
+              </div>
+              <div>
+                <span>Placed parts</span>
+                <strong>{pendingExport.summary.placedParts}</strong>
+              </div>
+              <div>
+                <span>Components</span>
+                <strong>{pendingExport.summary.uniqueComponents}</strong>
+              </div>
+              <div>
+                <span>Deepest cut</span>
+                <strong>{formatSetting(pendingExport.summary.deepestCutMm, ' mm')}</strong>
+              </div>
+              <div>
+                <span>Final depth override</span>
+                <strong>{formatSetting(pendingExport.summary.finalCutDepthMm, ' mm')}</strong>
+              </div>
+              <div>
+                <span>Max depth of cut</span>
+                <strong>{formatSetting(pendingExport.summary.maxDepthOfCutMm, ' mm')}</strong>
+              </div>
+              <div>
+                <span>Safe Z</span>
+                <strong>{formatSetting(pendingExport.summary.safeZ, ' mm')}</strong>
+              </div>
+              <div>
+                <span>Cutting feed</span>
+                <strong>{formatSetting(pendingExport.summary.cuttingFeedMmPerSecond, ' mm/s')}</strong>
+              </div>
+              <div>
+                <span>Plunge feed</span>
+                <strong>{formatSetting(pendingExport.summary.plungeFeedMmPerSecond, ' mm/s')}</strong>
+              </div>
+              <div>
+                <span>Ramp feed</span>
+                <strong>{formatSetting(pendingExport.summary.rampFeedMmPerSecond, ' mm/s')}</strong>
+              </div>
+              <div>
+                <span>Reach check</span>
+                <strong>{pendingExport.summary.reachCheckEnabled ? 'Enabled' : 'Off'}</strong>
+              </div>
+              <div>
+                <span>Spindle start block</span>
+                <strong>{pendingExport.summary.spindleStartEnabled ? 'Configured' : 'Empty'}</strong>
+              </div>
+              <div>
+                <span>Validation</span>
+                <strong>{pendingExport.summary.validationErrors} errors, {pendingExport.summary.validationWarnings} warnings</strong>
+              </div>
+            </div>
+
+            <div className="export-file-list">
+              <h3>Files to export</h3>
+              <ul>
+                {pendingExport.files.map((file) => (
+                  <li key={file.filename}>{file.filename}</li>
+                ))}
+              </ul>
+            </div>
+
+            {pendingExport.summary.exportWarnings.length > 0 && (
+              <div className="export-warnings">
+                <h3>Export warnings</h3>
+                <ul>
+                  {[...new Set(pendingExport.summary.exportWarnings)].slice(0, 8).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" onClick={() => setPendingExport(undefined)}>Cancel</button>
+              <button type="button" className="primary" onClick={() => void confirmPendingExport()}>
+                Export G-code
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
