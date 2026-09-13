@@ -18,9 +18,10 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
     return { instance, part, bounds: part ? instanceBounds(part, instance) : undefined }
   })
 
+  let missingPartCount = 0
   for (const item of placed) {
     if (!item.part || !item.bounds) {
-      issues.push({ level: 'error', message: `Instance ${item.instance.id} references a missing part.` })
+      missingPartCount += 1
       continue
     }
 
@@ -61,6 +62,13 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
       if (!first.bounds || !second.bounds || !first.part || !second.part) continue
       if (rectsOverlap(first.bounds, second.bounds, sheet.spacing)) issues.push({ level: 'error', message: `${first.part.name} and ${second.part.name} overlap or violate spacing.` })
     }
+  }
+
+  if (missingPartCount > 0) {
+    issues.unshift({
+      level: 'error',
+      message: `${missingPartCount} placed part${missingPartCount === 1 ? '' : 's'} reference component files that are no longer in the library.`,
+    })
   }
 
   return issues

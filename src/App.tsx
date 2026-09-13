@@ -85,6 +85,14 @@ function normalizeSheet(sheet: Sheet): Sheet {
   }
 }
 
+function pruneMissingSheetInstances(sheet: Sheet, availableParts: Part[]): Sheet {
+  const partIds = new Set(availableParts.map((part) => part.id))
+  return {
+    ...sheet,
+    instances: sheet.instances.filter((instance) => partIds.has(instance.partId)),
+  }
+}
+
 function readFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -146,10 +154,11 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
 
   if (project.items && project.items.length > 0) {
     const fallbackItemId = project.items[0].id
+    const parts = project.parts.map((part) => ({ ...part, itemId: part.itemId ?? fallbackItemId }))
     return {
       items: project.items,
-      parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? fallbackItemId })),
-      sheet: normalizeSheet(project.sheet),
+      parts,
+      sheet: pruneMissingSheetInstances(normalizeSheet(project.sheet), parts),
       sheetHistory: project.sheetHistory ?? [],
       selectedItemId: fallbackItemId,
       restored: true,
@@ -157,10 +166,11 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
   }
 
   const legacyItem = newItem('Imported Components')
+  const parts = project.parts.map((part) => ({ ...part, itemId: part.itemId ?? legacyItem.id }))
   return {
     items: [legacyItem],
-    parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? legacyItem.id })),
-    sheet: normalizeSheet(project.sheet),
+    parts,
+    sheet: pruneMissingSheetInstances(normalizeSheet(project.sheet), parts),
     sheetHistory: project.sheetHistory ?? [],
     selectedItemId: legacyItem.id,
     restored: true,
@@ -266,7 +276,7 @@ function App() {
         setItems(remoteProject.items)
         setParts(remoteProject.parts)
         setSheetHistory(remoteProject.sheetHistory)
-        if (remoteProject.sheet) setSheet(normalizeSheet(remoteProject.sheet))
+        if (remoteProject.sheet) setSheet(pruneMissingSheetInstances(normalizeSheet(remoteProject.sheet), remoteProject.parts))
         setSelectedItemId(remoteProject.selectedItemId)
         setSelectedInstanceId(undefined)
         setStatus('Loaded marketplace from Supabase.')
@@ -481,7 +491,7 @@ function App() {
     setItems(loadedState.items)
     setSelectedItemId(loadedState.selectedItemId)
     setParts(loadedState.parts)
-    setSheet(normalizeSheet(loadedState.sheet))
+    setSheet(pruneMissingSheetInstances(normalizeSheet(loadedState.sheet), loadedState.parts))
     setSheetHistory(loadedState.sheetHistory)
     setSelectedInstanceId(undefined)
     setStatus('Loaded saved marketplace from this browser.')
@@ -495,7 +505,7 @@ function App() {
     setItems(importedState.items)
     setSelectedItemId(importedState.selectedItemId)
     setParts(importedState.parts)
-    setSheet(normalizeSheet(importedState.sheet))
+    setSheet(pruneMissingSheetInstances(normalizeSheet(importedState.sheet), importedState.parts))
     setSheetHistory(importedState.sheetHistory)
     setSelectedInstanceId(undefined)
     setStatus(`Imported project ${file.name}.`)
@@ -525,11 +535,13 @@ function App() {
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
-    setSheet(normalizeSheet(entry.sheet))
+    const nextSheet = pruneMissingSheetInstances(normalizeSheet(entry.sheet), parts)
+    setSheet(nextSheet)
     setSelectedItemId(entry.selectedItemId)
     setSelectedInstanceId(undefined)
     setPage('sheet')
-    setStatus(`Opened ${entry.name}.`)
+    const removedCount = entry.sheet.instances.length - nextSheet.instances.length
+    setStatus(removedCount > 0 ? `Opened ${entry.name}; removed ${removedCount} missing placed part(s).` : `Opened ${entry.name}.`)
   }
 
   function deleteHistoryEntry(entryId: string) {
