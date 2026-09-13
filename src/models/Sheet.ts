@@ -4,6 +4,15 @@ export interface GCodeSettings {
   startGcode: string
   endGcode: string
   safeZ: number
+  maxDepthOfCut?: number
+  xyFeedRate?: number
+  applyXyFeedRate?: boolean
+}
+
+export interface GCodePreset {
+  id: string
+  name: string
+  settings: GCodeSettings
 }
 
 export interface Sheet {
@@ -12,4 +21,6 @@ export interface Sheet {
   spacing: number
   instances: PartInstance[]
   gcodeSettings: GCodeSettings
+  gcodePresets?: GCodePreset[]
+  defaultGcodePresetId?: string
 }

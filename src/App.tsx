@@ -8,7 +8,7 @@ import type { MarketplaceItem } from './models/Item'
 import type { Part } from './models/Part'
 import type { PartInstance } from './models/PartInstance'
 import type { Project } from './models/Project'
-import type { Sheet } from './models/Sheet'
+import type { GCodePreset, Sheet } from './models/Sheet'
 import { rectsOverlap } from './models/geometry'
 import { autoNest } from './nesting/nestingEngine'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
@@ -30,7 +30,41 @@ const defaultSheet: Sheet = {
     startGcode: 'G21\nG17\nG90\nG94',
     endGcode: 'M05\nM30',
     safeZ: 5,
+    maxDepthOfCut: 6,
+    xyFeedRate: 3000,
+    applyXyFeedRate: false,
   },
+  gcodePresets: [
+    {
+      id: 'default-estlcam-mm',
+      name: 'Estlcam metric',
+      settings: {
+        startGcode: 'G21\nG17\nG90\nG94',
+        endGcode: 'M05\nM30',
+        safeZ: 5,
+        maxDepthOfCut: 6,
+        xyFeedRate: 3000,
+        applyXyFeedRate: false,
+      },
+    },
+  ],
+  defaultGcodePresetId: 'default-estlcam-mm',
+}
+
+function normalizeSheet(sheet: Sheet): Sheet {
+  const gcodeSettings = {
+    ...defaultSheet.gcodeSettings,
+    ...sheet.gcodeSettings,
+  }
+  const presets = sheet.gcodePresets && sheet.gcodePresets.length > 0 ? sheet.gcodePresets : defaultSheet.gcodePresets
+
+  return {
+    ...defaultSheet,
+    ...sheet,
+    gcodeSettings,
+    gcodePresets: presets,
+    defaultGcodePresetId: sheet.defaultGcodePresetId ?? defaultSheet.defaultGcodePresetId,
+  }
 }
 
 function readFile(file: File): Promise<string> {
@@ -95,7 +129,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
     return {
       items: project.items,
       parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? fallbackItemId })),
-      sheet: project.sheet,
+      sheet: normalizeSheet(project.sheet),
       selectedItemId: fallbackItemId,
       restored: true,
     }
@@ -105,7 +139,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
   return {
     items: [legacyItem],
     parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? legacyItem.id })),
-    sheet: project.sheet,
+    sheet: normalizeSheet(project.sheet),
     selectedItemId: legacyItem.id,
     restored: true,
   }
@@ -160,7 +194,7 @@ function App() {
   const [page, setPage] = useState<'marketplace' | 'sheet'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
-  const [sheet, setSheet] = useState<Sheet>(initialState.sheet)
+  const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(initialState.selectedItemId)
   const [selectedPartId, setSelectedPartId] = useState<string>()
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>()
@@ -208,7 +242,7 @@ function App() {
       if (remoteProject.items.length > 0 || remoteProject.parts.length > 0 || remoteProject.sheet) {
         setItems(remoteProject.items)
         setParts(remoteProject.parts)
-        if (remoteProject.sheet) setSheet(remoteProject.sheet)
+        if (remoteProject.sheet) setSheet(normalizeSheet(remoteProject.sheet))
         setSelectedItemId(remoteProject.selectedItemId)
         setSelectedInstanceId(undefined)
         setStatus('Loaded marketplace from Supabase.')
@@ -392,7 +426,7 @@ function App() {
     setItems(loadedState.items)
     setSelectedItemId(loadedState.selectedItemId)
     setParts(loadedState.parts)
-    setSheet(loadedState.sheet)
+    setSheet(normalizeSheet(loadedState.sheet))
     setSelectedInstanceId(undefined)
     setStatus('Loaded saved marketplace from this browser.')
   }
@@ -405,7 +439,7 @@ function App() {
     setItems(importedState.items)
     setSelectedItemId(importedState.selectedItemId)
     setParts(importedState.parts)
-    setSheet(importedState.sheet)
+    setSheet(normalizeSheet(importedState.sheet))
     setSelectedInstanceId(undefined)
     setStatus(`Imported project ${file.name}.`)
   }
@@ -505,7 +539,32 @@ function App() {
               onDuplicate={duplicateSelected}
               onDelete={deleteSelected}
             />
-            <GCodeSettings settings={sheet.gcodeSettings} onChange={(gcodeSettings) => setSheet({ ...sheet, gcodeSettings })} />
+            <GCodeSettings
+              settings={sheet.gcodeSettings}
+              presets={sheet.gcodePresets ?? []}
+              defaultPresetId={sheet.defaultGcodePresetId}
+              onChange={(gcodeSettings) => setSheet({ ...sheet, gcodeSettings })}
+              onLoadPreset={(preset) => setSheet({ ...sheet, gcodeSettings: { ...preset.settings } })}
+              onSavePreset={(name) => {
+                const preset: GCodePreset = { id: crypto.randomUUID(), name, settings: { ...sheet.gcodeSettings } }
+                setSheet({ ...sheet, gcodePresets: [...(sheet.gcodePresets ?? []), preset] })
+              }}
+              onSetDefaultPreset={(presetId) => {
+                const preset = sheet.gcodePresets?.find((candidate) => candidate.id === presetId)
+                setSheet({
+                  ...sheet,
+                  defaultGcodePresetId: presetId,
+                  gcodeSettings: preset ? { ...preset.settings } : sheet.gcodeSettings,
+                })
+              }}
+              onDeletePreset={(presetId) => {
+                setSheet({
+                  ...sheet,
+                  gcodePresets: (sheet.gcodePresets ?? []).filter((preset) => preset.id !== presetId),
+                  defaultGcodePresetId: sheet.defaultGcodePresetId === presetId ? undefined : sheet.defaultGcodePresetId,
+                })
+              }}
+            />
           </div>
         </div>
       )}

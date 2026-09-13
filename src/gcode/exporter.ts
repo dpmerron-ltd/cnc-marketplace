@@ -1,12 +1,30 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { formatNumber } from './format'
+import { wordsToLine } from './format'
 import { transformLocalPoint, transformPartProgram } from './transform'
+import type { ParsedLine } from './types'
 
 export interface ExportResult {
   gcode: string
   errors: string[]
   warnings: string[]
+}
+
+function lineWithXyFeedOverride(line: ParsedLine, feedRate?: number): string {
+  if (!feedRate || feedRate <= 0) return line.raw
+  const motion = line.effectiveMotion
+  const hasXy = line.words.some((word) => word.letter === 'X' || word.letter === 'Y')
+  if (!hasXy || motion === 'G00') return line.raw
+  if (motion !== 'G01' && motion !== 'G02' && motion !== 'G03') return line.raw
+
+  const feedIndex = line.words.findIndex((word) => word.letter === 'F')
+  const words = [...line.words]
+  const feedWord = { letter: 'F', value: feedRate, raw: `F${formatNumber(feedRate)}` }
+  if (feedIndex >= 0) words[feedIndex] = feedWord
+  else words.push(feedWord)
+
+  return wordsToLine(words, line.comment)
 }
 
 export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
@@ -37,7 +55,12 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
     const transformed = transformPartProgram(part, instance)
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
-    output.push(...transformed.lines)
+    if (sheet.gcodeSettings.applyXyFeedRate) {
+      warnings.push(`Applied XY feed override F${formatNumber(sheet.gcodeSettings.xyFeedRate ?? 0)} to transformed cutting moves.`)
+      output.push(...transformed.transformedLines.map((line) => lineWithXyFeedOverride(line, sheet.gcodeSettings.xyFeedRate)))
+    } else {
+      output.push(...transformed.lines)
+    }
   }
 
   output.push('')
