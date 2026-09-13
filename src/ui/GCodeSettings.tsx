@@ -103,14 +103,14 @@ export function GCodeSettings({
         Override XY cutting feed
       </label>
       <label>
-        XY feed rate
+        XY feed rate (mm/s)
         <input
           type="number"
           min={0}
-          step={10}
-          value={settings.xyFeedRate ?? ''}
+          step={0.1}
+          value={settings.xyFeedRateMmPerSecond ?? ''}
           disabled={!settings.applyXyFeedRate}
-          onChange={(event) => onChange({ ...settings, xyFeedRate: event.target.value === '' ? undefined : Number(event.target.value) })}
+          onChange={(event) => onChange({ ...settings, xyFeedRateMmPerSecond: event.target.value === '' ? undefined : Number(event.target.value) })}
         />
       </label>
       <label>

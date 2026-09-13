@@ -31,7 +31,7 @@ const defaultSheet: Sheet = {
     endGcode: 'M05\nM30',
     safeZ: 5,
     maxDepthOfCut: 6,
-    xyFeedRate: 3000,
+    xyFeedRateMmPerSecond: 50,
     applyXyFeedRate: false,
   },
   gcodePresets: [
@@ -43,7 +43,7 @@ const defaultSheet: Sheet = {
         endGcode: 'M05\nM30',
         safeZ: 5,
         maxDepthOfCut: 6,
-        xyFeedRate: 3000,
+        xyFeedRateMmPerSecond: 50,
         applyXyFeedRate: false,
       },
     },
@@ -56,13 +56,23 @@ function normalizeSheet(sheet: Sheet): Sheet {
     ...defaultSheet.gcodeSettings,
     ...sheet.gcodeSettings,
   }
+  if (gcodeSettings.xyFeedRateMmPerSecond === undefined && gcodeSettings.xyFeedRate !== undefined) {
+    gcodeSettings.xyFeedRateMmPerSecond = gcodeSettings.xyFeedRate / 60
+  }
   const presets = sheet.gcodePresets && sheet.gcodePresets.length > 0 ? sheet.gcodePresets : defaultSheet.gcodePresets
+  const normalizedPresets = presets?.map((preset) => {
+    const settings = { ...defaultSheet.gcodeSettings, ...preset.settings }
+    if (settings.xyFeedRateMmPerSecond === undefined && settings.xyFeedRate !== undefined) {
+      settings.xyFeedRateMmPerSecond = settings.xyFeedRate / 60
+    }
+    return { ...preset, settings }
+  })
 
   return {
     ...defaultSheet,
     ...sheet,
     gcodeSettings,
-    gcodePresets: presets,
+    gcodePresets: normalizedPresets,
     defaultGcodePresetId: sheet.defaultGcodePresetId ?? defaultSheet.defaultGcodePresetId,
   }
 }
