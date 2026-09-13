@@ -45,10 +45,12 @@ const defaultSheet: Sheet = {
     spindleStartGcode: 'S18000\nM03',
     endGcode: 'M05\nM30',
     safeZ: 5,
+    reachCheckEnabled: false,
     maxDepthOfCut: 6,
-    cuttingFeedRateMmPerMinute: 4500,
-    plungeFeedRateMmPerMinute: 600,
-    rampFeedRateMmPerMinute: 600,
+    finalCutDepth: undefined,
+    cuttingFeedRateMmPerSecond: 75,
+    plungeFeedRateMmPerSecond: 10,
+    rampFeedRateMmPerSecond: 10,
     xyFeedRateMmPerSecond: 50,
     applyXyFeedRate: false,
   },
@@ -61,10 +63,12 @@ const defaultSheet: Sheet = {
         spindleStartGcode: 'S18000\nM03',
         endGcode: 'M05\nM30',
         safeZ: 5,
+        reachCheckEnabled: false,
         maxDepthOfCut: 6,
-        cuttingFeedRateMmPerMinute: 4500,
-        plungeFeedRateMmPerMinute: 600,
-        rampFeedRateMmPerMinute: 600,
+        finalCutDepth: undefined,
+        cuttingFeedRateMmPerSecond: 75,
+        plungeFeedRateMmPerSecond: 10,
+        rampFeedRateMmPerSecond: 10,
         xyFeedRateMmPerSecond: 50,
         applyXyFeedRate: false,
       },
@@ -73,40 +77,53 @@ const defaultSheet: Sheet = {
   defaultGcodePresetId: 'default-estlcam-mm',
 }
 
-function normalizeSheet(sheet: Sheet): Sheet {
-  const gcodeSettings = {
+function normalizeGCodeSettings(rawSettings: Partial<Sheet['gcodeSettings']> | undefined): Sheet['gcodeSettings'] {
+  const raw = rawSettings ?? {}
+  const settings: Sheet['gcodeSettings'] = {
     ...defaultSheet.gcodeSettings,
-    ...sheet.gcodeSettings,
+    ...raw,
   }
-  if (gcodeSettings.xyFeedRateMmPerSecond === undefined && gcodeSettings.xyFeedRate !== undefined) {
-    gcodeSettings.xyFeedRateMmPerSecond = gcodeSettings.xyFeedRate / 60
+
+  if (raw.xyFeedRateMmPerSecond === undefined && raw.xyFeedRate !== undefined) {
+    settings.xyFeedRateMmPerSecond = raw.xyFeedRate / 60
   }
-  if (gcodeSettings.cuttingFeedRateMmPerMinute === undefined && gcodeSettings.xyFeedRateMmPerSecond !== undefined) {
-    gcodeSettings.cuttingFeedRateMmPerMinute = gcodeSettings.xyFeedRateMmPerSecond * 60
+
+  if (raw.cuttingFeedRateMmPerSecond === undefined) {
+    if (raw.cuttingFeedRateMmPerMinute !== undefined) {
+      settings.cuttingFeedRateMmPerSecond = raw.cuttingFeedRateMmPerMinute / 60
+    } else if (settings.xyFeedRateMmPerSecond !== undefined) {
+      settings.cuttingFeedRateMmPerSecond = settings.xyFeedRateMmPerSecond
+    }
   }
-  if (gcodeSettings.plungeFeedRateMmPerMinute === undefined) {
-    gcodeSettings.plungeFeedRateMmPerMinute = Math.min(gcodeSettings.cuttingFeedRateMmPerMinute ?? 600, 600)
+
+  if (raw.plungeFeedRateMmPerSecond === undefined) {
+    settings.plungeFeedRateMmPerSecond =
+      raw.plungeFeedRateMmPerMinute !== undefined
+        ? raw.plungeFeedRateMmPerMinute / 60
+        : Math.min(settings.cuttingFeedRateMmPerSecond ?? 10, 10)
   }
-  if (gcodeSettings.rampFeedRateMmPerMinute === undefined) {
-    gcodeSettings.rampFeedRateMmPerMinute = gcodeSettings.plungeFeedRateMmPerMinute
+
+  if (raw.rampFeedRateMmPerSecond === undefined) {
+    settings.rampFeedRateMmPerSecond =
+      raw.rampFeedRateMmPerMinute !== undefined
+        ? raw.rampFeedRateMmPerMinute / 60
+        : settings.plungeFeedRateMmPerSecond
   }
+
+  settings.cuttingFeedRateMmPerMinute =
+    settings.cuttingFeedRateMmPerSecond !== undefined ? settings.cuttingFeedRateMmPerSecond * 60 : undefined
+  settings.plungeFeedRateMmPerMinute =
+    settings.plungeFeedRateMmPerSecond !== undefined ? settings.plungeFeedRateMmPerSecond * 60 : undefined
+  settings.rampFeedRateMmPerMinute =
+    settings.rampFeedRateMmPerSecond !== undefined ? settings.rampFeedRateMmPerSecond * 60 : undefined
+
+  return settings
+}
+
+function normalizeSheet(sheet: Sheet): Sheet {
+  const gcodeSettings = normalizeGCodeSettings(sheet.gcodeSettings)
   const presets = sheet.gcodePresets && sheet.gcodePresets.length > 0 ? sheet.gcodePresets : defaultSheet.gcodePresets
-  const normalizedPresets = presets?.map((preset) => {
-    const settings = { ...defaultSheet.gcodeSettings, ...preset.settings }
-    if (settings.xyFeedRateMmPerSecond === undefined && settings.xyFeedRate !== undefined) {
-      settings.xyFeedRateMmPerSecond = settings.xyFeedRate / 60
-    }
-    if (settings.cuttingFeedRateMmPerMinute === undefined && settings.xyFeedRateMmPerSecond !== undefined) {
-      settings.cuttingFeedRateMmPerMinute = settings.xyFeedRateMmPerSecond * 60
-    }
-    if (settings.plungeFeedRateMmPerMinute === undefined) {
-      settings.plungeFeedRateMmPerMinute = Math.min(settings.cuttingFeedRateMmPerMinute ?? 600, 600)
-    }
-    if (settings.rampFeedRateMmPerMinute === undefined) {
-      settings.rampFeedRateMmPerMinute = settings.plungeFeedRateMmPerMinute
-    }
-    return { ...preset, settings }
-  })
+  const normalizedPresets = presets?.map((preset) => ({ ...preset, settings: normalizeGCodeSettings(preset.settings) }))
 
   return {
     ...defaultSheet,

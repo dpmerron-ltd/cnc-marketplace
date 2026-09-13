@@ -17,11 +17,13 @@ function makeSheet(instance: PartInstance): Sheet {
       spindleStartGcode: 'S18000\nM03',
       endGcode: 'M05\nM30',
       safeZ: 5,
+      reachCheckEnabled: false,
       maxDepthOfCut: 6,
+      finalCutDepth: undefined,
       applyXyFeedRate: true,
-      cuttingFeedRateMmPerMinute: 4500,
-      plungeFeedRateMmPerMinute: 500,
-      rampFeedRateMmPerMinute: 600,
+      cuttingFeedRateMmPerSecond: 75,
+      plungeFeedRateMmPerSecond: 500 / 60,
+      rampFeedRateMmPerSecond: 10,
     },
     gcodePresets: [],
   }
@@ -77,5 +79,49 @@ describe('G-code exporter feed-rate selection', () => {
     const firstCutIndex = result.gcode.indexOf('G01 X10 Y10 F4500')
     expect(spindleIndex).toBeGreaterThan(-1)
     expect(firstCutIndex).toBeGreaterThan(spindleIndex)
+  })
+
+  it('uses mm/s settings while emitting G-code feed words in mm/min', () => {
+    const part = createPartFromGCode('units.nc', 'G21\nG90\nG01 X0 Y0\nG01 X10 Y0 F1\nM30')
+    const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
+
+    expect(result.errors).toEqual([])
+    expect(result.gcode).toContain('G01 X20 Y10 F4500')
+  })
+
+  it('scales imported negative Z depths to the configured final cut depth', () => {
+    const part = createPartFromGCode(
+      'depth.nc',
+      [
+        'G21',
+        'G90',
+        'G01 X0 Y0',
+        'G01 Z-1.5',
+        'G01 X10 Y0 Z-3',
+        'G01 X20 Y0',
+        'M30',
+      ].join('\n'),
+    )
+    const sheet = makeSheet(makeInstance(part.id))
+    sheet.gcodeSettings.finalCutDepth = 6
+    const result = exportCombinedGCode([part], sheet)
+
+    expect(result.errors).toEqual([])
+    expect(result.gcode).toContain('G01 Z-3 F500')
+    expect(result.gcode).toContain('G01 X20 Y10 Z-6 F600')
+    expect(result.gcode).toContain('G01 X30 Y10 F4500')
+  })
+
+  it('emits optional reach check before spindle start', () => {
+    const part = createPartFromGCode('reach.nc', 'G21\nG90\nG01 X0 Y0\nG01 X50 Y20\nM30')
+    const sheet = makeSheet(makeInstance(part.id))
+    sheet.gcodeSettings.reachCheckEnabled = true
+    const result = exportCombinedGCode([part], sheet)
+
+    const reachIndex = result.gcode.indexOf('G00 X60 Y30')
+    const spindleIndex = result.gcode.indexOf('M03')
+    expect(result.errors).toEqual([])
+    expect(reachIndex).toBeGreaterThan(-1)
+    expect(spindleIndex).toBeGreaterThan(reachIndex)
   })
 })

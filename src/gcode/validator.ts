@@ -1,6 +1,7 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { rectsOverlap } from '../models/geometry'
+import { depthScaleForPart, scaleZDepth } from './depthOverride'
 import { instanceBounds, transformPartProgram } from './transform'
 import { createInitialState, getWord, updatePositionFromLine } from './state'
 
@@ -39,19 +40,21 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
     if (sheet.gcodeSettings.maxDepthOfCut && sheet.gcodeSettings.maxDepthOfCut > 0) {
       let state = createInitialState()
       let previousCutZ = 0
+      const depthScale = depthScaleForPart(item.part, sheet)
       for (const line of item.part.parsed.bodyLines) {
         const next = updatePositionFromLine(state, line)
         const hasCuttingMove = line.effectiveMotion === 'G01' || line.effectiveMotion === 'G02' || line.effectiveMotion === 'G03'
         const zWord = getWord(line, 'Z')
-        if (hasCuttingMove && zWord !== undefined && next.position.z < previousCutZ) {
-          const stepDown = previousCutZ - next.position.z
+        const nextZ = scaleZDepth(next.position.z, depthScale)
+        if (hasCuttingMove && zWord !== undefined && nextZ < previousCutZ) {
+          const stepDown = previousCutZ - nextZ
           if (stepDown > sheet.gcodeSettings.maxDepthOfCut + 0.0001) {
             issues.push({
               level: 'warning',
               message: `${item.part.name} line ${line.lineNumber + 1} steps down ${stepDown.toFixed(2)} mm, above the configured ${sheet.gcodeSettings.maxDepthOfCut} mm depth-of-cut limit.`,
             })
           }
-          previousCutZ = next.position.z
+          previousCutZ = nextZ
         }
         state = next
       }

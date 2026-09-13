@@ -5,7 +5,12 @@ export interface GCodeSettings {
   spindleStartGcode: string
   endGcode: string
   safeZ: number
+  reachCheckEnabled?: boolean
   maxDepthOfCut?: number
+  finalCutDepth?: number
+  cuttingFeedRateMmPerSecond?: number
+  plungeFeedRateMmPerSecond?: number
+  rampFeedRateMmPerSecond?: number
   cuttingFeedRateMmPerMinute?: number
   plungeFeedRateMmPerMinute?: number
   rampFeedRateMmPerMinute?: number
