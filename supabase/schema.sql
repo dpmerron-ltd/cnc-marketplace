@@ -70,28 +70,32 @@ drop policy if exists "owner marketplace item read" on public.marketplace_items;
 drop policy if exists "owner marketplace item write" on public.marketplace_items;
 drop policy if exists "owner component read" on public.cnc_components;
 drop policy if exists "owner component write" on public.cnc_components;
+drop policy if exists "authenticated marketplace item read" on public.marketplace_items;
+drop policy if exists "authenticated marketplace item write" on public.marketplace_items;
+drop policy if exists "authenticated component read" on public.cnc_components;
+drop policy if exists "authenticated component write" on public.cnc_components;
 drop policy if exists "owner sheet read" on public.sheet_projects;
 drop policy if exists "owner sheet write" on public.sheet_projects;
 drop policy if exists "owner sheet history read" on public.sheet_history;
 drop policy if exists "owner sheet history write" on public.sheet_history;
 
-create policy "owner marketplace item read"
+create policy "authenticated marketplace item read"
   on public.marketplace_items for select
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
-create policy "owner marketplace item write"
+create policy "authenticated marketplace item write"
   on public.marketplace_items for all
-  using (auth.uid() = owner_id)
-  with check (auth.uid() = owner_id);
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null and owner_id = auth.uid());
 
-create policy "owner component read"
+create policy "authenticated component read"
   on public.cnc_components for select
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
-create policy "owner component write"
+create policy "authenticated component write"
   on public.cnc_components for all
-  using (auth.uid() = owner_id)
-  with check (auth.uid() = owner_id);
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null and owner_id = auth.uid());
 
 create policy "owner sheet read"
   on public.sheet_projects for select

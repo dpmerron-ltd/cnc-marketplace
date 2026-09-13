@@ -61,8 +61,8 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   if (!userId) return undefined
 
   const [itemsResult, componentsResult, projectResult, historyResult] = await Promise.all([
-    supabase.from('marketplace_items').select('*').eq('owner_id', userId).order('created_at'),
-    supabase.from('cnc_components').select('*').eq('owner_id', userId).order('date_imported'),
+    supabase.from('marketplace_items').select('*').order('created_at'),
+    supabase.from('cnc_components').select('*').order('date_imported'),
     supabase.from('sheet_projects').select('*').eq('id', userId).maybeSingle<ProjectRow>(),
     supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
   ])
@@ -178,9 +178,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
 
 export async function deleteRemoteComponent(partId: string): Promise<void> {
   if (!supabase) return
-  const userId = await getUserId()
-  if (!userId) return
-  const result = await supabase.from('cnc_components').delete().eq('id', partId).eq('owner_id', userId)
+  const result = await supabase.from('cnc_components').delete().eq('id', partId)
   if (result.error) console.warn('Supabase component delete failed.', result.error)
 }
 
