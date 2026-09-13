@@ -251,6 +251,15 @@ button.danger {
   padding: 14px;
 }
 
+.item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #637083;
+  font-size: 13px;
+  padding-bottom: 10px;
+}
+
 .item-edit {
   display: grid;
   grid-template-columns: minmax(180px, 280px) minmax(140px, 190px) minmax(260px, 1fr) auto;

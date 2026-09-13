@@ -48,7 +48,9 @@ export function transformPartProgram(part: Part, instance: PartInstance): Transf
   const segments: ToolpathSegment[] = []
   let state = createInitialState()
 
-  if (part.parsed.distanceMode === 'incremental') errors.push(`${part.name}: G91 incremental positioning cannot be safely exported in this MVP.`)
+  for (const line of part.parsed.startLines) {
+    state = updatePositionFromLine(state, line)
+  }
 
   for (const line of part.parsed.bodyLines) {
     if (line.unsupportedForTransform) errors.push(`${part.name} line ${line.lineNumber + 1}: unsupported transform construct: ${line.unsupportedForTransform}.`)
@@ -58,8 +60,9 @@ export function transformPartProgram(part: Part, instance: PartInstance): Transf
     const motion = line.effectiveMotion ?? nextState.motion
     const hasX = getWord(line, 'X') !== undefined
     const hasY = getWord(line, 'Y') !== undefined
+    const zWord = getWord(line, 'Z')
     const hasSpatialXY = hasX || hasY
-    let nextWords = [...line.words]
+    let nextWords = line.words.map((word) => (word.letter === 'G' && Math.trunc(word.value) === 91 ? { letter: 'G', value: 90, raw: 'G90' } : word))
     let center: Point | undefined
 
     if (motion && hasSpatialXY) {
@@ -87,6 +90,7 @@ export function transformPartProgram(part: Part, instance: PartInstance): Transf
       })
     }
 
+    if (zWord !== undefined && nextState.distanceMode === 'incremental') nextWords = replaceOrAppend(nextWords, 'Z', nextState.position.z)
     if (motion && hasX !== hasY && instance.rotation !== 0) warnings.push(`${part.name} line ${line.lineNumber + 1}: emitted both X and Y because rotation requires modal axis reconstruction.`)
 
     const transformedLine: ParsedLine = { ...line, words: nextWords, raw: wordsToLine(nextWords, line.comment) }

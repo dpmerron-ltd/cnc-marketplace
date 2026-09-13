@@ -15,6 +15,12 @@ interface MarketplacePageProps {
   onOpenSheet: () => void
 }
 
+function formatDateTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
 export function MarketplacePage({
   items,
   parts,
@@ -52,6 +58,8 @@ export function MarketplacePage({
               >
                 <strong>{item.name}</strong>
                 <small>{item.sku}</small>
+                <small>Uploaded by {item.uploadedBy || 'Unknown uploader'}</small>
+                <small>{formatDateTime(item.createdAt)}</small>
                 <small>{count} component{count === 1 ? '' : 's'}</small>
                 {item.description && <span>{item.description}</span>}
               </button>
@@ -68,6 +76,10 @@ export function MarketplacePage({
           </div>
         ) : (
           <>
+            <div className="item-meta">
+              <span>Uploaded by {selectedItem.uploadedBy || 'Unknown uploader'}</span>
+              <span>{formatDateTime(selectedItem.createdAt)}</span>
+            </div>
             <div className="item-edit">
               <label>
                 Item name

@@ -93,6 +93,7 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   const items: MarketplaceItem[] = (itemsResult.data ?? []).map((row) => ({
     id: row.id,
     ownerId: row.owner_id,
+    uploadedBy: row.uploaded_by ?? undefined,
     sku: row.sku ?? fallbackItemSku(row.id, row.name),
     name: row.name,
     description: row.description ?? '',
@@ -148,6 +149,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
       saveableItems.map((item) => ({
         id: item.id,
         owner_id: userId,
+        uploaded_by: item.uploadedBy ?? '',
         sku: item.sku,
         name: item.name,
         description: item.description,

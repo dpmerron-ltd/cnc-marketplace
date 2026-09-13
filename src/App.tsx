@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { exportCombinedGCode } from './gcode/exporter'
+import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
@@ -143,6 +143,7 @@ function filenameSafe(value: string): string {
 function normalizeItem(item: MarketplaceItem): MarketplaceItem {
   return {
     ...item,
+    uploadedBy: item.uploadedBy,
     sku: item.sku || makeItemSku(item.name),
   }
 }
@@ -170,10 +171,11 @@ function newInstance(partId: string, x: number, y: number, sheetIndex: number): 
   }
 }
 
-function newItem(name = 'Untitled Item'): MarketplaceItem {
+function newItem(name = 'Untitled Item', uploadedBy?: string): MarketplaceItem {
   const now = new Date().toISOString()
   return {
     id: crypto.randomUUID(),
+    uploadedBy,
     sku: makeItemSku(name),
     name,
     description: '',
@@ -573,7 +575,7 @@ function App() {
 
   function importFiles(fileList: FileList) {
     if (!selectedItemId) {
-      const item = newItem('Imported Item')
+      const item = newItem('Imported Item', userEmail)
       setItems((current) => [...current, item])
       setSelectedItemId(item.id)
       void importFilesForItem(item.id, fileList)
@@ -584,7 +586,7 @@ function App() {
   }
 
   function createMarketplaceItem() {
-    const item = newItem(`Item ${items.length + 1}`)
+    const item = newItem(`Item ${items.length + 1}`, userEmail)
     setItems((current) => [...current, item])
     setSelectedItemId(item.id)
     setPage('marketplace')
@@ -675,13 +677,13 @@ function App() {
     }
   }
 
-  async function saveCurrentProject() {
+  async function saveCurrentProject(): Promise<boolean> {
     const historyEntry = buildHistoryEntry()
     const nextHistory = [historyEntry, ...sheetHistory]
     const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() })
     if (!localSaved) {
       setStatus('Could not save project; browser storage may be full.')
-      return
+      return false
     }
 
     if (remoteHydratedRef.current && canUseSupabase()) {
@@ -689,15 +691,16 @@ function App() {
       const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry) : remoteSaved
       if (!historySaved.ok) {
         setStatus(`Cloud save failed: ${historySaved.error ?? 'unknown error'}`)
-        return
+        return false
       }
       setSheetHistory(nextHistory)
       setStatus('Saved sheet to history.')
-      return
+      return true
     }
 
     setSheetHistory(nextHistory)
     setStatus('Saved sheet to history.')
+    return true
   }
 
   function loadSavedProject() {
@@ -738,7 +741,7 @@ function App() {
     setStatus(result.errors.length > 0 ? `Preview generated with ${result.errors.length} export error(s).` : 'Preview generated from transformed G-code.')
   }
 
-  function exportGCode() {
+  async function exportGCode() {
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
@@ -751,9 +754,36 @@ function App() {
       return
     }
 
+    const saved = await saveCurrentProject()
+    if (!saved) return
     const filename = `${filenameSafe(sheet.name)}.nc`
     downloadText(filename, result.gcode, 'application/x-gcode')
-    setStatus(`Exported ${filename}.`)
+    setStatus(`Saved sheet and exported ${filename}.`)
+  }
+
+  async function exportAllSheetGCodes() {
+    if (errors.length > 0) {
+      setStatus('Export blocked by validation errors.')
+      return
+    }
+
+    const results = exportPhysicalSheetGCodes(parts, sheet)
+    const exportErrors = results.flatMap((result) => result.errors)
+    if (exportErrors.length > 0) {
+      setStatus('Export blocked by G-code transformation errors.')
+      setPreview(results.map((result) => result.gcode).join('\n\n'))
+      return
+    }
+
+    const saved = await saveCurrentProject()
+    if (!saved) return
+    const base = filenameSafe(sheet.name)
+    results.forEach((result, index) => {
+      window.setTimeout(() => {
+        downloadText(`${base}-sheet-${result.sheetIndex + 1}.nc`, result.gcode, 'application/x-gcode')
+      }, index * 150)
+    })
+    setStatus(`Saved sheet and exported ${results.length} sheet G-code file(s).`)
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
@@ -844,7 +874,8 @@ function App() {
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
           <button type="button" onClick={previewGCode}>Preview</button>
-          <button type="button" className="primary" onClick={exportGCode}>Export</button>
+          <button type="button" onClick={() => void exportAllSheetGCodes()}>Export Sheets</button>
+          <button type="button" className="primary" onClick={() => void exportGCode()}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div>
       </header>

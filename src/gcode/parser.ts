@@ -62,10 +62,6 @@ export function parseGCode(source: string): ParsedProgram {
       if (g === 'G90') distanceMode = 'absolute'
       if (g === 'G91') {
         distanceMode = 'incremental'
-        const warning = `Line ${line.lineNumber + 1}: G91 incremental positioning is parsed but export is blocked in the MVP.`
-        warnings.push(warning)
-        line.warnings.push(warning)
-        line.unsupportedForTransform = 'G91 incremental positioning'
       }
       if (g === 'G18' || g === 'G19') {
         const warning = `Line ${line.lineNumber + 1}: only G17 XY plane arcs are supported for transformation.`

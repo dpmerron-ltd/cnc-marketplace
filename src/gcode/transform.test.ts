@@ -60,10 +60,11 @@ describe('G-code parser and coordinate transformer', () => {
     expect(result.lines).toContain('G01 X110 Y210')
   })
 
-  it('flags incremental programs as unsafe for export', () => {
+  it('normalizes incremental XY moves to transformed absolute coordinates', () => {
     const part = makePart('G21\nG91\nG01 X10 Y20\nM30')
-    const result = transformPartProgram(part, makeInstance())
-    expect(result.errors.some((error) => error.includes('G91 incremental'))).toBe(true)
+    const result = transformPartProgram(part, makeInstance({ rotation: 90 }))
+    expect(result.errors).toEqual([])
+    expect(result.lines).toContain('G01 X100 Y210')
   })
 
   it('computes transformed instance bounds', () => {

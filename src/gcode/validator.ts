@@ -75,5 +75,11 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
     })
   }
 
-  return issues
+  const seen = new Set<string>()
+  return issues.filter((issue) => {
+    const key = `${issue.level}:${issue.message}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }

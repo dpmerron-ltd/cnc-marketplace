@@ -1,6 +1,7 @@
 create table if not exists public.marketplace_items (
   id uuid primary key,
   owner_id uuid not null references auth.users(id) on delete cascade,
+  uploaded_by text not null default '',
   sku text not null default '',
   name text not null,
   description text not null default '',
@@ -13,6 +14,9 @@ alter table public.marketplace_items
 
 alter table public.marketplace_items
   add column if not exists sku text not null default '';
+
+alter table public.marketplace_items
+  add column if not exists uploaded_by text not null default '';
 
 update public.marketplace_items
 set sku = upper(regexp_replace(coalesce(nullif(name, ''), 'ITEM'), '[^a-zA-Z0-9]+', '-', 'g')) || '-' || upper(left(replace(id::text, '-', ''), 6))

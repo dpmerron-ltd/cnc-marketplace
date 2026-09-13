@@ -11,6 +11,10 @@ export interface ExportResult {
   warnings: string[]
 }
 
+export interface SheetExportResult extends ExportResult {
+  sheetIndex: number
+}
+
 function lineWithXyFeedOverride(line: ParsedLine, feedRate?: number): string {
   if (!feedRate || feedRate <= 0) return line.raw
   const motion = line.effectiveMotion
@@ -27,6 +31,55 @@ function lineWithXyFeedOverride(line: ParsedLine, feedRate?: number): string {
   return wordsToLine(words, line.comment)
 }
 
+function transformedInstanceLines(
+  parts: Part[],
+  sheet: Sheet,
+  instanceIds: string[],
+  startingInstanceNumber = 0,
+): { lines: string[]; errors: string[]; warnings: string[]; nextInstanceNumber: number } {
+  const output: string[] = []
+  const errors: string[] = []
+  const warnings: string[] = []
+  const xyFeedRateMmPerMinute = sheet.gcodeSettings.xyFeedRateMmPerSecond
+    ? sheet.gcodeSettings.xyFeedRateMmPerSecond * 60
+    : undefined
+  let instanceNumber = startingInstanceNumber
+
+  for (const instance of sheet.instances.filter((candidate) => instanceIds.includes(candidate.id))) {
+    instanceNumber += 1
+    const part = parts.find((candidate) => candidate.id === instance.partId)
+    if (!part) {
+      errors.push(`Instance ${instance.id} references a missing library part.`)
+      continue
+    }
+
+    const firstPoint = transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
+    output.push('')
+    output.push(`(Part: ${part.name})`)
+    output.push(`(SKU: ${part.sku})`)
+    output.push(`(Instance: ${instanceNumber} / ${instance.id})`)
+    output.push(`(Physical sheet: ${instance.sheetIndex + 1})`)
+    output.push(`(Position: X${formatNumber(instance.x)} Y${formatNumber(instance.y)})`)
+    output.push(`(Rotation: ${instance.rotation})`)
+    output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
+    output.push(`G00 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`)
+
+    const transformed = transformPartProgram(part, instance)
+    errors.push(...transformed.errors)
+    warnings.push(...transformed.warnings)
+    if (sheet.gcodeSettings.applyXyFeedRate) {
+      warnings.push(
+        `Applied XY feed override ${formatNumber(sheet.gcodeSettings.xyFeedRateMmPerSecond ?? 0)} mm/s as F${formatNumber(xyFeedRateMmPerMinute ?? 0)} mm/min.`,
+      )
+      output.push(...transformed.transformedLines.map((line) => lineWithXyFeedOverride(line, xyFeedRateMmPerMinute)))
+    } else {
+      output.push(...transformed.lines)
+    }
+  }
+
+  return { lines: output, errors, warnings, nextInstanceNumber: instanceNumber }
+}
+
 export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
   const errors: string[] = []
   const warnings: string[] = []
@@ -38,9 +91,6 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
   output.push(`(Sheet: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
   output.push(`(Physical sheets: ${sheetCount})`)
   output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
-  const xyFeedRateMmPerMinute = sheet.gcodeSettings.xyFeedRateMmPerSecond
-    ? sheet.gcodeSettings.xyFeedRateMmPerSecond * 60
-    : undefined
 
   let instanceNumber = 0
   for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
@@ -54,37 +104,12 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
     output.push('')
     output.push(`(Physical sheet ${sheetIndex + 1} of ${sheetCount})`)
 
-    for (const instance of sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex)) {
-      instanceNumber += 1
-      const part = parts.find((candidate) => candidate.id === instance.partId)
-      if (!part) {
-        errors.push(`Instance ${instance.id} references a missing library part.`)
-        continue
-      }
-
-      const firstPoint = transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
-      output.push('')
-      output.push(`(Part: ${part.name})`)
-      output.push(`(SKU: ${part.sku})`)
-      output.push(`(Instance: ${instanceNumber} / ${instance.id})`)
-      output.push(`(Physical sheet: ${sheetIndex + 1})`)
-      output.push(`(Position: X${formatNumber(instance.x)} Y${formatNumber(instance.y)})`)
-      output.push(`(Rotation: ${instance.rotation})`)
-      output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
-      output.push(`G00 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`)
-
-      const transformed = transformPartProgram(part, instance)
-      errors.push(...transformed.errors)
-      warnings.push(...transformed.warnings)
-      if (sheet.gcodeSettings.applyXyFeedRate) {
-        warnings.push(
-          `Applied XY feed override ${formatNumber(sheet.gcodeSettings.xyFeedRateMmPerSecond ?? 0)} mm/s as F${formatNumber(xyFeedRateMmPerMinute ?? 0)} mm/min.`,
-        )
-        output.push(...transformed.transformedLines.map((line) => lineWithXyFeedOverride(line, xyFeedRateMmPerMinute)))
-      } else {
-        output.push(...transformed.lines)
-      }
-    }
+    const sheetInstanceIds = sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex).map((instance) => instance.id)
+    const transformed = transformedInstanceLines(parts, sheet, sheetInstanceIds, instanceNumber)
+    instanceNumber = transformed.nextInstanceNumber
+    errors.push(...transformed.errors)
+    warnings.push(...transformed.warnings)
+    output.push(...transformed.lines)
   }
 
   output.push('')
@@ -92,4 +117,31 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
   output.push(...sheet.gcodeSettings.endGcode.split('\n').filter(Boolean))
 
   return { gcode: `${output.join('\n')}\n`, errors, warnings: Array.from(new Set(warnings)) }
+}
+
+export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExportResult[] {
+  const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
+
+  return Array.from({ length: sheetCount }, (_, sheetIndex) => {
+    const output: string[] = []
+    const sheetInstanceIds = sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex).map((instance) => instance.id)
+    const transformed = transformedInstanceLines(parts, sheet, sheetInstanceIds)
+
+    output.push('(CNC sheet program generated by Sheet Builder)')
+    output.push(`(Sheet name: ${sheet.name})`)
+    output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
+    output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
+    output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
+    output.push(...transformed.lines)
+    output.push('')
+    output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
+    output.push(...sheet.gcodeSettings.endGcode.split('\n').filter(Boolean))
+
+    return {
+      sheetIndex,
+      gcode: `${output.join('\n')}\n`,
+      errors: transformed.errors,
+      warnings: Array.from(new Set(transformed.warnings)),
+    }
+  })
 }
