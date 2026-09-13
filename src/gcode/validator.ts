@@ -12,6 +12,7 @@ export interface ValidationIssue {
 export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   if (sheet.width <= 0 || sheet.height <= 0) issues.push({ level: 'error', message: 'Sheet dimensions must be positive.' })
+  if (sheet.borderSpacing < 0) issues.push({ level: 'error', message: 'Border spacing cannot be negative.' })
 
   const placed = sheet.instances.map((instance) => {
     const part = parts.find((candidate) => candidate.id === instance.partId)
@@ -27,7 +28,9 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
 
     const { bounds } = item
     if ([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].some((value) => !Number.isFinite(value))) issues.push({ level: 'error', message: `${item.part.name} has non-finite transformed bounds.` })
-    if (bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > sheet.width || bounds.maxY > sheet.height) issues.push({ level: 'error', message: `${item.part.name} (${item.instance.id}) extends beyond the sheet.` })
+    if (bounds.minX < sheet.borderSpacing || bounds.minY < sheet.borderSpacing || bounds.maxX > sheet.width - sheet.borderSpacing || bounds.maxY > sheet.height - sheet.borderSpacing) {
+      issues.push({ level: 'error', message: `${item.part.name} (${item.instance.id}) violates the ${sheet.borderSpacing} mm border spacing on sheet ${item.instance.sheetIndex + 1}.` })
+    }
 
     const transformed = transformPartProgram(item.part, item.instance)
     transformed.errors.forEach((message) => issues.push({ level: 'error', message }))
@@ -60,6 +63,7 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
       const first = placed[a]
       const second = placed[b]
       if (!first.bounds || !second.bounds || !first.part || !second.part) continue
+      if (first.instance.sheetIndex !== second.instance.sheetIndex) continue
       if (rectsOverlap(first.bounds, second.bounds, sheet.spacing)) issues.push({ level: 'error', message: `${first.part.name} and ${second.part.name} overlap or violate spacing.` })
     }
   }

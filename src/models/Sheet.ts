@@ -21,6 +21,7 @@ export interface Sheet {
   width: number
   height: number
   spacing: number
+  borderSpacing: number
   instances: PartInstance[]
   gcodeSettings: GCodeSettings
   gcodePresets?: GCodePreset[]

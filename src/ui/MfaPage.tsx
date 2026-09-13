@@ -17,8 +17,23 @@ interface MfaPageProps {
   onSignOut: () => void
 }
 
-function qrCodeSrc(qrCode: string): string {
-  return `data:image/svg+xml;utf-8,${encodeURIComponent(qrCode)}`
+function decodeQrCode(qrCode: string): string {
+  if (qrCode.trim().startsWith('%3C')) return decodeURIComponent(qrCode)
+  return qrCode
+}
+
+function qrCodeSrc(qrCode: string): string | undefined {
+  const decoded = decodeQrCode(qrCode)
+  if (decoded.startsWith('data:image')) return decoded
+  if (decoded.trim().startsWith('<svg')) return undefined
+  return `data:image/svg+xml;utf-8,${encodeURIComponent(decoded)}`
+}
+
+function QrCode({ qrCode }: { qrCode: string }) {
+  const decoded = decodeQrCode(qrCode)
+  const src = qrCodeSrc(qrCode)
+  if (src) return <img className="mfa-qr" src={src} alt="Microsoft Authenticator QR code" />
+  return <div className="mfa-qr mfa-qr-svg" aria-label="Microsoft Authenticator QR code" dangerouslySetInnerHTML={{ __html: decoded }} />
 }
 
 export function MfaPage({ mode, enrollment, error, busy = false, onStartEnrollment, onVerify, onSignOut }: MfaPageProps) {
@@ -42,7 +57,7 @@ export function MfaPage({ mode, enrollment, error, busy = false, onStartEnrollme
               </button>
             ) : (
               <>
-                <img className="mfa-qr" src={qrCodeSrc(enrollment.qrCode)} alt="Microsoft Authenticator QR code" />
+                <QrCode qrCode={enrollment.qrCode} />
                 <label>
                   Manual secret
                   <input value={enrollment.secret} readOnly />

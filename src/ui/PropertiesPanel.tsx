@@ -20,6 +20,10 @@ export function PropertiesPanel({ part, instance, onUpdate, onDuplicate, onDelet
         <div className="property-grid">
           <strong>{part.name}</strong>
           <label>
+            Sheet
+            <input type="number" min={1} value={instance.sheetIndex + 1} onChange={(event) => onUpdate({ sheetIndex: Math.max(0, Number(event.target.value) - 1) })} />
+          </label>
+          <label>
             X
             <input type="number" value={instance.x} onChange={(event) => onUpdate({ x: Number(event.target.value) })} />
           </label>

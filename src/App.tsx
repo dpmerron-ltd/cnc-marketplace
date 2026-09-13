@@ -36,6 +36,7 @@ const defaultSheet: Sheet = {
   width: 1220,
   height: 1220,
   spacing: 5,
+  borderSpacing: 10,
   instances: [],
   gcodeSettings: {
     startGcode: 'G21\nG17\nG90\nG94',
@@ -83,6 +84,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
     ...defaultSheet,
     ...sheet,
     name: sheet.name?.trim() || defaultSheet.name,
+    instances: sheet.instances.map((instance) => ({ ...instance, sheetIndex: instance.sheetIndex ?? 0 })),
     gcodeSettings,
     gcodePresets: normalizedPresets,
     defaultGcodePresetId: sheet.defaultGcodePresetId ?? defaultSheet.defaultGcodePresetId,
@@ -152,10 +154,15 @@ function normalizePart(part: Part, itemSku?: string, index = 0): Part {
   }
 }
 
-function newInstance(partId: string, x: number, y: number): PartInstance {
+function sheetCountFor(sheet: Sheet): number {
+  return Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
+}
+
+function newInstance(partId: string, x: number, y: number, sheetIndex: number): PartInstance {
   return {
     id: crypto.randomUUID(),
     partId,
+    sheetIndex,
     x,
     y,
     rotation: 0,
@@ -245,6 +252,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
   const placed = sheet.instances
     .map((instance) => {
       const placedPart = parts.find((candidate) => candidate.id === instance.partId)
+      if (instance.sheetIndex !== source.sheetIndex) return undefined
       return placedPart ? instanceBounds(placedPart, instance) : undefined
     })
     .filter((bounds) => bounds !== undefined)
@@ -273,7 +281,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
     ys.add(bounds.minY - copySize.height - sheet.spacing)
   }
 
-  const candidates = [...xs].flatMap((x) => [...ys].map((y) => ({ ...copy, x: Math.max(0, x), y: Math.max(0, y) })))
+  const candidates = [...xs].flatMap((x) => [...ys].map((y) => ({ ...copy, sheetIndex: source.sheetIndex, x: Math.max(0, x), y: Math.max(0, y) })))
   candidates.sort((a, b) => Math.hypot(a.x - source.x, a.y - source.y) - Math.hypot(b.x - source.x, b.y - source.y))
 
   return candidates.find(isValid) ?? { ...copy, x: source.x + sheet.spacing + 10, y: source.y + sheet.spacing + 10 }
@@ -285,6 +293,7 @@ function App() {
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
+  const [activeSheetIndex, setActiveSheetIndex] = useState(0)
   const [sheetHistory, setSheetHistory] = useState<SheetHistoryEntry[]>(initialState.sheetHistory)
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(initialState.selectedItemId)
   const [selectedPartId, setSelectedPartId] = useState<string>()
@@ -307,6 +316,8 @@ function App() {
   const selectedInstancePart = selectedInstance ? parts.find((part) => part.id === selectedInstance.partId) : undefined
   const selectedItem = items.find((item) => item.id === selectedItemId)
   const visibleParts = selectedItemId ? parts.filter((part) => part.itemId === selectedItemId) : []
+  const sheetCount = sheetCountFor(sheet)
+  const currentSheetIndex = Math.min(activeSheetIndex, sheetCount - 1)
   const issues = useMemo(() => validateSheet(parts, sheet), [parts, sheet])
   const errors = issues.filter((issue) => issue.level === 'error')
   const warnings = issues.filter((issue) => issue.level === 'warning')
@@ -429,6 +440,7 @@ function App() {
         if (remoteProject.sheet) setSheet(pruneMissingSheetInstances(normalizeSheet(remoteProject.sheet), remoteProject.parts))
         setSelectedItemId(remoteProject.selectedItemId)
         setSelectedInstanceId(undefined)
+        setActiveSheetIndex(0)
         setStatus('Loaded marketplace from Supabase.')
       } else {
         setStatus('Connected to Supabase. Marketplace is empty.')
@@ -465,6 +477,7 @@ function App() {
         setParts([])
         setSheetHistory([])
         setSheet(defaultSheet)
+        setActiveSheetIndex(0)
         setSelectedItemId(undefined)
         setSelectedPartId(undefined)
         setSelectedInstanceId(undefined)
@@ -589,10 +602,10 @@ function App() {
     setStatus('Removed component from item.')
   }
 
-  function addPart(partId: string, x = sheet.spacing, y = sheet.spacing) {
+  function addPart(partId: string, x = sheet.borderSpacing, y = sheet.borderSpacing) {
     setSheet((current) => ({
       ...current,
-      instances: [...current.instances, newInstance(partId, x, y)],
+      instances: [...current.instances, newInstance(partId, x, y, currentSheetIndex)],
     }))
   }
 
@@ -620,6 +633,7 @@ function App() {
   function clearSheet() {
     setSheet((current) => ({ ...current, instances: [] }))
     setSelectedInstanceId(undefined)
+    setActiveSheetIndex(0)
     setPreview(undefined)
     setStatus('Cleared placed parts from the sheet.')
   }
@@ -680,6 +694,7 @@ function App() {
     setSheet(pruneMissingSheetInstances(normalizeSheet(loadedState.sheet), loadedState.parts))
     setSheetHistory(loadedState.sheetHistory)
     setSelectedInstanceId(undefined)
+    setActiveSheetIndex(0)
     setStatus('Loaded saved marketplace from this browser.')
   }
 
@@ -694,6 +709,7 @@ function App() {
     setSheet(pruneMissingSheetInstances(normalizeSheet(importedState.sheet), importedState.parts))
     setSheetHistory(importedState.sheetHistory)
     setSelectedInstanceId(undefined)
+    setActiveSheetIndex(0)
     setStatus(`Imported project ${file.name}.`)
   }
 
@@ -726,6 +742,7 @@ function App() {
     setSheet(nextSheet)
     setSelectedItemId(entry.selectedItemId)
     setSelectedInstanceId(undefined)
+    setActiveSheetIndex(0)
     setPage('sheet')
     const removedCount = entry.sheet.instances.length - nextSheet.instances.length
     setStatus(removedCount > 0 ? `Opened ${entry.name}; removed ${removedCount} missing placed part(s).` : `Opened ${entry.name}.`)
@@ -789,9 +806,21 @@ function App() {
             Gap
             <input type="number" value={sheet.spacing} onChange={(event) => setSheet({ ...sheet, spacing: Number(event.target.value) })} />
           </label>
+          <label>
+            Border
+            <input type="number" value={sheet.borderSpacing} onChange={(event) => setSheet({ ...sheet, borderSpacing: Number(event.target.value) })} />
+          </label>
         </div>
         <div className="toolbar-actions">
-          <button type="button" onClick={() => setSheet({ ...sheet, instances: autoNest(parts, sheet) })}>Auto Nest</button>
+          <button
+            type="button"
+            onClick={() => {
+              setSheet({ ...sheet, instances: autoNest(parts, sheet) })
+              setActiveSheetIndex(0)
+            }}
+          >
+            Auto Nest
+          </button>
           <button type="button" onClick={clearSheet}>Clear Sheet</button>
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
@@ -835,7 +864,32 @@ function App() {
             onAdd={addPart}
             onSelect={setSelectedPartId}
           />
-          <SheetEditor parts={parts} sheet={sheet} selectedId={selectedInstanceId} onAddPart={addPart} onSelect={setSelectedInstanceId} onUpdateInstance={updateInstance} />
+          <main className="sheet-stage">
+            <div className="sheet-tabs" aria-label="Physical sheets">
+              {Array.from({ length: sheetCount }, (_, index) => (
+                <button
+                  type="button"
+                  key={index}
+                  className={currentSheetIndex === index ? 'active-sheet-tab' : ''}
+                  onClick={() => {
+                    setActiveSheetIndex(index)
+                    setSelectedInstanceId(undefined)
+                  }}
+                >
+                  Sheet {index + 1}
+                </button>
+              ))}
+            </div>
+            <SheetEditor
+              parts={parts}
+              sheet={sheet}
+              sheetIndex={currentSheetIndex}
+              selectedId={selectedInstance?.sheetIndex === currentSheetIndex ? selectedInstanceId : undefined}
+              onAddPart={addPart}
+              onSelect={setSelectedInstanceId}
+              onUpdateInstance={updateInstance}
+            />
+          </main>
           <div className="side-stack">
             <PropertiesPanel
               part={selectedInstancePart}

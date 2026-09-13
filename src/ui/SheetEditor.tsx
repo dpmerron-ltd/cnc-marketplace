@@ -9,6 +9,7 @@ import type { ToolpathSegment } from '../gcode/types'
 interface SheetEditorProps {
   parts: Part[]
   sheet: Sheet
+  sheetIndex: number
   selectedId?: string
   onAddPart: (partId: string, x: number, y: number) => void
   onSelect: (instanceId: string) => void
@@ -55,7 +56,7 @@ function arcPolylinePoints(segment: ToolpathSegment): string {
   return points.join(' ')
 }
 
-export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onUpdateInstance }: SheetEditorProps) {
+export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, onSelect, onUpdateInstance }: SheetEditorProps) {
   const [dragging, setDragging] = useState<{ id: string; dx: number; dy: number }>()
   const scale = Math.min(820 / sheet.width, 620 / sheet.height)
   const svgWidth = sheet.width * scale + viewPadding * 2
@@ -64,6 +65,7 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
   const placed = useMemo(
     () =>
       sheet.instances
+        .filter((instance) => instance.sheetIndex === sheetIndex)
         .map((instance) => {
           const part = parts.find((candidate) => candidate.id === instance.partId)
           return part ? { instance, part, bounds: instanceBounds(part, instance), transformed: transformPartProgram(part, instance) } : undefined
@@ -74,7 +76,7 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
         bounds: ReturnType<typeof instanceBounds>
         transformed: ReturnType<typeof transformPartProgram>
       }>,
-    [parts, sheet.instances],
+    [parts, sheet.instances, sheetIndex],
   )
 
   const collidingIds = new Set<string>()
@@ -120,6 +122,15 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
       >
         <g transform={`translate(${viewPadding} ${viewPadding + sheet.height * scale}) scale(${scale} ${-scale})`}>
           <rect width={sheet.width} height={sheet.height} className="sheet-boundary" />
+          {sheet.borderSpacing > 0 && (
+            <rect
+              x={sheet.borderSpacing}
+              y={sheet.borderSpacing}
+              width={Math.max(0, sheet.width - sheet.borderSpacing * 2)}
+              height={Math.max(0, sheet.height - sheet.borderSpacing * 2)}
+              className="border-spacing-guide"
+            />
+          )}
           <g className="origin-marker">
             <line x1={0} y1={0} x2={Math.min(80, sheet.width * 0.12)} y2={0} />
             <line x1={0} y1={0} x2={0} y2={Math.min(80, sheet.height * 0.12)} />

@@ -12,7 +12,7 @@ function makePart(id: string) {
 }
 
 function makeInstance(id: string, partId: string): PartInstance {
-  return { id, partId, x: 0, y: 0, rotation: 0, locked: false }
+  return { id, partId, sheetIndex: 0, x: 0, y: 0, rotation: 0, locked: false }
 }
 
 function makeSheet(instances: PartInstance[]): Sheet {
@@ -21,6 +21,7 @@ function makeSheet(instances: PartInstance[]): Sheet {
     width: 250,
     height: 250,
     spacing: 5,
+    borderSpacing: 10,
     instances,
     gcodeSettings: {
       startGcode: '',
@@ -42,9 +43,20 @@ describe('autoNest', () => {
     const nested = autoNest(parts, makeSheet(instances))
 
     expect(nested.map((instance) => ({ x: instance.x, y: instance.y }))).toEqual([
-      { x: 5, y: 5 },
-      { x: 110, y: 5 },
-      { x: 5, y: 60 },
+      { x: 10, y: 10 },
+      { x: 115, y: 10 },
+      { x: 10, y: 65 },
     ])
+  })
+
+  it('spills unlocked parts onto additional physical sheets when needed', () => {
+    const parts = [makePart('part-a')]
+    const instances = Array.from({ length: 11 }, (_, index) => makeInstance(`i${index + 1}`, 'part-a'))
+
+    const nested = autoNest(parts, makeSheet(instances))
+
+    expect(nested.slice(0, 8).every((instance) => instance.sheetIndex === 0)).toBe(true)
+    expect(nested.slice(8).every((instance) => instance.sheetIndex === 1)).toBe(true)
+    expect(nested[8]).toMatchObject({ sheetIndex: 1, x: 10, y: 10 })
   })
 })

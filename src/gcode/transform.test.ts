@@ -8,7 +8,7 @@ function makePart(gcode: string) {
 }
 
 function makeInstance(patch: Partial<PartInstance> = {}): PartInstance {
-  return { id: 'i1', partId: 'p1', x: 100, y: 200, rotation: 0, locked: false, ...patch }
+  return { id: 'i1', partId: 'p1', sheetIndex: 0, x: 100, y: 200, rotation: 0, locked: false, ...patch }
 }
 
 describe('G-code parser and coordinate transformer', () => {
