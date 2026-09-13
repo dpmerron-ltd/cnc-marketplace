@@ -22,6 +22,46 @@
   font-weight: 700;
 }
 
+.signed-in {
+  color: #637083;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f6f7f8;
+}
+
+.login-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid #d7dde3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.login-panel h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.login-panel label {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.login-error {
+  color: #b42318;
+  font-size: 13px;
+}
+
 .toolbar label,
 .bottom-bar label {
   display: inline-flex;

@@ -25,6 +25,23 @@ npm run lint
 npm run build
 ```
 
+## Supabase Setup
+
+The app can run entirely from browser storage, but it also supports Supabase cloud sync for the marketplace library.
+
+1. Open Supabase SQL Editor.
+2. Run `supabase/schema.sql`.
+3. Restart the app.
+
+For local development, copy `.env.example` to `.env.local` and set:
+
+```bash
+VITE_SUPABASE_URL=https://bsnndtwbvgrthddmbhoa.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+The current MVP stores G-code and optional DXF text in Postgres rows. For larger public libraries, move raw files into Supabase Storage and keep only file paths in `cnc_components`.
+
 ## MVP Features
 
 - Import individual Estlcam-style G-code files.

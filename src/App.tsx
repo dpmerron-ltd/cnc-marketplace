@@ -12,7 +12,10 @@ import type { Sheet } from './models/Sheet'
 import { rectsOverlap } from './models/geometry'
 import { autoNest } from './nesting/nestingEngine'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
+import { supabase } from './storage/supabaseClient'
+import { canUseSupabase, deleteRemoteComponent, loadRemoteProject, saveRemoteProject } from './storage/supabaseProjectStore'
 import { GCodeSettings } from './ui/GCodeSettings'
+import { LoginPage } from './ui/LoginPage'
 import { MarketplacePage } from './ui/MarketplacePage'
 import { PartLibrary } from './ui/PartLibrary'
 import { PropertiesPanel } from './ui/PropertiesPanel'
@@ -163,7 +166,10 @@ function App() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>()
   const [preview, setPreview] = useState<string>()
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
+  const [authReady, setAuthReady] = useState(!supabase)
+  const [userEmail, setUserEmail] = useState<string>()
   const importProjectRef = useRef<HTMLInputElement>(null)
+  const remoteHydratedRef = useRef(false)
 
   const selectedInstance = sheet.instances.find((instance) => instance.id === selectedInstanceId)
   const selectedInstancePart = selectedInstance ? parts.find((part) => part.id === selectedInstance.partId) : undefined
@@ -174,12 +180,90 @@ function App() {
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
   useEffect(() => {
+    if (!userEmail) return
+
     const timeout = window.setTimeout(() => {
       saveProject({ version: 1, items, parts, sheet, savedAt: new Date().toISOString() })
+      if (remoteHydratedRef.current && canUseSupabase()) {
+        void saveRemoteProject(items, parts, sheet, selectedItemId)
+      }
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, sheet])
+  }, [items, parts, selectedItemId, sheet, userEmail])
+
+  useEffect(() => {
+    if (!canUseSupabase() || !userEmail) return
+
+    let cancelled = false
+    void loadRemoteProject().then((remoteProject) => {
+      remoteHydratedRef.current = true
+      if (cancelled || !remoteProject) {
+        if (!cancelled) setStatus('Using local browser storage. Run the Supabase schema setup to enable cloud sync.')
+        return
+      }
+
+      if (remoteProject.items.length > 0 || remoteProject.parts.length > 0 || remoteProject.sheet) {
+        setItems(remoteProject.items)
+        setParts(remoteProject.parts)
+        if (remoteProject.sheet) setSheet(remoteProject.sheet)
+        setSelectedItemId(remoteProject.selectedItemId)
+        setSelectedInstanceId(undefined)
+        setStatus('Loaded marketplace from Supabase.')
+      } else {
+        setStatus('Connected to Supabase. Marketplace is empty.')
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [userEmail])
+
+  useEffect(() => {
+    if (!supabase) return
+
+    void supabase.auth.getSession().then((result) => {
+      setUserEmail(result.data.session?.user.email)
+      setAuthReady(true)
+    })
+
+    const listener = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user.email)
+      if (!session) {
+        remoteHydratedRef.current = false
+        setItems([])
+        setParts([])
+        setSheet(defaultSheet)
+        setSelectedItemId(undefined)
+        setSelectedPartId(undefined)
+        setSelectedInstanceId(undefined)
+        setPreview(undefined)
+        setStatus('Signed out.')
+      }
+    })
+
+    return () => {
+      listener.data.subscription.unsubscribe()
+    }
+  }, [])
+
+  async function login(username: string, password: string): Promise<string | undefined> {
+    if (!supabase) return 'Supabase is not configured.'
+
+    const result = await supabase.auth.signInWithPassword({
+      email: username,
+      password,
+    })
+
+    if (result.error) return 'Invalid username or password.'
+    setStatus('Signed in.')
+    return undefined
+  }
+
+  function signOut() {
+    void supabase?.auth.signOut()
+  }
 
   async function importFilesForItem(itemId: string, fileList: FileList) {
     const files = Array.from(fileList)
@@ -234,6 +318,7 @@ function App() {
     }
 
     setParts((current) => current.filter((part) => part.id !== partId))
+    void deleteRemoteComponent(partId)
     if (selectedPartId === partId) setSelectedPartId(undefined)
     setStatus('Removed component from item.')
   }
@@ -325,10 +410,20 @@ function App() {
     setStatus('Exported combined-sheet.nc.')
   }
 
+  if (!authReady) {
+    return <main className="login-shell"><div className="login-panel">Loading...</div></main>
+  }
+
+  if (!userEmail) {
+    return <LoginPage onLogin={login} />
+  }
+
   return (
     <div className="app">
       <header className="toolbar">
         <h1>CNC Marketplace</h1>
+        <span className="signed-in">{userEmail}</span>
+        <button type="button" onClick={signOut}>Sign Out</button>
         <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
         <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
         <label>
