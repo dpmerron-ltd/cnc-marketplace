@@ -7,14 +7,22 @@ import { validateSheet } from './gcode/validator'
 import type { MarketplaceItem } from './models/Item'
 import type { Part } from './models/Part'
 import type { PartInstance } from './models/PartInstance'
-import type { Project } from './models/Project'
+import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
 import { rectsOverlap } from './models/geometry'
 import { autoNest } from './nesting/nestingEngine'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
 import { supabase } from './storage/supabaseClient'
-import { canUseSupabase, deleteRemoteComponent, loadRemoteProject, saveRemoteProject } from './storage/supabaseProjectStore'
+import {
+  canUseSupabase,
+  deleteRemoteComponent,
+  deleteRemoteSheetHistory,
+  loadRemoteProject,
+  saveRemoteProject,
+  saveRemoteSheetHistory,
+} from './storage/supabaseProjectStore'
 import { GCodeSettings } from './ui/GCodeSettings'
+import { HistoryPage } from './ui/HistoryPage'
 import { LoginPage } from './ui/LoginPage'
 import { MarketplacePage } from './ui/MarketplacePage'
 import { PartLibrary } from './ui/PartLibrary'
@@ -120,6 +128,7 @@ interface AppPersistenceState {
   items: MarketplaceItem[]
   parts: Part[]
   sheet: Sheet
+  sheetHistory: SheetHistoryEntry[]
   selectedItemId?: string
   restored: boolean
 }
@@ -130,6 +139,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
       items: [],
       parts: [],
       sheet: defaultSheet,
+      sheetHistory: [],
       restored: false,
     }
   }
@@ -140,6 +150,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
       items: project.items,
       parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? fallbackItemId })),
       sheet: normalizeSheet(project.sheet),
+      sheetHistory: project.sheetHistory ?? [],
       selectedItemId: fallbackItemId,
       restored: true,
     }
@@ -150,6 +161,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
     items: [legacyItem],
     parts: project.parts.map((part) => ({ ...part, itemId: part.itemId ?? legacyItem.id })),
     sheet: normalizeSheet(project.sheet),
+    sheetHistory: project.sheetHistory ?? [],
     selectedItemId: legacyItem.id,
     restored: true,
   }
@@ -201,10 +213,11 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(loadProject()), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet'>('marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
+  const [sheetHistory, setSheetHistory] = useState<SheetHistoryEntry[]>(initialState.sheetHistory)
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(initialState.selectedItemId)
   const [selectedPartId, setSelectedPartId] = useState<string>()
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>()
@@ -227,7 +240,7 @@ function App() {
     if (!userEmail) return
 
     const timeout = window.setTimeout(() => {
-      saveProject({ version: 1, items, parts, sheet, savedAt: new Date().toISOString() })
+      saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() })
       if (remoteHydratedRef.current && canUseSupabase()) {
         void saveRemoteProject(items, parts, sheet, selectedItemId).then((result) => {
           if (!result.ok) setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
@@ -236,7 +249,7 @@ function App() {
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, selectedItemId, sheet, userEmail])
+  }, [items, parts, selectedItemId, sheet, sheetHistory, userEmail])
 
   useEffect(() => {
     if (!canUseSupabase() || !userEmail) return
@@ -252,6 +265,7 @@ function App() {
       if (remoteProject.items.length > 0 || remoteProject.parts.length > 0 || remoteProject.sheet) {
         setItems(remoteProject.items)
         setParts(remoteProject.parts)
+        setSheetHistory(remoteProject.sheetHistory)
         if (remoteProject.sheet) setSheet(normalizeSheet(remoteProject.sheet))
         setSelectedItemId(remoteProject.selectedItemId)
         setSelectedInstanceId(undefined)
@@ -280,6 +294,7 @@ function App() {
         remoteHydratedRef.current = false
         setItems([])
         setParts([])
+        setSheetHistory([])
         setSheet(defaultSheet)
         setSelectedItemId(undefined)
         setSelectedPartId(undefined)
@@ -406,12 +421,35 @@ function App() {
     setSelectedInstanceId(undefined)
   }
 
+  function clearSheet() {
+    setSheet((current) => ({ ...current, instances: [] }))
+    setSelectedInstanceId(undefined)
+    setPreview(undefined)
+    setStatus('Cleared placed parts from the sheet.')
+  }
+
   function buildProject(): Project {
-    return { version: 1, items, parts, sheet, savedAt: new Date().toISOString() }
+    return { version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() }
+  }
+
+  function buildHistoryEntry(): SheetHistoryEntry {
+    const now = new Date()
+    return {
+      id: crypto.randomUUID(),
+      name: `Sheet ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`,
+      savedAt: now.toISOString(),
+      sheet: normalizeSheet({ ...sheet, instances: sheet.instances.map((instance) => ({ ...instance })) }),
+      selectedItemId,
+      itemCount: items.length,
+      componentCount: parts.length,
+      placedCount: sheet.instances.length,
+    }
   }
 
   async function saveCurrentProject() {
-    const localSaved = saveProject(buildProject())
+    const historyEntry = buildHistoryEntry()
+    const nextHistory = [historyEntry, ...sheetHistory]
+    const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() })
     if (!localSaved) {
       setStatus('Could not save project; browser storage may be full.')
       return
@@ -419,11 +457,18 @@ function App() {
 
     if (remoteHydratedRef.current && canUseSupabase()) {
       const remoteSaved = await saveRemoteProject(items, parts, sheet, selectedItemId)
-      setStatus(remoteSaved.ok ? 'Saved project to Supabase.' : `Cloud save failed: ${remoteSaved.error ?? 'unknown error'}`)
+      const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry) : remoteSaved
+      if (!historySaved.ok) {
+        setStatus(`Cloud save failed: ${historySaved.error ?? 'unknown error'}`)
+        return
+      }
+      setSheetHistory(nextHistory)
+      setStatus('Saved sheet to history.')
       return
     }
 
-    setStatus('Saved project to local browser storage.')
+    setSheetHistory(nextHistory)
+    setStatus('Saved sheet to history.')
   }
 
   function loadSavedProject() {
@@ -437,6 +482,7 @@ function App() {
     setSelectedItemId(loadedState.selectedItemId)
     setParts(loadedState.parts)
     setSheet(normalizeSheet(loadedState.sheet))
+    setSheetHistory(loadedState.sheetHistory)
     setSelectedInstanceId(undefined)
     setStatus('Loaded saved marketplace from this browser.')
   }
@@ -450,6 +496,7 @@ function App() {
     setSelectedItemId(importedState.selectedItemId)
     setParts(importedState.parts)
     setSheet(normalizeSheet(importedState.sheet))
+    setSheetHistory(importedState.sheetHistory)
     setSelectedInstanceId(undefined)
     setStatus(`Imported project ${file.name}.`)
   }
@@ -477,6 +524,20 @@ function App() {
     setStatus('Exported combined-sheet.nc.')
   }
 
+  function openHistoryEntry(entry: SheetHistoryEntry) {
+    setSheet(normalizeSheet(entry.sheet))
+    setSelectedItemId(entry.selectedItemId)
+    setSelectedInstanceId(undefined)
+    setPage('sheet')
+    setStatus(`Opened ${entry.name}.`)
+  }
+
+  function deleteHistoryEntry(entryId: string) {
+    setSheetHistory((current) => current.filter((entry) => entry.id !== entryId))
+    void deleteRemoteSheetHistory(entryId)
+    setStatus('Deleted saved sheet from history.')
+  }
+
   if (!authReady) {
     return <main className="login-shell"><div className="login-panel">Loading...</div></main>
   }
@@ -488,29 +549,39 @@ function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <h1>CNC Marketplace</h1>
-        <span className="signed-in">{userEmail}</span>
-        <button type="button" onClick={() => void signOut()}>Sign Out</button>
-        <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
-        <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
-        <label>
-          Sheet
-          <input type="number" value={sheet.width} onChange={(event) => setSheet({ ...sheet, width: Number(event.target.value) })} />
-        </label>
-        <span>x</span>
-        <label>
-          <input type="number" value={sheet.height} onChange={(event) => setSheet({ ...sheet, height: Number(event.target.value) })} />
-          mm
-        </label>
-        <label>
-          Spacing
-          <input type="number" value={sheet.spacing} onChange={(event) => setSheet({ ...sheet, spacing: Number(event.target.value) })} />
-        </label>
-        <button type="button" onClick={() => setSheet({ ...sheet, instances: autoNest(parts, sheet) })}>Auto Nest</button>
-        <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
-        <button type="button" onClick={loadSavedProject}>Load Sheet</button>
-        <button type="button" onClick={previewGCode}>Preview G-code</button>
-        <button type="button" className="primary" onClick={exportGCode}>Export G-code</button>
+        <div className="brand-block">
+          <h1>CNC Marketplace</h1>
+          <span>{userEmail}</span>
+        </div>
+        <nav className="nav-tabs" aria-label="Primary">
+          <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
+          <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
+          <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
+        </nav>
+        <div className="sheet-controls">
+          <label>
+            W
+            <input type="number" value={sheet.width} onChange={(event) => setSheet({ ...sheet, width: Number(event.target.value) })} />
+          </label>
+          <span>x</span>
+          <label>
+            H
+            <input type="number" value={sheet.height} onChange={(event) => setSheet({ ...sheet, height: Number(event.target.value) })} />
+          </label>
+          <label>
+            Gap
+            <input type="number" value={sheet.spacing} onChange={(event) => setSheet({ ...sheet, spacing: Number(event.target.value) })} />
+          </label>
+        </div>
+        <div className="toolbar-actions">
+          <button type="button" onClick={() => setSheet({ ...sheet, instances: autoNest(parts, sheet) })}>Auto Nest</button>
+          <button type="button" onClick={clearSheet}>Clear Sheet</button>
+          <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
+          <button type="button" onClick={loadSavedProject}>Load Sheet</button>
+          <button type="button" onClick={previewGCode}>Preview</button>
+          <button type="button" className="primary" onClick={exportGCode}>Export</button>
+          <button type="button" onClick={() => void signOut()}>Sign Out</button>
+        </div>
       </header>
 
       {page === 'marketplace' ? (
@@ -529,6 +600,8 @@ function App() {
           }}
           onOpenSheet={() => setPage('sheet')}
         />
+      ) : page === 'history' ? (
+        <HistoryPage history={sheetHistory} onOpen={openHistoryEntry} onDelete={deleteHistoryEntry} />
       ) : (
         <div className="workspace">
           <PartLibrary

@@ -40,9 +40,25 @@ create table if not exists public.sheet_projects (
 alter table public.sheet_projects
   add column if not exists owner_id uuid references auth.users(id) on delete cascade;
 
+create table if not exists public.sheet_history (
+  id text primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  saved_at timestamptz not null default now(),
+  sheet jsonb not null,
+  selected_item_id uuid references public.marketplace_items(id) on delete set null,
+  item_count integer not null default 0,
+  component_count integer not null default 0,
+  placed_count integer not null default 0
+);
+
+alter table public.sheet_history
+  add column if not exists owner_id uuid references auth.users(id) on delete cascade;
+
 alter table public.marketplace_items enable row level security;
 alter table public.cnc_components enable row level security;
 alter table public.sheet_projects enable row level security;
+alter table public.sheet_history enable row level security;
 
 drop policy if exists "public marketplace item read" on public.marketplace_items;
 drop policy if exists "public marketplace item write" on public.marketplace_items;
@@ -56,6 +72,8 @@ drop policy if exists "owner component read" on public.cnc_components;
 drop policy if exists "owner component write" on public.cnc_components;
 drop policy if exists "owner sheet read" on public.sheet_projects;
 drop policy if exists "owner sheet write" on public.sheet_projects;
+drop policy if exists "owner sheet history read" on public.sheet_history;
+drop policy if exists "owner sheet history write" on public.sheet_history;
 
 create policy "owner marketplace item read"
   on public.marketplace_items for select
@@ -81,5 +99,14 @@ create policy "owner sheet read"
 
 create policy "owner sheet write"
   on public.sheet_projects for all
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+create policy "owner sheet history read"
+  on public.sheet_history for select
+  using (auth.uid() = owner_id);
+
+create policy "owner sheet history write"
+  on public.sheet_history for all
   using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);

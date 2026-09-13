@@ -1,6 +1,7 @@
 import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
+import type { SheetHistoryEntry } from '../models/Project'
 import type { Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 
@@ -20,11 +21,23 @@ interface ProjectRow {
   selected_item_id: string | null
 }
 
+interface SheetHistoryRow {
+  id: string
+  name: string
+  saved_at: string
+  sheet: Sheet
+  selected_item_id: string | null
+  item_count: number
+  component_count: number
+  placed_count: number
+}
+
 export interface RemoteProjectState {
   items: MarketplaceItem[]
   parts: Part[]
   sheet?: Sheet
   selectedItemId?: string
+  sheetHistory: SheetHistoryEntry[]
 }
 
 export interface RemoteSaveResult {
@@ -47,10 +60,11 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   const userId = await getUserId()
   if (!userId) return undefined
 
-  const [itemsResult, componentsResult, projectResult] = await Promise.all([
+  const [itemsResult, componentsResult, projectResult, historyResult] = await Promise.all([
     supabase.from('marketplace_items').select('*').eq('owner_id', userId).order('created_at'),
     supabase.from('cnc_components').select('*').eq('owner_id', userId).order('date_imported'),
     supabase.from('sheet_projects').select('*').eq('id', userId).maybeSingle<ProjectRow>(),
+    supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
   ])
 
   if (itemsResult.error || componentsResult.error) {
@@ -77,12 +91,25 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   })
 
   const project = projectResult.error ? undefined : projectResult.data
+  const sheetHistory: SheetHistoryEntry[] = historyResult.error
+    ? []
+    : ((historyResult.data ?? []) as SheetHistoryRow[]).map((row) => ({
+        id: row.id,
+        name: row.name,
+        savedAt: row.saved_at,
+        sheet: row.sheet,
+        selectedItemId: row.selected_item_id ?? undefined,
+        itemCount: row.item_count,
+        componentCount: row.component_count,
+        placedCount: row.placed_count,
+      }))
 
   return {
     items,
     parts,
     sheet: project?.sheet,
     selectedItemId: project?.selected_item_id ?? items[0]?.id,
+    sheetHistory,
   }
 }
 
@@ -155,4 +182,33 @@ export async function deleteRemoteComponent(partId: string): Promise<void> {
   if (!userId) return
   const result = await supabase.from('cnc_components').delete().eq('id', partId).eq('owner_id', userId)
   if (result.error) console.warn('Supabase component delete failed.', result.error)
+}
+
+export async function saveRemoteSheetHistory(entry: SheetHistoryEntry): Promise<RemoteSaveResult> {
+  if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
+  const userId = await getUserId()
+  if (!userId) return { ok: false, error: 'You are not signed in.' }
+
+  const result = await supabase.from('sheet_history').upsert({
+    id: entry.id,
+    owner_id: userId,
+    name: entry.name,
+    saved_at: entry.savedAt,
+    sheet: entry.sheet,
+    selected_item_id: entry.selectedItemId ?? null,
+    item_count: entry.itemCount,
+    component_count: entry.componentCount,
+    placed_count: entry.placedCount,
+  })
+
+  if (result.error) return { ok: false, error: result.error.message }
+  return { ok: true }
+}
+
+export async function deleteRemoteSheetHistory(entryId: string): Promise<void> {
+  if (!supabase) return
+  const userId = await getUserId()
+  if (!userId) return
+  const result = await supabase.from('sheet_history').delete().eq('id', entryId).eq('owner_id', userId)
+  if (result.error) console.warn('Supabase sheet history delete failed.', result.error)
 }

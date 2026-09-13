@@ -1,0 +1,22 @@
+name: Apply Supabase Schema
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply schema
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          test -n "$SUPABASE_DB_URL"
+          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/schema.sql
+          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "notify pgrst, 'reload schema';"
