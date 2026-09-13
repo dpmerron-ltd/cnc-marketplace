@@ -15,9 +15,11 @@ import { downloadText, loadProject, saveProject } from './storage/projectStorage
 import { supabase } from './storage/supabaseClient'
 import {
   canUseSupabase,
+  deleteRemoteGCodePreset,
   deleteRemoteComponent,
   deleteRemoteSheetHistory,
   loadRemoteProject,
+  saveRemoteGCodePreset,
   saveRemoteProject,
   saveRemoteSheetHistory,
 } from './storage/supabaseProjectStore'
@@ -155,6 +157,13 @@ function normalizePart(part: Part, itemSku?: string, index = 0): Part {
     ...part,
     sku: part.sku || makeComponentSku(itemSku ?? 'COMP', index + 1),
   }
+}
+
+function mergePresets(current: GCodePreset[] | undefined, shared: GCodePreset[]): GCodePreset[] {
+  const byId = new Map<string, GCodePreset>()
+  for (const preset of current ?? []) byId.set(preset.id, preset)
+  for (const preset of shared) byId.set(preset.id, preset)
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function sheetCountFor(sheet: Sheet): number {
@@ -330,8 +339,29 @@ function App() {
     return Boolean(item && (!item.ownerId || item.ownerId === userId))
   }
 
+  async function requireAuthSession(): Promise<boolean> {
+    if (!supabase) return false
+    const sessionResult = await supabase.auth.getSession()
+    if (sessionResult.data.session) {
+      setUserId(sessionResult.data.session.user.id)
+      setUserEmail(sessionResult.data.session.user.email)
+      return true
+    }
+
+    setMfaReady(false)
+    setMfaMode('enroll')
+    setMfaFactors([])
+    setMfaEnrollment(undefined)
+    setMfaError('Your login session expired before 2FA setup. Please sign in again.')
+    setUserId(undefined)
+    setUserEmail(undefined)
+    return false
+  }
+
   async function refreshMfaState(): Promise<boolean> {
     if (!supabase) return true
+    const hasSession = await requireAuthSession()
+    if (!hasSession) return false
 
     const [aalResult, factorsResult] = await Promise.all([
       supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
@@ -366,8 +396,25 @@ function App() {
     const client = supabase
     setMfaBusy(true)
     setMfaError(undefined)
+    const hasSession = await requireAuthSession()
+    if (!hasSession) {
+      setMfaBusy(false)
+      return
+    }
 
     const factorsResult = await client.auth.mfa.listFactors()
+    if (factorsResult.error) {
+      setMfaBusy(false)
+      if (factorsResult.error.message.toLowerCase().includes('session')) {
+        setMfaError('Your login session expired before 2FA setup. Please sign in again.')
+        setUserId(undefined)
+        setUserEmail(undefined)
+        return
+      }
+      setMfaError(factorsResult.error.message)
+      return
+    }
+
     const staleTotpFactors = ((factorsResult.data?.all ?? []) as MfaFactor[]).filter(
       (factor) => factor.factor_type === 'totp' && factor.status === 'unverified',
     )
@@ -460,7 +507,12 @@ function App() {
         setItems(remoteProject.items)
         setParts(remoteProject.parts)
         setSheetHistory(remoteProject.sheetHistory)
-        if (remoteProject.sheet) setSheet(pruneMissingSheetInstances(normalizeSheet(remoteProject.sheet), remoteProject.parts))
+        if (remoteProject.sheet) {
+          const remoteSheet = normalizeSheet(remoteProject.sheet)
+          setSheet(pruneMissingSheetInstances({ ...remoteSheet, gcodePresets: mergePresets(remoteSheet.gcodePresets, remoteProject.gcodePresets) }, remoteProject.parts))
+        } else {
+          setSheet((current) => ({ ...current, gcodePresets: mergePresets(current.gcodePresets, remoteProject.gcodePresets) }))
+        }
         setSelectedItemId(remoteProject.selectedItemId)
         setSelectedInstanceId(undefined)
         setActiveSheetIndex(0)
@@ -957,8 +1009,13 @@ function App() {
               onChange={(gcodeSettings) => setSheet({ ...sheet, gcodeSettings })}
               onLoadPreset={(preset) => setSheet({ ...sheet, gcodeSettings: { ...preset.settings } })}
               onSavePreset={(name) => {
-                const preset: GCodePreset = { id: crypto.randomUUID(), name, settings: { ...sheet.gcodeSettings } }
+                const preset: GCodePreset = { id: crypto.randomUUID(), name, uploadedBy: userEmail, settings: { ...sheet.gcodeSettings } }
                 setSheet({ ...sheet, gcodePresets: [...(sheet.gcodePresets ?? []), preset] })
+                if (canUseSupabase()) {
+                  void saveRemoteGCodePreset(preset, userEmail).then((result) => {
+                    if (!result.ok) setStatus(`Cloud preset save failed: ${result.error ?? 'unknown error'}`)
+                  })
+                }
               }}
               onSetDefaultPreset={(presetId) => {
                 const preset = sheet.gcodePresets?.find((candidate) => candidate.id === presetId)
@@ -974,6 +1031,7 @@ function App() {
                   gcodePresets: (sheet.gcodePresets ?? []).filter((preset) => preset.id !== presetId),
                   defaultGcodePresetId: sheet.defaultGcodePresetId === presetId ? undefined : sheet.defaultGcodePresetId,
                 })
+                void deleteRemoteGCodePreset(presetId)
               }}
             />
           </div>

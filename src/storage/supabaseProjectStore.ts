@@ -2,7 +2,7 @@ import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { SheetHistoryEntry } from '../models/Project'
-import type { Sheet } from '../models/Sheet'
+import type { GCodePreset, Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 
 interface ComponentRow {
@@ -34,12 +34,21 @@ interface SheetHistoryRow {
   placed_count: number
 }
 
+interface GCodePresetRow {
+  id: string
+  owner_id: string
+  uploaded_by: string
+  name: string
+  settings: GCodePreset['settings']
+}
+
 export interface RemoteProjectState {
   items: MarketplaceItem[]
   parts: Part[]
   sheet?: Sheet
   selectedItemId?: string
   sheetHistory: SheetHistoryEntry[]
+  gcodePresets: GCodePreset[]
 }
 
 export interface RemoteSaveResult {
@@ -78,15 +87,16 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   const userId = await getUserId()
   if (!userId) return undefined
 
-  const [itemsResult, componentsResult, projectResult, historyResult] = await Promise.all([
+  const [itemsResult, componentsResult, projectResult, historyResult, presetsResult] = await Promise.all([
     supabase.from('marketplace_items').select('*').order('created_at'),
     supabase.from('cnc_components').select('*').order('date_imported'),
     supabase.from('sheet_projects').select('*').eq('id', userId).maybeSingle<ProjectRow>(),
     supabase.from('sheet_history').select('*').order('saved_at', { ascending: false }),
+    supabase.from('gcode_presets').select('*').order('name'),
   ])
 
-  if (itemsResult.error || componentsResult.error) {
-    console.warn('Supabase load failed. Has the schema been created?', itemsResult.error ?? componentsResult.error)
+  if (itemsResult.error || componentsResult.error || presetsResult.error) {
+    console.warn('Supabase load failed. Has the schema been created?', itemsResult.error ?? componentsResult.error ?? presetsResult.error)
     return undefined
   }
 
@@ -116,6 +126,13 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   })
 
   const project = projectResult.error ? undefined : projectResult.data
+  const gcodePresets: GCodePreset[] = ((presetsResult.data ?? []) as GCodePresetRow[]).map((row) => ({
+    id: row.id,
+    ownerId: row.owner_id,
+    uploadedBy: row.uploaded_by,
+    name: row.name,
+    settings: row.settings,
+  }))
   const sheetHistory: SheetHistoryEntry[] = historyResult.error
     ? []
     : ((historyResult.data ?? []) as SheetHistoryRow[]).map((row) => ({
@@ -135,6 +152,7 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
     sheet: project?.sheet,
     selectedItemId: project?.selected_item_id ?? items[0]?.id,
     sheetHistory,
+    gcodePresets,
   }
 }
 
@@ -238,4 +256,28 @@ export async function deleteRemoteSheetHistory(entryId: string): Promise<void> {
   if (!userId) return
   const result = await supabase.from('sheet_history').delete().eq('id', entryId).eq('owner_id', userId)
   if (result.error) console.warn('Supabase sheet history delete failed.', result.error)
+}
+
+export async function saveRemoteGCodePreset(preset: GCodePreset, uploadedBy?: string): Promise<RemoteSaveResult> {
+  if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
+  const userId = await getUserId()
+  if (!userId) return { ok: false, error: 'You are not signed in.' }
+
+  const result = await supabase.from('gcode_presets').upsert({
+    id: preset.id,
+    owner_id: userId,
+    uploaded_by: preset.uploadedBy ?? uploadedBy ?? '',
+    name: preset.name,
+    settings: preset.settings,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (result.error) return { ok: false, error: result.error.message }
+  return { ok: true }
+}
+
+export async function deleteRemoteGCodePreset(presetId: string): Promise<void> {
+  if (!supabase) return
+  const result = await supabase.from('gcode_presets').delete().eq('id', presetId)
+  if (result.error) console.warn('Supabase G-code preset delete failed.', result.error)
 }

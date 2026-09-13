@@ -13,6 +13,8 @@ export interface GCodeSettings {
 
 export interface GCodePreset {
   id: string
+  ownerId?: string
+  uploadedBy?: string
   name: string
   settings: GCodeSettings
 }

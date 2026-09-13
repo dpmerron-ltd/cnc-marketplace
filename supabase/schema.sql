@@ -77,10 +77,21 @@ create table if not exists public.sheet_history (
 alter table public.sheet_history
   add column if not exists owner_id uuid references auth.users(id) on delete cascade;
 
+create table if not exists public.gcode_presets (
+  id text primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  uploaded_by text not null default '',
+  name text not null,
+  settings jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.marketplace_items enable row level security;
 alter table public.cnc_components enable row level security;
 alter table public.sheet_projects enable row level security;
 alter table public.sheet_history enable row level security;
+alter table public.gcode_presets enable row level security;
 
 drop policy if exists "public marketplace item read" on public.marketplace_items;
 drop policy if exists "public marketplace item write" on public.marketplace_items;
@@ -107,6 +118,10 @@ drop policy if exists "owner sheet write" on public.sheet_projects;
 drop policy if exists "owner sheet history read" on public.sheet_history;
 drop policy if exists "owner sheet history write" on public.sheet_history;
 drop policy if exists "authenticated sheet history read" on public.sheet_history;
+drop policy if exists "authenticated gcode preset read" on public.gcode_presets;
+drop policy if exists "authenticated gcode preset insert" on public.gcode_presets;
+drop policy if exists "owner gcode preset update" on public.gcode_presets;
+drop policy if exists "owner gcode preset delete" on public.gcode_presets;
 
 create policy "authenticated marketplace item read"
   on public.marketplace_items for select
@@ -159,3 +174,20 @@ create policy "owner sheet history write"
   on public.sheet_history for all
   using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);
+
+create policy "authenticated gcode preset read"
+  on public.gcode_presets for select
+  using (auth.uid() is not null);
+
+create policy "authenticated gcode preset insert"
+  on public.gcode_presets for insert
+  with check (auth.uid() is not null and owner_id = auth.uid());
+
+create policy "owner gcode preset update"
+  on public.gcode_presets for update
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+create policy "owner gcode preset delete"
+  on public.gcode_presets for delete
+  using (auth.uid() = owner_id);
