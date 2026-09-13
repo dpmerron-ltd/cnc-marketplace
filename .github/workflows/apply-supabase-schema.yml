@@ -18,5 +18,10 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           test -n "$SUPABASE_DB_URL"
+          if echo "$SUPABASE_DB_URL" | grep -q "db\.bsnndtwbvgrthddmbhoa\.supabase\.co"; then
+            echo "SUPABASE_DB_URL is using the direct database host, which can be IPv6-only from GitHub Actions."
+            echo "Use the Supabase Session pooler connection string instead."
+            exit 1
+          fi
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/schema.sql
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "notify pgrst, 'reload schema';"
