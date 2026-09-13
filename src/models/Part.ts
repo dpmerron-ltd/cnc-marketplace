@@ -9,7 +9,9 @@ export interface PartMetadata {
 
 export interface Part {
   id: string
+  ownerId?: string
   itemId?: string
+  sku: string
   name: string
   originalFilename: string
   gcode: string

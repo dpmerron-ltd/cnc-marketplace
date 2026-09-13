@@ -91,7 +91,7 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
     const rect = target.getBoundingClientRect()
     return {
       x: (clientX - rect.left - viewPadding) / scale,
-      y: (clientY - rect.top - viewPadding) / scale,
+      y: sheet.height - (clientY - rect.top - viewPadding) / scale,
     }
   }
 
@@ -118,8 +118,16 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
         onPointerUp={() => setDragging(undefined)}
         onPointerLeave={() => setDragging(undefined)}
       >
-        <g transform={`translate(${viewPadding} ${viewPadding}) scale(${scale})`}>
+        <g transform={`translate(${viewPadding} ${viewPadding + sheet.height * scale}) scale(${scale} ${-scale})`}>
           <rect width={sheet.width} height={sheet.height} className="sheet-boundary" />
+          <g className="origin-marker">
+            <line x1={0} y1={0} x2={Math.min(80, sheet.width * 0.12)} y2={0} />
+            <line x1={0} y1={0} x2={0} y2={Math.min(80, sheet.height * 0.12)} />
+            <circle cx={0} cy={0} r={4} />
+            <text transform="translate(8 16) scale(1 -1)">X0 Y0</text>
+            <text transform={`translate(${Math.min(86, sheet.width * 0.12 + 8)} 5) scale(1 -1)`}>+X</text>
+            <text transform={`translate(6 ${Math.min(86, sheet.height * 0.12 + 8)}) scale(1 -1)`}>+Y</text>
+          </g>
           {placed.map(({ transformed, instance }) =>
             transformed.segments.map((segment, index) =>
               segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? (
@@ -159,7 +167,7 @@ export function SheetEditor({ parts, sheet, selectedId, onAddPart, onSelect, onU
                     setDragging({ id: instance.id, dx: point.x - instance.x, dy: point.y - instance.y })
                   }}
                 />
-                <text x={bounds.minX + 5} y={bounds.minY + 16} className="part-label">
+                <text transform={`translate(${bounds.minX + 5} ${bounds.maxY - 6}) scale(1 -1)`} className="part-label">
                   {part.name}
                 </text>
               </g>

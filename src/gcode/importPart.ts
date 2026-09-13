@@ -15,6 +15,7 @@ export function createPartFromGCode(filename: string, gcode: string, dxf?: strin
   return {
     id: idFromName(filename),
     itemId,
+    sku: '',
     name: filename.replace(/\.[^.]+$/, ''),
     originalFilename: filename,
     gcode,

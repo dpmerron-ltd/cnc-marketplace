@@ -7,7 +7,9 @@ import { isSupabaseConfigured, supabase } from './supabaseClient'
 
 interface ComponentRow {
   id: string
+  owner_id: string
   item_id: string
+  sku: string | null
   name: string
   original_filename: string
   gcode: string
@@ -55,6 +57,22 @@ async function getUserId(): Promise<string | undefined> {
   return result.data.user?.id
 }
 
+function skuBase(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function fallbackItemSku(id: string, name: string): string {
+  return `${skuBase(name) || 'ITEM'}-${id.replace(/-/g, '').slice(0, 6).toUpperCase()}`
+}
+
+function fallbackComponentSku(id: string, itemSku: string): string {
+  return `${skuBase(itemSku) || 'ITEM'}-C${id.replace(/[^a-z0-9]/gi, '').slice(-6).toUpperCase()}`
+}
+
 export async function loadRemoteProject(): Promise<RemoteProjectState | undefined> {
   if (!supabase) return undefined
   const userId = await getUserId()
@@ -64,7 +82,7 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
     supabase.from('marketplace_items').select('*').order('created_at'),
     supabase.from('cnc_components').select('*').order('date_imported'),
     supabase.from('sheet_projects').select('*').eq('id', userId).maybeSingle<ProjectRow>(),
-    supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
+    supabase.from('sheet_history').select('*').order('saved_at', { ascending: false }),
   ])
 
   if (itemsResult.error || componentsResult.error) {
@@ -74,17 +92,23 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
 
   const items: MarketplaceItem[] = (itemsResult.data ?? []).map((row) => ({
     id: row.id,
+    ownerId: row.owner_id,
+    sku: row.sku ?? fallbackItemSku(row.id, row.name),
     name: row.name,
     description: row.description ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
 
+  const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
   const parts: Part[] = ((componentsResult.data ?? []) as ComponentRow[]).map((row) => {
     const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, row.item_id)
+    const itemSku = itemSkuById.get(row.item_id) ?? 'ITEM'
     return {
       ...part,
       id: row.id,
+      ownerId: row.owner_id,
+      sku: row.sku ?? fallbackComponentSku(row.id, itemSku),
       name: row.name,
       dateImported: row.date_imported,
     }
@@ -118,11 +142,13 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
   const userId = await getUserId()
   if (!userId) return { ok: false, error: 'You are not signed in.' }
 
-  if (items.length > 0) {
+  const saveableItems = items.filter((item) => !item.ownerId || item.ownerId === userId)
+  if (saveableItems.length > 0) {
     const itemsResult = await supabase.from('marketplace_items').upsert(
-      items.map((item) => ({
+      saveableItems.map((item) => ({
         id: item.id,
         owner_id: userId,
+        sku: item.sku,
         name: item.name,
         description: item.description,
         created_at: item.createdAt,
@@ -135,13 +161,14 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     }
   }
 
-  const saveableParts = parts.filter((part) => part.itemId)
+  const saveableParts = parts.filter((part) => part.itemId && (!part.ownerId || part.ownerId === userId))
   if (saveableParts.length > 0) {
     const componentsResult = await supabase.from('cnc_components').upsert(
       saveableParts.map((part) => ({
         id: part.id,
         owner_id: userId,
         item_id: part.itemId,
+        sku: part.sku,
         name: part.name,
         original_filename: part.originalFilename,
         gcode: part.gcode,

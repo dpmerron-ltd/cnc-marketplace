@@ -25,11 +25,14 @@ import { GCodeSettings } from './ui/GCodeSettings'
 import { HistoryPage } from './ui/HistoryPage'
 import { LoginPage } from './ui/LoginPage'
 import { MarketplacePage } from './ui/MarketplacePage'
+import { MfaPage } from './ui/MfaPage'
+import type { MfaEnrollment } from './ui/MfaPage'
 import { PartLibrary } from './ui/PartLibrary'
 import { PropertiesPanel } from './ui/PropertiesPanel'
 import { SheetEditor } from './ui/SheetEditor'
 
 const defaultSheet: Sheet = {
+  name: 'Untitled Sheet',
   width: 1220,
   height: 1220,
   spacing: 5,
@@ -79,6 +82,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
   return {
     ...defaultSheet,
     ...sheet,
+    name: sheet.name?.trim() || defaultSheet.name,
     gcodeSettings,
     gcodePresets: normalizedPresets,
     defaultGcodePresetId: sheet.defaultGcodePresetId ?? defaultSheet.defaultGcodePresetId,
@@ -110,6 +114,44 @@ function stem(filename: string): string {
   return filename.replace(/\.[^.]+$/, '').toLowerCase()
 }
 
+function skuBase(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function shortCode(): string {
+  return crypto.randomUUID().slice(0, 6).toUpperCase()
+}
+
+function makeItemSku(name: string): string {
+  return `${skuBase(name) || 'ITEM'}-${shortCode()}`
+}
+
+function makeComponentSku(itemSku: string, index: number): string {
+  return `${skuBase(itemSku) || 'ITEM'}-C${String(index).padStart(3, '0')}`
+}
+
+function filenameSafe(value: string): string {
+  return (skuBase(value).toLowerCase() || 'combined-sheet').replace(/-+/g, '-')
+}
+
+function normalizeItem(item: MarketplaceItem): MarketplaceItem {
+  return {
+    ...item,
+    sku: item.sku || makeItemSku(item.name),
+  }
+}
+
+function normalizePart(part: Part, itemSku?: string, index = 0): Part {
+  return {
+    ...part,
+    sku: part.sku || makeComponentSku(itemSku ?? 'COMP', index + 1),
+  }
+}
+
 function newInstance(partId: string, x: number, y: number): PartInstance {
   return {
     id: crypto.randomUUID(),
@@ -125,6 +167,7 @@ function newItem(name = 'Untitled Item'): MarketplaceItem {
   const now = new Date().toISOString()
   return {
     id: crypto.randomUUID(),
+    sku: makeItemSku(name),
     name,
     description: '',
     createdAt: now,
@@ -141,6 +184,13 @@ interface AppPersistenceState {
   restored: boolean
 }
 
+interface MfaFactor {
+  id: string
+  factor_type: string
+  status: string
+  friendly_name?: string
+}
+
 function projectToAppState(project: Project | undefined): AppPersistenceState {
   if (!project) {
     return {
@@ -153,10 +203,18 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
   }
 
   if (project.items && project.items.length > 0) {
-    const fallbackItemId = project.items[0].id
-    const parts = project.parts.map((part) => ({ ...part, itemId: part.itemId ?? fallbackItemId }))
+    const items = project.items.map(normalizeItem)
+    const fallbackItemId = items[0].id
+    const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
+    const partSequenceByItem = new Map<string, number>()
+    const parts = project.parts.map((part) => {
+      const itemId = part.itemId ?? fallbackItemId
+      const nextIndex = (partSequenceByItem.get(itemId) ?? 0) + 1
+      partSequenceByItem.set(itemId, nextIndex)
+      return normalizePart({ ...part, itemId }, itemSkuById.get(itemId), nextIndex - 1)
+    })
     return {
-      items: project.items,
+      items,
       parts,
       sheet: pruneMissingSheetInstances(normalizeSheet(project.sheet), parts),
       sheetHistory: project.sheetHistory ?? [],
@@ -166,7 +224,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
   }
 
   const legacyItem = newItem('Imported Components')
-  const parts = project.parts.map((part) => ({ ...part, itemId: part.itemId ?? legacyItem.id }))
+  const parts = project.parts.map((part, index) => normalizePart({ ...part, itemId: part.itemId ?? legacyItem.id }, legacyItem.sku, index))
   return {
     items: [legacyItem],
     parts,
@@ -234,6 +292,13 @@ function App() {
   const [preview, setPreview] = useState<string>()
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
+  const [mfaReady, setMfaReady] = useState(!supabase)
+  const [mfaMode, setMfaMode] = useState<'enroll' | 'challenge'>('enroll')
+  const [mfaFactors, setMfaFactors] = useState<MfaFactor[]>([])
+  const [mfaEnrollment, setMfaEnrollment] = useState<MfaEnrollment>()
+  const [mfaError, setMfaError] = useState<string>()
+  const [mfaBusy, setMfaBusy] = useState(false)
+  const [userId, setUserId] = useState<string>()
   const [userEmail, setUserEmail] = useState<string>()
   const importProjectRef = useRef<HTMLInputElement>(null)
   const remoteHydratedRef = useRef(false)
@@ -246,8 +311,93 @@ function App() {
   const errors = issues.filter((issue) => issue.level === 'error')
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
+  function canEditItem(item?: MarketplaceItem): boolean {
+    return Boolean(item && (!item.ownerId || item.ownerId === userId))
+  }
+
+  async function refreshMfaState(): Promise<boolean> {
+    if (!supabase) return true
+
+    const [aalResult, factorsResult] = await Promise.all([
+      supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+      supabase.auth.mfa.listFactors(),
+    ])
+
+    if (aalResult.error) {
+      setMfaReady(false)
+      setMfaMode('challenge')
+      setMfaError(aalResult.error.message)
+      return false
+    }
+
+    const verifiedTotpFactors = ((factorsResult.data?.totp ?? []) as MfaFactor[]).filter((factor) => factor.status === 'verified')
+    setMfaFactors(verifiedTotpFactors)
+    setMfaEnrollment(undefined)
+
+    if (aalResult.data.currentLevel === 'aal2') {
+      setMfaReady(true)
+      setMfaError(undefined)
+      return true
+    }
+
+    setMfaReady(false)
+    setMfaMode(verifiedTotpFactors.length > 0 ? 'challenge' : 'enroll')
+    setMfaError(factorsResult.error?.message)
+    return false
+  }
+
+  async function startMfaEnrollment() {
+    if (!supabase) return
+    setMfaBusy(true)
+    setMfaError(undefined)
+    const result = await supabase.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: 'Microsoft Authenticator',
+    })
+    setMfaBusy(false)
+
+    if (result.error || !result.data) {
+      setMfaError(result.error?.message ?? 'Could not start two-factor setup.')
+      return
+    }
+
+    setMfaEnrollment({
+      factorId: result.data.id,
+      qrCode: result.data.totp.qr_code,
+      secret: result.data.totp.secret,
+    })
+  }
+
+  async function verifyMfaCode(code: string) {
+    if (!supabase) return
+    const client = supabase
+    const factorId = mfaEnrollment?.factorId ?? mfaFactors[0]?.id
+    if (!factorId) {
+      setMfaError('No authenticator factor is available.')
+      return
+    }
+
+    setMfaBusy(true)
+    setMfaError(undefined)
+    const result = mfaEnrollment
+      ? await client.auth.mfa.challenge({ factorId }).then(async (challengeResult) => {
+          if (challengeResult.error || !challengeResult.data) return { error: challengeResult.error ?? new Error('Could not create MFA challenge.') }
+          return client.auth.mfa.verify({ factorId, challengeId: challengeResult.data.id, code })
+        })
+      : await client.auth.mfa.challengeAndVerify({ factorId, code })
+    setMfaBusy(false)
+
+    if (result.error) {
+      setMfaError(result.error.message)
+      return
+    }
+
+    await refreshMfaState()
+    setStatus('Two-factor authentication verified.')
+  }
+
   useEffect(() => {
-    if (!userEmail) return
+    if (!userEmail || !mfaReady) return
 
     const timeout = window.setTimeout(() => {
       saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() })
@@ -259,10 +409,10 @@ function App() {
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, selectedItemId, sheet, sheetHistory, userEmail])
+  }, [items, parts, selectedItemId, sheet, sheetHistory, userEmail, mfaReady])
 
   useEffect(() => {
-    if (!canUseSupabase() || !userEmail) return
+    if (!canUseSupabase() || !userEmail || !mfaReady) return
 
     let cancelled = false
     void loadRemoteProject().then((remoteProject) => {
@@ -288,20 +438,29 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [userEmail])
+  }, [userEmail, mfaReady])
 
   useEffect(() => {
     if (!supabase) return
 
     void supabase.auth.getSession().then((result) => {
+      setUserId(result.data.session?.user.id)
       setUserEmail(result.data.session?.user.email)
+      if (result.data.session?.user.email) void refreshMfaState()
       setAuthReady(true)
     })
 
     const listener = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user.id)
       setUserEmail(session?.user.email)
+      if (session?.user.email) void refreshMfaState()
       if (!session) {
         remoteHydratedRef.current = false
+        setMfaReady(false)
+        setMfaMode('enroll')
+        setMfaFactors([])
+        setMfaEnrollment(undefined)
+        setMfaError(undefined)
         setItems([])
         setParts([])
         setSheetHistory([])
@@ -311,6 +470,7 @@ function App() {
         setSelectedInstanceId(undefined)
         setPreview(undefined)
         setStatus('Signed out.')
+        setUserId(undefined)
       }
     })
 
@@ -329,6 +489,7 @@ function App() {
 
     if (result.error) return 'Invalid username or password.'
     setStatus('Signed in.')
+    await refreshMfaState()
     return undefined
   }
 
@@ -346,6 +507,12 @@ function App() {
   }
 
   async function importFilesForItem(itemId: string, fileList: FileList) {
+    const targetItem = items.find((item) => item.id === itemId)
+    if (!canEditItem(targetItem)) {
+      setStatus('This shared item can be used on sheets, but only its owner can upload components.')
+      return
+    }
+
     const files = Array.from(fileList)
     const dxfFiles = files.filter((file) => extension(file.name) === 'dxf')
     const gcodeFiles = files.filter((file) => ['nc', 'tap', 'gcode', 'cnc'].includes(extension(file.name)))
@@ -361,7 +528,13 @@ function App() {
       imported.push(createPartFromGCode(file.name, gcode, dxfByStem.get(stem(file.name)), itemId))
     }
 
-    setParts((current) => [...current, ...imported])
+    setParts((current) => {
+      const item = items.find((candidate) => candidate.id === itemId)
+      const itemSku = item?.sku ?? 'ITEM'
+      const existingCount = current.filter((part) => part.itemId === itemId).length
+      const nextImported = imported.map((part, index) => normalizePart(part, itemSku, existingCount + index))
+      return [...current, ...nextImported]
+    })
     setItems((current) => current.map((item) => (item.id === itemId ? { ...item, updatedAt: new Date().toISOString() } : item)))
     setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
   }
@@ -387,10 +560,23 @@ function App() {
   }
 
   function updateMarketplaceItem(itemId: string, patch: Partial<MarketplaceItem>) {
+    const targetItem = items.find((item) => item.id === itemId)
+    if (!canEditItem(targetItem)) {
+      setStatus('Only the owner can edit this shared item.')
+      return
+    }
+
     setItems((current) => current.map((item) => (item.id === itemId ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item)))
   }
 
   function deleteComponent(partId: string) {
+    const part = parts.find((candidate) => candidate.id === partId)
+    const item = part?.itemId ? items.find((candidate) => candidate.id === part.itemId) : undefined
+    if (!canEditItem(item)) {
+      setStatus('Only the owner can remove components from this shared item.')
+      return
+    }
+
     const isPlaced = sheet.instances.some((instance) => instance.partId === partId)
     if (isPlaced) {
       setStatus('Remove this component from the sheet before deleting it from the item.')
@@ -446,7 +632,7 @@ function App() {
     const now = new Date()
     return {
       id: crypto.randomUUID(),
-      name: `Sheet ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`,
+      name: sheet.name.trim() || `Sheet ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`,
       savedAt: now.toISOString(),
       sheet: normalizeSheet({ ...sheet, instances: sheet.instances.map((instance) => ({ ...instance })) }),
       selectedItemId,
@@ -530,8 +716,9 @@ function App() {
       return
     }
 
-    downloadText('combined-sheet.nc', result.gcode, 'application/x-gcode')
-    setStatus('Exported combined-sheet.nc.')
+    const filename = `${filenameSafe(sheet.name)}.nc`
+    downloadText(filename, result.gcode, 'application/x-gcode')
+    setStatus(`Exported ${filename}.`)
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
@@ -558,6 +745,20 @@ function App() {
     return <LoginPage onLogin={login} />
   }
 
+  if (!mfaReady) {
+    return (
+      <MfaPage
+        mode={mfaMode}
+        enrollment={mfaEnrollment}
+        error={mfaError}
+        busy={mfaBusy}
+        onStartEnrollment={startMfaEnrollment}
+        onVerify={verifyMfaCode}
+        onSignOut={() => void signOut()}
+      />
+    )
+  }
+
   return (
     <div className="app">
       <header className="toolbar">
@@ -571,6 +772,10 @@ function App() {
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
         </nav>
         <div className="sheet-controls">
+          <label className="sheet-name-control">
+            Sheet
+            <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
+          </label>
           <label>
             W
             <input type="number" value={sheet.width} onChange={(event) => setSheet({ ...sheet, width: Number(event.target.value) })} />
@@ -601,6 +806,7 @@ function App() {
           items={items}
           parts={parts}
           selectedItemId={selectedItemId}
+          currentUserId={userId}
           onCreateItem={createMarketplaceItem}
           onSelectItem={setSelectedItemId}
           onUpdateItem={updateMarketplaceItem}
@@ -617,10 +823,14 @@ function App() {
       ) : (
         <div className="workspace">
           <PartLibrary
+            items={items}
             parts={visibleParts}
             title={selectedItem ? selectedItem.name : 'Components'}
-            emptyText="Select an item on the Items page, then upload components to add them to the sheet."
+            emptyText="Select an item above or upload components to add them to the sheet."
+            selectedItemId={selectedItemId}
             selectedPartId={selectedPartId}
+            onSelectItem={setSelectedItemId}
+            canImport={canEditItem(selectedItem)}
             onImport={importFiles}
             onAdd={addPart}
             onSelect={setSelectedPartId}

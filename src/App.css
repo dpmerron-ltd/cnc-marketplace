@@ -71,6 +71,10 @@
   width: 74px;
 }
 
+.sheet-controls .sheet-name-control input {
+  width: 180px;
+}
+
 .login-shell {
   min-height: 100vh;
   display: grid;
@@ -207,6 +211,25 @@ button.danger {
   border-radius: 8px;
 }
 
+.mfa-panel {
+  width: min(460px, 100%);
+}
+
+.mfa-qr {
+  width: 220px;
+  height: 220px;
+  justify-self: center;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.mfa-code-form {
+  display: grid;
+  gap: 12px;
+}
+
 .item-card small,
 .item-card span,
 .component-row small {
@@ -224,7 +247,7 @@ button.danger {
 
 .item-edit {
   display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(180px, 280px) minmax(140px, 190px) minmax(260px, 1fr) auto;
   align-items: end;
   gap: 12px;
   padding-bottom: 12px;
@@ -383,10 +406,52 @@ button.danger {
   display: none;
 }
 
+.disabled-file {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .library,
 .properties,
 .settings {
   min-height: 160px;
+}
+
+.library-items {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e5e9ee;
+}
+
+.library-items h2 {
+  font-size: 13px;
+  color: #52606f;
+  text-transform: uppercase;
+}
+
+.library-item-list {
+  display: grid;
+  gap: 6px;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.library-item {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+
+.library-item small {
+  color: #637083;
+}
+
+.library-item.selected {
+  border-color: #1f6feb;
+  background: linear-gradient(180deg, #edf5ff, #f8fbff);
 }
 
 .part-list {
@@ -451,6 +516,28 @@ button.danger {
   fill: #ffffff;
   stroke: #111827;
   stroke-width: 1.8;
+}
+
+.origin-marker {
+  pointer-events: none;
+}
+
+.origin-marker line {
+  stroke: #d92d20;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.origin-marker circle {
+  fill: #d92d20;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+.origin-marker text {
+  fill: #b42318;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .part-outline {

@@ -17,6 +17,7 @@ export interface GCodePreset {
 }
 
 export interface Sheet {
+  name: string
   width: number
   height: number
   spacing: number

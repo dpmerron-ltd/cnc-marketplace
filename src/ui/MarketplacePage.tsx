@@ -5,6 +5,7 @@ interface MarketplacePageProps {
   items: MarketplaceItem[]
   parts: Part[]
   selectedItemId?: string
+  currentUserId?: string
   onCreateItem: () => void
   onSelectItem: (itemId: string) => void
   onUpdateItem: (itemId: string, patch: Partial<MarketplaceItem>) => void
@@ -18,6 +19,7 @@ export function MarketplacePage({
   items,
   parts,
   selectedItemId,
+  currentUserId,
   onCreateItem,
   onSelectItem,
   onUpdateItem,
@@ -28,6 +30,7 @@ export function MarketplacePage({
 }: MarketplacePageProps) {
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
   const selectedParts = selectedItem ? parts.filter((part) => part.itemId === selectedItem.id) : []
+  const canEditSelectedItem = Boolean(selectedItem && (!selectedItem.ownerId || selectedItem.ownerId === currentUserId))
 
   return (
     <section className="marketplace-page">
@@ -48,6 +51,7 @@ export function MarketplacePage({
                 onClick={() => onSelectItem(item.id)}
               >
                 <strong>{item.name}</strong>
+                <small>{item.sku}</small>
                 <small>{count} component{count === 1 ? '' : 's'}</small>
                 {item.description && <span>{item.description}</span>}
               </button>
@@ -67,18 +71,23 @@ export function MarketplacePage({
             <div className="item-edit">
               <label>
                 Item name
-                <input value={selectedItem.name} onChange={(event) => onUpdateItem(selectedItem.id, { name: event.target.value })} />
+                <input disabled={!canEditSelectedItem} value={selectedItem.name} onChange={(event) => onUpdateItem(selectedItem.id, { name: event.target.value })} />
+              </label>
+              <label>
+                SKU
+                <input disabled={!canEditSelectedItem} value={selectedItem.sku} onChange={(event) => onUpdateItem(selectedItem.id, { sku: event.target.value.toUpperCase() })} />
               </label>
               <label>
                 Description
-                <textarea value={selectedItem.description} onChange={(event) => onUpdateItem(selectedItem.id, { description: event.target.value })} />
+                <textarea disabled={!canEditSelectedItem} value={selectedItem.description} onChange={(event) => onUpdateItem(selectedItem.id, { description: event.target.value })} />
               </label>
-              <label className="file-button upload-components">
+              <label className={`file-button upload-components ${canEditSelectedItem ? '' : 'disabled-file'}`}>
                 Upload Components
                 <input
                   type="file"
                   multiple
                   accept=".nc,.tap,.gcode,.cnc,.dxf"
+                  disabled={!canEditSelectedItem}
                   onChange={(event) => {
                     if (event.target.files) onImportComponents(selectedItem.id, event.target.files)
                     event.currentTarget.value = ''
@@ -92,6 +101,7 @@ export function MarketplacePage({
                 <h2>Components</h2>
                 <button type="button" onClick={onOpenSheet}>Open Sheet</button>
               </div>
+              {!canEditSelectedItem && <p className="muted">Shared item. You can add components to sheets; only the owner can edit the item.</p>}
               {selectedParts.length === 0 ? (
                 <p className="muted">Upload one or more pre-generated Estlcam files for this item.</p>
               ) : (
@@ -99,13 +109,14 @@ export function MarketplacePage({
                   <div className="component-row" key={part.id}>
                     <div>
                       <strong>{part.name}</strong>
+                      <small>{part.sku}</small>
                       <small>
                         {part.width.toFixed(1)} x {part.height.toFixed(1)} mm from {part.originalFilename}
                         {part.dxf ? ' + DXF' : ''}
                       </small>
                     </div>
                     <button type="button" onClick={() => onAddToSheet(part.id)}>Add to Sheet</button>
-                    <button type="button" className="danger" onClick={() => onDeleteComponent(part.id)}>Remove</button>
+                    <button type="button" className="danger" disabled={!canEditSelectedItem} onClick={() => onDeleteComponent(part.id)}>Remove</button>
                   </div>
                 ))
               )}
