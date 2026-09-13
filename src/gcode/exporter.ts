@@ -15,13 +15,8 @@ export interface SheetExportResult extends ExportResult {
   sheetIndex: number
 }
 
-function lineWithXyFeedOverride(line: ParsedLine, feedRate?: number): string {
+function lineWithFeedOverride(line: ParsedLine, feedRate?: number): string {
   if (!feedRate || feedRate <= 0) return line.raw
-  const motion = line.effectiveMotion
-  const hasXy = line.words.some((word) => word.letter === 'X' || word.letter === 'Y')
-  if (!hasXy || motion === 'G00') return line.raw
-  if (motion !== 'G01' && motion !== 'G02' && motion !== 'G03') return line.raw
-
   const feedIndex = line.words.findIndex((word) => word.letter === 'F')
   const words = [...line.words]
   const feedWord = { letter: 'F', value: feedRate, raw: `F${formatNumber(feedRate)}` }
@@ -29,6 +24,34 @@ function lineWithXyFeedOverride(line: ParsedLine, feedRate?: number): string {
   else words.push(feedWord)
 
   return wordsToLine(words, line.comment)
+}
+
+function wordValue(line: ParsedLine, letter: string): number | undefined {
+  return line.words.find((word) => word.letter === letter)?.value
+}
+
+function lineWithToolFeed(line: ParsedLine, previousZ: number | undefined, sheet: Sheet): { raw: string; nextZ: number | undefined; mode?: 'cut' | 'plunge' | 'ramp' } {
+  const z = wordValue(line, 'Z')
+  const nextZ = z ?? previousZ
+  const motion = line.effectiveMotion
+  if (!sheet.gcodeSettings.applyXyFeedRate || (motion !== 'G01' && motion !== 'G02' && motion !== 'G03')) {
+    return { raw: line.raw, nextZ }
+  }
+
+  const hasXy = line.words.some((word) => word.letter === 'X' || word.letter === 'Y')
+  const hasZ = z !== undefined
+  const movesDown = hasZ && previousZ !== undefined && z < previousZ - 0.0001
+  if (movesDown && hasXy) {
+    return { raw: lineWithFeedOverride(line, sheet.gcodeSettings.rampFeedRateMmPerMinute), nextZ, mode: 'ramp' }
+  }
+  if (movesDown) {
+    return { raw: lineWithFeedOverride(line, sheet.gcodeSettings.plungeFeedRateMmPerMinute), nextZ, mode: 'plunge' }
+  }
+  if (hasXy) {
+    return { raw: lineWithFeedOverride(line, sheet.gcodeSettings.cuttingFeedRateMmPerMinute), nextZ, mode: 'cut' }
+  }
+
+  return { raw: line.raw, nextZ }
 }
 
 function transformedInstanceLines(
@@ -40,9 +63,7 @@ function transformedInstanceLines(
   const output: string[] = []
   const errors: string[] = []
   const warnings: string[] = []
-  const xyFeedRateMmPerMinute = sheet.gcodeSettings.xyFeedRateMmPerSecond
-    ? sheet.gcodeSettings.xyFeedRateMmPerSecond * 60
-    : undefined
+  const feedModes = new Set<'cut' | 'plunge' | 'ramp'>()
   let instanceNumber = startingInstanceNumber
 
   for (const instance of sheet.instances.filter((candidate) => instanceIds.includes(candidate.id))) {
@@ -68,13 +89,23 @@ function transformedInstanceLines(
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
     if (sheet.gcodeSettings.applyXyFeedRate) {
-      warnings.push(
-        `Applied XY feed override ${formatNumber(sheet.gcodeSettings.xyFeedRateMmPerSecond ?? 0)} mm/s as F${formatNumber(xyFeedRateMmPerMinute ?? 0)} mm/min.`,
-      )
-      output.push(...transformed.transformedLines.map((line) => lineWithXyFeedOverride(line, xyFeedRateMmPerMinute)))
+      let previousZ: number | undefined = 0
+      const feedLines = transformed.transformedLines.map((line) => {
+        const result = lineWithToolFeed(line, previousZ, sheet)
+        previousZ = result.nextZ
+        if (result.mode) feedModes.add(result.mode)
+        return result.raw
+      })
+      output.push(...feedLines)
     } else {
       output.push(...transformed.lines)
     }
+  }
+
+  if (feedModes.size > 0) {
+    warnings.push(
+      `Applied feed overrides: cut F${formatNumber(sheet.gcodeSettings.cuttingFeedRateMmPerMinute ?? 0)}, plunge F${formatNumber(sheet.gcodeSettings.plungeFeedRateMmPerMinute ?? 0)}, ramp F${formatNumber(sheet.gcodeSettings.rampFeedRateMmPerMinute ?? 0)} mm/min.`,
+    )
   }
 
   return { lines: output, errors, warnings, nextInstanceNumber: instanceNumber }

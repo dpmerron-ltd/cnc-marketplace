@@ -46,6 +46,9 @@ const defaultSheet: Sheet = {
     endGcode: 'M05\nM30',
     safeZ: 5,
     maxDepthOfCut: 6,
+    cuttingFeedRateMmPerMinute: 4500,
+    plungeFeedRateMmPerMinute: 600,
+    rampFeedRateMmPerMinute: 600,
     xyFeedRateMmPerSecond: 50,
     applyXyFeedRate: false,
   },
@@ -59,6 +62,9 @@ const defaultSheet: Sheet = {
         endGcode: 'M05\nM30',
         safeZ: 5,
         maxDepthOfCut: 6,
+        cuttingFeedRateMmPerMinute: 4500,
+        plungeFeedRateMmPerMinute: 600,
+        rampFeedRateMmPerMinute: 600,
         xyFeedRateMmPerSecond: 50,
         applyXyFeedRate: false,
       },
@@ -75,11 +81,29 @@ function normalizeSheet(sheet: Sheet): Sheet {
   if (gcodeSettings.xyFeedRateMmPerSecond === undefined && gcodeSettings.xyFeedRate !== undefined) {
     gcodeSettings.xyFeedRateMmPerSecond = gcodeSettings.xyFeedRate / 60
   }
+  if (gcodeSettings.cuttingFeedRateMmPerMinute === undefined && gcodeSettings.xyFeedRateMmPerSecond !== undefined) {
+    gcodeSettings.cuttingFeedRateMmPerMinute = gcodeSettings.xyFeedRateMmPerSecond * 60
+  }
+  if (gcodeSettings.plungeFeedRateMmPerMinute === undefined) {
+    gcodeSettings.plungeFeedRateMmPerMinute = Math.min(gcodeSettings.cuttingFeedRateMmPerMinute ?? 600, 600)
+  }
+  if (gcodeSettings.rampFeedRateMmPerMinute === undefined) {
+    gcodeSettings.rampFeedRateMmPerMinute = gcodeSettings.plungeFeedRateMmPerMinute
+  }
   const presets = sheet.gcodePresets && sheet.gcodePresets.length > 0 ? sheet.gcodePresets : defaultSheet.gcodePresets
   const normalizedPresets = presets?.map((preset) => {
     const settings = { ...defaultSheet.gcodeSettings, ...preset.settings }
     if (settings.xyFeedRateMmPerSecond === undefined && settings.xyFeedRate !== undefined) {
       settings.xyFeedRateMmPerSecond = settings.xyFeedRate / 60
+    }
+    if (settings.cuttingFeedRateMmPerMinute === undefined && settings.xyFeedRateMmPerSecond !== undefined) {
+      settings.cuttingFeedRateMmPerMinute = settings.xyFeedRateMmPerSecond * 60
+    }
+    if (settings.plungeFeedRateMmPerMinute === undefined) {
+      settings.plungeFeedRateMmPerMinute = Math.min(settings.cuttingFeedRateMmPerMinute ?? 600, 600)
+    }
+    if (settings.rampFeedRateMmPerMinute === undefined) {
+      settings.rampFeedRateMmPerMinute = settings.plungeFeedRateMmPerMinute
     }
     return { ...preset, settings }
   })

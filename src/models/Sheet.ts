@@ -6,6 +6,9 @@ export interface GCodeSettings {
   endGcode: string
   safeZ: number
   maxDepthOfCut?: number
+  cuttingFeedRateMmPerMinute?: number
+  plungeFeedRateMmPerMinute?: number
+  rampFeedRateMmPerMinute?: number
   xyFeedRateMmPerSecond?: number
   xyFeedRate?: number
   applyXyFeedRate?: boolean

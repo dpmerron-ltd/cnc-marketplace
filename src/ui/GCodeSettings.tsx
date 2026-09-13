@@ -100,17 +100,39 @@ export function GCodeSettings({
           checked={Boolean(settings.applyXyFeedRate)}
           onChange={(event) => onChange({ ...settings, applyXyFeedRate: event.target.checked })}
         />
-        Override XY cutting feed
+        Override cutting, plunge and ramp feeds
       </label>
       <label>
-        XY feed rate (mm/s)
+        Cutting Feed Rate (mm/min)
         <input
           type="number"
           min={0}
-          step={0.1}
-          value={settings.xyFeedRateMmPerSecond ?? ''}
+          step={1}
+          value={settings.cuttingFeedRateMmPerMinute ?? ''}
           disabled={!settings.applyXyFeedRate}
-          onChange={(event) => onChange({ ...settings, xyFeedRateMmPerSecond: event.target.value === '' ? undefined : Number(event.target.value) })}
+          onChange={(event) => onChange({ ...settings, cuttingFeedRateMmPerMinute: event.target.value === '' ? undefined : Number(event.target.value) })}
+        />
+      </label>
+      <label title="Feed rate used for pure downward Z cutting moves.">
+        Plunge Feed Rate (mm/min)
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={settings.plungeFeedRateMmPerMinute ?? ''}
+          disabled={!settings.applyXyFeedRate}
+          onChange={(event) => onChange({ ...settings, plungeFeedRateMmPerMinute: event.target.value === '' ? undefined : Number(event.target.value) })}
+        />
+      </label>
+      <label title="Feed rate used for cutting moves that simultaneously change XY position and Z depth.">
+        Ramp Feed Rate (mm/min)
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={settings.rampFeedRateMmPerMinute ?? ''}
+          disabled={!settings.applyXyFeedRate}
+          onChange={(event) => onChange({ ...settings, rampFeedRateMmPerMinute: event.target.value === '' ? undefined : Number(event.target.value) })}
         />
       </label>
       <label>
