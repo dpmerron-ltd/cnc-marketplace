@@ -1,0 +1,94 @@
+import type { DistanceMode, GCodeWord, MotionCommand, ParsedLine, ParsedProgram, Units } from './types'
+
+const wordPattern = /([A-Za-z])([+-]?(?:\d+\.?\d*|\.\d+))/g
+
+function normalizeG(value: number): string {
+  return `G${Math.trunc(value).toString().padStart(2, '0')}`
+}
+
+function normalizeM(value: number): string {
+  return `M${Math.trunc(value).toString().padStart(2, '0')}`
+}
+
+function splitComment(raw: string): { body: string; comment?: string } {
+  const parenIndex = raw.indexOf('(')
+  const semiIndex = raw.indexOf(';')
+  const candidates = [parenIndex, semiIndex].filter((index) => index >= 0)
+  if (candidates.length === 0) return { body: raw }
+  const first = Math.min(...candidates)
+  return { body: raw.slice(0, first), comment: raw.slice(first).trim() }
+}
+
+function isMotion(command: string): command is MotionCommand {
+  return command === 'G00' || command === 'G01' || command === 'G02' || command === 'G03'
+}
+
+export function parseLine(raw: string, lineNumber: number): ParsedLine {
+  const { body, comment } = splitComment(raw)
+  const words: GCodeWord[] = []
+  const warnings: string[] = []
+  let match: RegExpExecArray | null
+
+  wordPattern.lastIndex = 0
+  while ((match = wordPattern.exec(body)) !== null) {
+    words.push({ letter: match[1].toUpperCase(), value: Number(match[2]), raw: match[0] })
+  }
+
+  const commandWord = words.find((word) => word.letter === 'G' || word.letter === 'M')
+  const command =
+    commandWord?.letter === 'G'
+      ? normalizeG(commandWord.value)
+      : commandWord?.letter === 'M'
+        ? normalizeM(commandWord.value)
+        : undefined
+
+  if (body.trim() && words.length === 0) warnings.push(`Line ${lineNumber + 1}: no parseable G-code words found.`)
+  return { lineNumber, raw, words, comment, command, warnings }
+}
+
+export function parseGCode(source: string): ParsedProgram {
+  const lines = source.replace(/\r\n/g, '\n').split('\n').map(parseLine)
+  const warnings: string[] = []
+  let units: Units | 'unknown' = 'unknown'
+  let distanceMode: DistanceMode | 'unknown' = 'unknown'
+  let modalMotion: MotionCommand | undefined
+
+  for (const line of lines) {
+    for (const word of line.words) {
+      if (word.letter !== 'G') continue
+      const g = normalizeG(word.value)
+      if (g === 'G20') units = 'inch'
+      if (g === 'G21') units = 'mm'
+      if (g === 'G90') distanceMode = 'absolute'
+      if (g === 'G91') {
+        distanceMode = 'incremental'
+        const warning = `Line ${line.lineNumber + 1}: G91 incremental positioning is parsed but export is blocked in the MVP.`
+        warnings.push(warning)
+        line.warnings.push(warning)
+        line.unsupportedForTransform = 'G91 incremental positioning'
+      }
+      if (g === 'G18' || g === 'G19') {
+        const warning = `Line ${line.lineNumber + 1}: only G17 XY plane arcs are supported for transformation.`
+        warnings.push(warning)
+        line.warnings.push(warning)
+        line.unsupportedForTransform = `${g} non-XY plane`
+      }
+      if (isMotion(g)) {
+        modalMotion = g
+        line.command = g
+      }
+    }
+
+    const hasAxis = line.words.some((word) => ['X', 'Y', 'Z', 'I', 'J'].includes(word.letter))
+    if (line.command && isMotion(line.command)) line.effectiveMotion = line.command
+    else if (hasAxis && modalMotion) line.effectiveMotion = modalMotion
+    warnings.push(...line.warnings)
+  }
+
+  const firstMotionIndex = lines.findIndex((line) => line.effectiveMotion === 'G01' || line.effectiveMotion === 'G02' || line.effectiveMotion === 'G03')
+  const endIndex = lines.findIndex((line) => line.words.some((word) => word.letter === 'M' && [2, 5, 30].includes(Math.trunc(word.value))))
+  const bodyStart = firstMotionIndex >= 0 ? firstMotionIndex : 0
+  const bodyEnd = endIndex >= 0 && endIndex > bodyStart ? endIndex : lines.length
+
+  return { lines, warnings, units, distanceMode, startLines: lines.slice(0, bodyStart), bodyLines: lines.slice(bodyStart, bodyEnd), endLines: lines.slice(bodyEnd) }
+}
