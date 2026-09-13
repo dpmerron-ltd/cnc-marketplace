@@ -91,6 +91,7 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
   output.push(`(Sheet: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
   output.push(`(Physical sheets: ${sheetCount})`)
   output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
+  output.push(...sheet.gcodeSettings.spindleStartGcode.split('\n').filter(Boolean))
 
   let instanceNumber = 0
   for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
@@ -132,6 +133,7 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExp
     output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
     output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
     output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
+    output.push(...sheet.gcodeSettings.spindleStartGcode.split('\n').filter(Boolean))
     output.push(...transformed.lines)
     output.push('')
     output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)

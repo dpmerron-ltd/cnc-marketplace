@@ -25,6 +25,7 @@ function makeSheet(instances: PartInstance[]): Sheet {
     instances,
     gcodeSettings: {
       startGcode: '',
+      spindleStartGcode: '',
       endGcode: '',
       safeZ: 5,
       maxDepthOfCut: 6,

@@ -2,6 +2,7 @@ import type { PartInstance } from './PartInstance'
 
 export interface GCodeSettings {
   startGcode: string
+  spindleStartGcode: string
   endGcode: string
   safeZ: number
   maxDepthOfCut?: number

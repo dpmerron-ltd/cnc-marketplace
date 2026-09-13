@@ -118,6 +118,10 @@ export function GCodeSettings({
         <textarea value={settings.startGcode} onChange={(event) => onChange({ ...settings, startGcode: event.target.value })} />
       </label>
       <label>
+        Spindle start G-code
+        <textarea value={settings.spindleStartGcode} onChange={(event) => onChange({ ...settings, spindleStartGcode: event.target.value })} />
+      </label>
+      <label>
         End G-code
         <textarea value={settings.endGcode} onChange={(event) => onChange({ ...settings, endGcode: event.target.value })} />
       </label>

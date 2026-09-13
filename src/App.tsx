@@ -40,6 +40,7 @@ const defaultSheet: Sheet = {
   instances: [],
   gcodeSettings: {
     startGcode: 'G21\nG17\nG90\nG94',
+    spindleStartGcode: 'S18000\nM03',
     endGcode: 'M05\nM30',
     safeZ: 5,
     maxDepthOfCut: 6,
@@ -52,6 +53,7 @@ const defaultSheet: Sheet = {
       name: 'Estlcam metric',
       settings: {
         startGcode: 'G21\nG17\nG90\nG94',
+        spindleStartGcode: 'S18000\nM03',
         endGcode: 'M05\nM30',
         safeZ: 5,
         maxDepthOfCut: 6,
