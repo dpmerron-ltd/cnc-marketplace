@@ -27,6 +27,11 @@ export interface RemoteProjectState {
   selectedItemId?: string
 }
 
+export interface RemoteSaveResult {
+  ok: boolean
+  error?: string
+}
+
 export function canUseSupabase(): boolean {
   return isSupabaseConfigured && Boolean(supabase)
 }
@@ -81,29 +86,32 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   }
 }
 
-export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId?: string): Promise<boolean> {
-  if (!supabase) return false
+export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId?: string): Promise<RemoteSaveResult> {
+  if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
-  if (!userId) return false
+  if (!userId) return { ok: false, error: 'You are not signed in.' }
 
-  const itemsResult = await supabase.from('marketplace_items').upsert(
-    items.map((item) => ({
-      id: item.id,
-      owner_id: userId,
-      name: item.name,
-      description: item.description,
-      created_at: item.createdAt,
-      updated_at: item.updatedAt,
-    })),
-  )
-  if (itemsResult.error) {
-    console.warn('Supabase item save failed.', itemsResult.error)
-    return false
+  if (items.length > 0) {
+    const itemsResult = await supabase.from('marketplace_items').upsert(
+      items.map((item) => ({
+        id: item.id,
+        owner_id: userId,
+        name: item.name,
+        description: item.description,
+        created_at: item.createdAt,
+        updated_at: item.updatedAt,
+      })),
+    )
+    if (itemsResult.error) {
+      console.warn('Supabase item save failed.', itemsResult.error)
+      return { ok: false, error: itemsResult.error.message }
+    }
   }
 
-  if (parts.length > 0) {
+  const saveableParts = parts.filter((part) => part.itemId)
+  if (saveableParts.length > 0) {
     const componentsResult = await supabase.from('cnc_components').upsert(
-      parts.map((part) => ({
+      saveableParts.map((part) => ({
         id: part.id,
         owner_id: userId,
         item_id: part.itemId,
@@ -121,7 +129,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     )
     if (componentsResult.error) {
       console.warn('Supabase component save failed.', componentsResult.error)
-      return false
+      return { ok: false, error: componentsResult.error.message }
     }
   }
 
@@ -135,10 +143,10 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
 
   if (projectResult.error) {
     console.warn('Supabase project save failed.', projectResult.error)
-    return false
+    return { ok: false, error: projectResult.error.message }
   }
 
-  return true
+  return { ok: true }
 }
 
 export async function deleteRemoteComponent(partId: string): Promise<void> {

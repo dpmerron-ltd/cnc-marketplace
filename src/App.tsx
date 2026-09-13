@@ -185,7 +185,9 @@ function App() {
     const timeout = window.setTimeout(() => {
       saveProject({ version: 1, items, parts, sheet, savedAt: new Date().toISOString() })
       if (remoteHydratedRef.current && canUseSupabase()) {
-        void saveRemoteProject(items, parts, sheet, selectedItemId)
+        void saveRemoteProject(items, parts, sheet, selectedItemId).then((result) => {
+          if (!result.ok) setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
+        })
       }
     }, 300)
 
@@ -261,7 +263,16 @@ function App() {
     return undefined
   }
 
-  function signOut() {
+  async function signOut() {
+    saveProject(buildProject())
+    if (remoteHydratedRef.current && canUseSupabase()) {
+      const result = await saveRemoteProject(items, parts, sheet, selectedItemId)
+      if (!result.ok) {
+        setStatus(`Sign out blocked. Cloud save failed: ${result.error ?? 'unknown error'}`)
+        return
+      }
+    }
+
     void supabase?.auth.signOut()
   }
 
@@ -355,8 +366,20 @@ function App() {
     return { version: 1, items, parts, sheet, savedAt: new Date().toISOString() }
   }
 
-  function saveCurrentProject() {
-    setStatus(saveProject(buildProject()) ? 'Saved project to local browser storage.' : 'Could not save project; browser storage may be full.')
+  async function saveCurrentProject() {
+    const localSaved = saveProject(buildProject())
+    if (!localSaved) {
+      setStatus('Could not save project; browser storage may be full.')
+      return
+    }
+
+    if (remoteHydratedRef.current && canUseSupabase()) {
+      const remoteSaved = await saveRemoteProject(items, parts, sheet, selectedItemId)
+      setStatus(remoteSaved.ok ? 'Saved project to Supabase.' : `Cloud save failed: ${remoteSaved.error ?? 'unknown error'}`)
+      return
+    }
+
+    setStatus('Saved project to local browser storage.')
   }
 
   function loadSavedProject() {
@@ -423,7 +446,7 @@ function App() {
       <header className="toolbar">
         <h1>CNC Marketplace</h1>
         <span className="signed-in">{userEmail}</span>
-        <button type="button" onClick={signOut}>Sign Out</button>
+        <button type="button" onClick={() => void signOut()}>Sign Out</button>
         <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
         <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
         <label>
@@ -440,7 +463,7 @@ function App() {
           <input type="number" value={sheet.spacing} onChange={(event) => setSheet({ ...sheet, spacing: Number(event.target.value) })} />
         </label>
         <button type="button" onClick={() => setSheet({ ...sheet, instances: autoNest(parts, sheet) })}>Auto Nest</button>
-        <button type="button" onClick={saveCurrentProject}>Save Sheet</button>
+        <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
         <button type="button" onClick={loadSavedProject}>Load Sheet</button>
         <button type="button" onClick={previewGCode}>Preview G-code</button>
         <button type="button" className="primary" onClick={exportGCode}>Export G-code</button>
