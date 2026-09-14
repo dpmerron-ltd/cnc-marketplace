@@ -144,8 +144,12 @@ function transformedInstanceLines(
     warnings.push(...transformed.warnings)
     const depthScale = depthScaleForPart(part, sheet)
     const transformedLines = transformed.transformedLines.map((line) => lineWithDepthOverride(line, depthScale))
+    const rapidBelowSurfaceCount = transformedLines.filter((line) => line.effectiveMotion === 'G00' && (wordValue(line, 'Z') ?? 0) < 0).length
     if (depthScale !== undefined) {
       warnings.push(`Applied final depth override to ${part.name}: exported deepest Z is -${formatNumber(sheet.gcodeSettings.finalCutDepth ?? 0)} mm.`)
+    }
+    if (rapidBelowSurfaceCount > 0) {
+      warnings.push(`${part.name} contains ${rapidBelowSurfaceCount} rapid Z move${rapidBelowSurfaceCount === 1 ? '' : 's'} below Z0; verify the source CAM clearance path before cutting.`)
     }
     if (sheet.gcodeSettings.applyXyFeedRate) {
       let previousZ: number | undefined = 0

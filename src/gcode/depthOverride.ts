@@ -35,6 +35,7 @@ export function scaleZDepth(z: number, scale?: number): number {
 
 export function lineWithDepthOverride(line: ParsedLine, scale?: number): ParsedLine {
   if (scale === undefined || scale <= 0) return line
+  if (line.effectiveMotion !== 'G01' && line.effectiveMotion !== 'G02' && line.effectiveMotion !== 'G03') return line
   const zIndex = line.words.findIndex((word) => word.letter === 'Z')
   if (zIndex < 0) return line
 
