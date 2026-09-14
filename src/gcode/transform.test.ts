@@ -38,6 +38,24 @@ describe('G-code parser and coordinate transformer', () => {
     expect(result.lines).toContain('G02 X110 Y210 I5 J0')
   })
 
+  it('keeps radius arcs without inventing zero I/J offsets', () => {
+    const part = makePart('G21\nG90\nG01 X0 Y0\nG02 X10 Y10 R5\nM30')
+    const result = transformPartProgram(part, makeInstance({ rotation: 90 }))
+    expect(result.errors).toEqual([])
+    expect(result.lines).toContain('G02 X100 Y210 R5')
+    expect(result.lines.some((line) => line.includes('I0 J0'))).toBe(false)
+  })
+
+  it('reports arcs with no usable center or radius before export', () => {
+    const part = makePart('G21\nG90\nG01 X0 Y0\nG02 X10 Y10\nG03 X20 Y20 I0 J0\nG02 X30 Y30 R0\nM30')
+    const result = transformPartProgram(part, makeInstance())
+    expect(result.errors).toEqual([
+      'test line 4: arc move is missing I/J center offsets or an R radius.',
+      'test line 5: arc move has a zero I/J center offset.',
+      'test line 6: arc move has a zero R radius.',
+    ])
+  })
+
   it('reconstructs missing modal axes when rotation needs both coordinates', () => {
     const part = makePart('G21\nG90\nG01 X0 Y0\nG01 X10\nG01 Y20\nM30')
     const result = transformPartProgram(part, makeInstance({ rotation: 90 }))

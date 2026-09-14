@@ -72,10 +72,22 @@ export function transformPartProgram(part: Part, instance: PartInstance): Transf
       nextWords = replaceOrAppend(nextWords, 'Y', transformedEnd.y)
 
       if (motion === 'G02' || motion === 'G03') {
-        const rotatedIJ = rotateVector({ x: getWord(line, 'I') ?? 0, y: getWord(line, 'J') ?? 0 }, instance.rotation)
-        nextWords = replaceOrAppend(nextWords, 'I', rotatedIJ.x)
-        nextWords = replaceOrAppend(nextWords, 'J', rotatedIJ.y)
-        center = { x: transformedStart.x + rotatedIJ.x, y: transformedStart.y + rotatedIJ.y }
+        const i = getWord(line, 'I')
+        const j = getWord(line, 'J')
+        const r = getWord(line, 'R')
+        if (i === undefined && j === undefined && r === undefined) {
+          errors.push(`${part.name} line ${line.lineNumber + 1}: arc move is missing I/J center offsets or an R radius.`)
+        } else if (r !== undefined) {
+          if (Math.abs(r) <= 0.000001) errors.push(`${part.name} line ${line.lineNumber + 1}: arc move has a zero R radius.`)
+        } else {
+          const rotatedIJ = rotateVector({ x: i ?? 0, y: j ?? 0 }, instance.rotation)
+          if (Math.hypot(rotatedIJ.x, rotatedIJ.y) <= 0.000001) {
+            errors.push(`${part.name} line ${line.lineNumber + 1}: arc move has a zero I/J center offset.`)
+          }
+          nextWords = replaceOrAppend(nextWords, 'I', rotatedIJ.x)
+          nextWords = replaceOrAppend(nextWords, 'J', rotatedIJ.y)
+          center = { x: transformedStart.x + rotatedIJ.x, y: transformedStart.y + rotatedIJ.y }
+        }
       }
 
       segments.push({
