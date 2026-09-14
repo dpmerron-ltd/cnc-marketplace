@@ -33,6 +33,24 @@ function makeInstance(partId: string): PartInstance {
   return { id: 'i1', partId, sheetIndex: 0, x: 10, y: 10, rotation: 0, locked: false }
 }
 
+function collectOperationDepths(gcode: string): Map<string, number> {
+  const operationDepths = new Map<string, number>()
+  let operation = '<none>'
+
+  for (const line of gcode.split('\n')) {
+    const operationMatch = line.trim().match(/^\((No\.\s*\d+\s+.+)\)$/i)
+    if (operationMatch) operation = operationMatch[1]
+    const zMatch = line.match(/\bZ([-+]?\d*\.?\d+)/i)
+    const motionMatch = line.match(/\bG0?([123])\b/i)
+    if (!zMatch || !motionMatch) continue
+    const z = Number(zMatch[1])
+    if (z >= 0) continue
+    operationDepths.set(operation, Math.min(operationDepths.get(operation) ?? 0, z))
+  }
+
+  return operationDepths
+}
+
 describe('G-code exporter feed-rate selection', () => {
   it('uses plunge, ramp and cutting feeds without unsafe modal inheritance', () => {
     const part = createPartFromGCode(
@@ -164,5 +182,74 @@ describe('G-code exporter feed-rate selection', () => {
     expect(result.errors).toEqual([])
     expect(reachIndex).toBeGreaterThan(-1)
     expect(spindleIndex).toBeGreaterThan(reachIndex)
+  })
+
+  it('exports nested Estlcam standalone programs without preserving terminal parking moves', () => {
+    const part = createPartFromGCode(
+      'side-l.nc',
+      [
+        'G21',
+        'G17',
+        'G90',
+        'G94',
+        'G00 Z5.0000',
+        'S18000 M03',
+        '(No. 1 Pocketing parallel: Pocket 1)',
+        'G00 X36.1740 Y33.6971 F2400',
+        'G00 Z0.5000 F900',
+        'G01 X37.7615 F420 S1',
+        'G02 X35.3802 Y32.3223 Z-0.5000 I-1.5875 J0.0000',
+        'G02 Y35.0719 Z-1.5000 I0.7937 J1.3748',
+        'G02 X37.7615 Y33.6971 Z-2.5000 I0.7938 J-1.3748',
+        'G02 X36.9677 Y32.3223 Z-3.0000 I-1.5875 J0.0000',
+        'G00 Z5.0000 F900',
+        '(No. 2 Pocketing parallel: Pocket 2)',
+        'G00 X301.1740 Y33.6971 Z5.0000 F2400',
+        'G00 Z0.5000 F900',
+        'G01 X302.7615 F420',
+        'G02 X300.3802 Y32.3223 Z-0.5000 I-1.5875 J0.0000',
+        'G02 Y35.0719 Z-1.5000 I0.7937 J1.3748',
+        'G02 X302.7615 Y33.6971 Z-2.5000 I0.7937 J-1.3748',
+        'G02 X301.9677 Y32.3223 Z-3.0000 I-1.5875 J0.0000',
+        'G00 Z5.0000 F900',
+        '(No. 3 Part machining: Profile)',
+        'G00 X279.3980 Y33.6971 Z5.0000 F2400',
+        'G00 Z0.5000 F900',
+        'G01 Z0.0000 F420',
+        'G01 Y25.4546 Z-3.0000',
+        'G01 Y25.0961 F2100',
+        'G01 Y25.4546 Z-6.0000 F420',
+        'G01 Y25.0961 F2100',
+        'G01 Y25.4546 Z-9.0000 F420',
+        'G01 Y25.0961 F2100',
+        'G01 Y25.4546 Z-12.0000 F420',
+        'G01 Y25.0961 F2100',
+        'G01 Y25.4546 Z-15.0000 F420',
+        'G01 Y25.0961 F2100',
+        'G01 Y25.4546 Z-18.0000 F420',
+        'G01 Y25.0961 F2100',
+        'G01 Y33.1476 Z-18.2000 F420',
+        'G01 Y25.0961 F2100',
+        'G00 Z5.0000 F900',
+        'G00 X0.0000 Y0.0000 F2400',
+        'G00 Z0.0000 F900',
+        'M30',
+      ].join('\n'),
+    )
+    const first = makeInstance(part.id)
+    const second: PartInstance = { ...makeInstance(part.id), id: 'i2', x: 320 }
+    const sheet = makeSheet(first)
+    sheet.instances = [first, second]
+    sheet.gcodeSettings.finalCutDepth = 18.2
+    const result = exportCombinedGCode([part], sheet)
+    const operationDepths = collectOperationDepths(result.gcode)
+
+    expect(result.errors).toEqual([])
+    expect(result.gcode).toContain('(No. 1 Pocketing parallel: Pocket 1)')
+    expect(result.gcode).toContain('(No. 2 Pocketing parallel: Pocket 2)')
+    expect(operationDepths.get('No. 1 Pocketing parallel: Pocket 1')).toBe(-3)
+    expect(operationDepths.get('No. 2 Pocketing parallel: Pocket 2')).toBe(-3)
+    expect(operationDepths.get('No. 3 Part machining: Profile')).toBe(-18.2)
+    expect(result.gcode).not.toMatch(/\nG00 X(?:10|320) Y10 F2400\nG00 Z0 F900\n/)
   })
 })

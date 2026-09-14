@@ -78,6 +78,24 @@ function lineWithToolFeed(line: ParsedLine, previousZ: number | undefined, sheet
   return { raw: line.raw, nextZ }
 }
 
+function isBlankOrCommentOnly(line: ParsedLine): boolean {
+  return line.words.length === 0
+}
+
+function isRapidLine(line: ParsedLine): boolean {
+  return line.effectiveMotion === 'G00'
+}
+
+function withoutSourceFooterRapids(lines: ParsedLine[]): ParsedLine[] {
+  let end = lines.length
+
+  while (end > 0 && isBlankOrCommentOnly(lines[end - 1])) end -= 1
+  while (end > 0 && isRapidLine(lines[end - 1])) end -= 1
+  while (end > 0 && isBlankOrCommentOnly(lines[end - 1])) end -= 1
+
+  return lines.slice(0, end)
+}
+
 function reachCheckLines(parts: Part[], sheet: Sheet, sheetIndex: number): { lines: string[]; errors: string[] } {
   if (!sheet.gcodeSettings.reachCheckEnabled) return { lines: [], errors: [] }
 
@@ -143,7 +161,7 @@ function transformedInstanceLines(
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
     const depthScale = depthScaleForPart(part, sheet)
-    const transformedLines = linesWithDepthOverride(part, transformed.transformedLines, depthScale)
+    const transformedLines = withoutSourceFooterRapids(linesWithDepthOverride(part, transformed.transformedLines, depthScale))
     const rapidBelowSurfaceCount = transformedLines.filter((line) => line.effectiveMotion === 'G00' && (wordValue(line, 'Z') ?? 0) < 0).length
     if (depthScale !== undefined) {
       warnings.push(`Applied final depth override to full-depth operations in ${part.name}: exported deepest Z is -${formatNumber(sheet.gcodeSettings.finalCutDepth ?? 0)} mm; shallower operations are preserved.`)

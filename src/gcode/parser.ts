@@ -83,7 +83,13 @@ export function parseGCode(source: string): ParsedProgram {
 
   const firstMotionIndex = lines.findIndex((line) => line.effectiveMotion === 'G01' || line.effectiveMotion === 'G02' || line.effectiveMotion === 'G03')
   const endIndex = lines.findIndex((line) => line.words.some((word) => word.letter === 'M' && [2, 5, 30].includes(Math.trunc(word.value))))
-  const bodyStart = firstMotionIndex >= 0 ? firstMotionIndex : 0
+  let bodyStart = firstMotionIndex >= 0 ? firstMotionIndex : 0
+  for (let index = bodyStart - 1; index >= 0; index -= 1) {
+    if (lines[index].raw.trim().match(/^\(No\.\s*\d+\s+.+\)$/i)) {
+      bodyStart = index
+      break
+    }
+  }
   const bodyEnd = endIndex >= 0 && endIndex > bodyStart ? endIndex : lines.length
 
   return { lines, warnings, units, distanceMode, startLines: lines.slice(0, bodyStart), bodyLines: lines.slice(bodyStart, bodyEnd), endLines: lines.slice(bodyEnd) }
