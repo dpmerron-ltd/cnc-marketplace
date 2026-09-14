@@ -237,6 +237,28 @@ function formatDistance(mm: number): string {
   return `${mm.toFixed(1)} mm`
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function safeSimulateGCode(source: string): GCodeSimulation {
+  try {
+    return simulateGCode(source)
+  } catch (error) {
+    return {
+      moves: [],
+      bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+      totalDistanceMm: 0,
+      cuttingDistanceMm: 0,
+      rapidDistanceMm: 0,
+      estimatedSeconds: 0,
+      deepestCutMm: 0,
+      warnings: [],
+      errors: [`Simulator failed: ${errorMessage(error)}`],
+    }
+  }
+}
+
 function deepestConfiguredCut(parts: Part[], sheet: Sheet): number | undefined {
   if (sheet.gcodeSettings.finalCutDepth && sheet.gcodeSettings.finalCutDepth > 0) return sheet.gcodeSettings.finalCutDepth
 
@@ -909,15 +931,21 @@ function App() {
   }
 
   function previewGCode() {
-    const result = exportCombinedGCode(parts, sheet)
-    const simulation = simulateGCode(result.gcode)
-    setPreview(result.gcode)
-    setPreviewSimulation(simulation)
-    setStatus(
-      result.errors.length > 0 || simulation.errors.length > 0
-        ? `Preview generated with ${result.errors.length + simulation.errors.length} export/simulation error(s).`
-        : `Preview generated. Estimated cutting time ${formatDuration(simulation.estimatedSeconds)}.`,
-    )
+    try {
+      const result = exportCombinedGCode(parts, sheet)
+      const simulation = safeSimulateGCode(result.gcode)
+      setPreview(result.gcode)
+      setPreviewSimulation(simulation)
+      setStatus(
+        result.errors.length > 0 || simulation.errors.length > 0
+          ? `Preview generated with ${result.errors.length + simulation.errors.length} export/simulation error(s).`
+          : `Preview generated. Estimated cutting time ${formatDuration(simulation.estimatedSeconds)}.`,
+      )
+    } catch (error) {
+      setPreview(undefined)
+      setPreviewSimulation(undefined)
+      setStatus(`Preview failed: ${errorMessage(error)}`)
+    }
   }
 
   function exportSummary(exportWarnings: string[], simulations: GCodeSimulation[]): ExportSummary {
@@ -960,7 +988,7 @@ function App() {
     }
 
     const filename = `${filenameSafe(sheet.name)}.nc`
-    const simulation = simulateGCode(result.gcode)
+    const simulation = safeSimulateGCode(result.gcode)
     if (simulation.errors.length > 0) {
       setStatus(`Export blocked by ${simulation.errors.length} simulation error(s).`)
       setPreview(result.gcode)
@@ -992,7 +1020,7 @@ function App() {
     const files = results.map((result) => ({
       filename: `${base}-sheet-${result.sheetIndex + 1}.nc`,
       gcode: result.gcode,
-      simulation: simulateGCode(result.gcode),
+      simulation: safeSimulateGCode(result.gcode),
     }))
     const simulationErrors = files.flatMap((file) => file.simulation.errors)
     if (simulationErrors.length > 0) {
