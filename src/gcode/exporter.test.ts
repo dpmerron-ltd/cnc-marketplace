@@ -76,8 +76,8 @@ describe('G-code exporter feed-rate selection', () => {
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G00 X65 Y33.35')
-    expect(result.gcode).toContain('G02 X61.875 Y31.4014 Z-1 I-2.25 J0 F600')
+    expect(result.gcode).toContain('G00 X13.125 Y11.9486')
+    expect(result.gcode).toContain('G02 X10 Y10 Z-1 I-2.25 J0 F600')
   })
 
   it('emits spindle start before the first cutting or ramping move', () => {
