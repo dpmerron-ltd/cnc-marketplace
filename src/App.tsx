@@ -953,20 +953,23 @@ function App() {
 
   async function confirmPendingExport() {
     if (!pendingExport) return
-    const saved = await saveCurrentProject()
-    if (!saved) return
+    const exportToConfirm = pendingExport
 
-    pendingExport.files.forEach((file, index) => {
-      window.setTimeout(() => {
-        downloadText(file.filename, file.gcode, 'application/x-gcode')
-      }, index * 150)
+    exportToConfirm.files.forEach((file) => {
+      downloadText(file.filename, file.gcode, 'application/x-gcode')
     })
-    setStatus(
-      pendingExport.mode === 'combined'
-        ? `Saved sheet and exported ${pendingExport.files[0].filename}.`
-        : `Saved sheet and exported ${pendingExport.files.length} sheet G-code file(s).`,
-    )
     setPendingExport(undefined)
+
+    const saved = await saveCurrentProject()
+    setStatus(
+      saved
+        ? exportToConfirm.mode === 'combined'
+          ? `Saved sheet and exported ${exportToConfirm.files[0].filename}.`
+          : `Saved sheet and exported ${exportToConfirm.files.length} sheet G-code file(s).`
+        : exportToConfirm.mode === 'combined'
+          ? `Exported ${exportToConfirm.files[0].filename}, but could not save the sheet.`
+          : `Exported ${exportToConfirm.files.length} sheet G-code file(s), but could not save the sheet.`,
+    )
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
