@@ -71,6 +71,15 @@ describe('G-code exporter feed-rate selection', () => {
     expect(result.gcode).toContain('G02 X20 Y10 Z-1 I5 J0 F600')
   })
 
+  it('positions at the actual first toolpath start before an initial arc move', () => {
+    const part = createPartFromGCode('arc-start.nc', 'G21\nG90\nG00 X55 Y23.35\nG02 X51.875 Y21.4014 Z-1 I-2.25 J0 F4500\nM30')
+    const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
+
+    expect(result.errors).toEqual([])
+    expect(result.gcode).toContain('G00 X65 Y33.35')
+    expect(result.gcode).toContain('G02 X61.875 Y31.4014 Z-1 I-2.25 J0 F600')
+  })
+
   it('emits spindle start before the first cutting or ramping move', () => {
     const part = createPartFromGCode('spindle.nc', 'G21\nG90\nG01 X0 Y0\nG01 Z-1\nM30')
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))

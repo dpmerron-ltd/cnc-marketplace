@@ -5,6 +5,7 @@ import { formatNumber } from './format'
 import { wordsToLine } from './format'
 import { instanceBounds, transformLocalPoint, transformPartProgram } from './transform'
 import type { ParsedLine } from './types'
+import type { Point } from '../models/geometry'
 
 export interface ExportResult {
   gcode: string
@@ -43,6 +44,10 @@ function feedRateMmPerMinute(sheet: Sheet, mode: 'cut' | 'plunge' | 'ramp'): num
         : settings.rampFeedRateMmPerMinute
 
   return feedMmPerSecond !== undefined ? feedMmPerSecond * 60 : legacyFeedMmPerMinute
+}
+
+function instanceStartPoint(part: Part, instance: Sheet['instances'][number], transformed: ReturnType<typeof transformPartProgram>): Point {
+  return transformed.segments[0]?.start ?? transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
 }
 
 function wordValue(line: ParsedLine, letter: string): number | undefined {
@@ -123,7 +128,8 @@ function transformedInstanceLines(
       continue
     }
 
-    const firstPoint = transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
+    const transformed = transformPartProgram(part, instance)
+    const firstPoint = instanceStartPoint(part, instance, transformed)
     output.push('')
     output.push(`(Part: ${part.name})`)
     output.push(`(SKU: ${part.sku})`)
@@ -134,7 +140,6 @@ function transformedInstanceLines(
     output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
     output.push(`G00 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`)
 
-    const transformed = transformPartProgram(part, instance)
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
     const depthScale = depthScaleForPart(part, sheet)
