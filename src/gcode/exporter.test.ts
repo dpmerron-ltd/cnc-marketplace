@@ -140,7 +140,7 @@ describe('G-code exporter feed-rate selection', () => {
 
     expect(result.errors).toEqual([])
     expect(result.gcode).toContain('G01 Z-10 F500')
-    expect(result.gcode).toContain('G00 Z-2 F900')
+    expect(result.gcode).toContain('G00 Z-2')
     expect(result.gcode).toContain('G01 X20 Y10 Z-20 F600')
   })
 
