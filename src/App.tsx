@@ -3,6 +3,8 @@ import './App.css'
 import { originalFinalDepth } from './gcode/depthOverride'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
+import { simulateGCode } from './gcode/simulator'
+import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
 import type { MarketplaceItem } from './models/Item'
@@ -25,6 +27,7 @@ import {
   saveRemoteSheetHistory,
 } from './storage/supabaseProjectStore'
 import { GCodeSettings } from './ui/GCodeSettings'
+import { GCodeSimulationPanel } from './ui/GCodeSimulationPanel'
 import { HistoryPage } from './ui/HistoryPage'
 import { LoginPage } from './ui/LoginPage'
 import { MarketplacePage } from './ui/MarketplacePage'
@@ -217,6 +220,23 @@ function formatSetting(value: number | undefined, suffix = ''): string {
   return `${Number.isInteger(value) ? value : Number(value.toFixed(3))}${suffix}`
 }
 
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s'
+  const rounded = Math.round(seconds)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const remainingSeconds = rounded % 60
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`
+  return `${remainingSeconds}s`
+}
+
+function formatDistance(mm: number): string {
+  if (!Number.isFinite(mm)) return '0 mm'
+  if (mm >= 1000) return `${(mm / 1000).toFixed(2)} m`
+  return `${mm.toFixed(1)} mm`
+}
+
 function deepestConfiguredCut(parts: Part[], sheet: Sheet): number | undefined {
   if (sheet.gcodeSettings.finalCutDepth && sheet.gcodeSettings.finalCutDepth > 0) return sheet.gcodeSettings.finalCutDepth
 
@@ -275,6 +295,7 @@ interface MfaFactor {
 interface PendingExportFile {
   filename: string
   gcode: string
+  simulation: GCodeSimulation
 }
 
 interface ExportSummary {
@@ -289,6 +310,10 @@ interface ExportSummary {
   cuttingFeedMmPerSecond?: number
   plungeFeedMmPerSecond?: number
   rampFeedMmPerSecond?: number
+  estimatedCuttingTimeSeconds: number
+  simulatedDistanceMm: number
+  simulationErrors: number
+  simulationWarnings: number
   reachCheckEnabled: boolean
   spindleStartEnabled: boolean
   validationErrors: number
@@ -403,6 +428,7 @@ function App() {
   const [selectedPartId, setSelectedPartId] = useState<string>()
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>()
   const [preview, setPreview] = useState<string>()
+  const [previewSimulation, setPreviewSimulation] = useState<GCodeSimulation>()
   const [pendingExport, setPendingExport] = useState<PendingExport>()
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
@@ -649,6 +675,7 @@ function App() {
         setSelectedPartId(undefined)
         setSelectedInstanceId(undefined)
         setPreview(undefined)
+        setPreviewSimulation(undefined)
         setStatus('Signed out.')
         setUserId(undefined)
       }
@@ -883,11 +910,18 @@ function App() {
 
   function previewGCode() {
     const result = exportCombinedGCode(parts, sheet)
+    const simulation = simulateGCode(result.gcode)
     setPreview(result.gcode)
-    setStatus(result.errors.length > 0 ? `Preview generated with ${result.errors.length} export error(s).` : 'Preview generated from transformed G-code.')
+    setPreviewSimulation(simulation)
+    setStatus(
+      result.errors.length > 0 || simulation.errors.length > 0
+        ? `Preview generated with ${result.errors.length + simulation.errors.length} export/simulation error(s).`
+        : `Preview generated. Estimated cutting time ${formatDuration(simulation.estimatedSeconds)}.`,
+    )
   }
 
-  function exportSummary(exportWarnings: string[]): ExportSummary {
+  function exportSummary(exportWarnings: string[], simulations: GCodeSimulation[]): ExportSummary {
+    const estimatedCuttingTimeSeconds = simulations.reduce((total, simulation) => total + simulation.estimatedSeconds, 0)
     return {
       sheetName: sheet.name.trim() || defaultSheet.name,
       physicalSheets: sheetCount,
@@ -900,6 +934,10 @@ function App() {
       cuttingFeedMmPerSecond: sheet.gcodeSettings.cuttingFeedRateMmPerSecond,
       plungeFeedMmPerSecond: sheet.gcodeSettings.plungeFeedRateMmPerSecond,
       rampFeedMmPerSecond: sheet.gcodeSettings.rampFeedRateMmPerSecond,
+      estimatedCuttingTimeSeconds,
+      simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
+      simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
+      simulationWarnings: simulations.reduce((total, simulation) => total + simulation.warnings.length, 0),
       reachCheckEnabled: Boolean(sheet.gcodeSettings.reachCheckEnabled),
       spindleStartEnabled: sheet.gcodeSettings.spindleStartGcode.trim().length > 0,
       validationErrors: errors.length,
@@ -922,10 +960,17 @@ function App() {
     }
 
     const filename = `${filenameSafe(sheet.name)}.nc`
+    const simulation = simulateGCode(result.gcode)
+    if (simulation.errors.length > 0) {
+      setStatus(`Export blocked by ${simulation.errors.length} simulation error(s).`)
+      setPreview(result.gcode)
+      setPreviewSimulation(simulation)
+      return
+    }
     setPendingExport({
       mode: 'combined',
-      files: [{ filename, gcode: result.gcode }],
-      summary: exportSummary(result.warnings),
+      files: [{ filename, gcode: result.gcode, simulation }],
+      summary: exportSummary(result.warnings, [simulation]),
     })
   }
 
@@ -944,10 +989,22 @@ function App() {
     }
 
     const base = filenameSafe(sheet.name)
+    const files = results.map((result) => ({
+      filename: `${base}-sheet-${result.sheetIndex + 1}.nc`,
+      gcode: result.gcode,
+      simulation: simulateGCode(result.gcode),
+    }))
+    const simulationErrors = files.flatMap((file) => file.simulation.errors)
+    if (simulationErrors.length > 0) {
+      setStatus(`Export blocked by ${simulationErrors.length} simulation error(s).`)
+      setPreview(files.map((file) => file.gcode).join('\n\n'))
+      setPreviewSimulation(files[0]?.simulation)
+      return
+    }
     setPendingExport({
       mode: 'sheets',
-      files: results.map((result) => ({ filename: `${base}-sheet-${result.sheetIndex + 1}.nc`, gcode: result.gcode })),
-      summary: exportSummary(results.flatMap((result) => result.warnings)),
+      files,
+      summary: exportSummary(results.flatMap((result) => result.warnings), files.map((file) => file.simulation)),
     })
   }
 
@@ -1235,6 +1292,14 @@ function App() {
                 <strong>{formatSetting(pendingExport.summary.rampFeedMmPerSecond, ' mm/s')}</strong>
               </div>
               <div>
+                <span>Estimated time</span>
+                <strong>{formatDuration(pendingExport.summary.estimatedCuttingTimeSeconds)}</strong>
+              </div>
+              <div>
+                <span>Sim distance</span>
+                <strong>{formatDistance(pendingExport.summary.simulatedDistanceMm)}</strong>
+              </div>
+              <div>
                 <span>Reach check</span>
                 <strong>{pendingExport.summary.reachCheckEnabled ? 'Enabled' : 'Off'}</strong>
               </div>
@@ -1244,9 +1309,19 @@ function App() {
               </div>
               <div>
                 <span>Validation</span>
-                <strong>{pendingExport.summary.validationErrors} errors, {pendingExport.summary.validationWarnings} warnings</strong>
+                <strong>
+                  {pendingExport.summary.validationErrors + pendingExport.summary.simulationErrors} errors,{' '}
+                  {pendingExport.summary.validationWarnings + pendingExport.summary.simulationWarnings} warnings
+                </strong>
               </div>
             </div>
+
+            {pendingExport.files[0] && (
+              <GCodeSimulationPanel
+                title={pendingExport.files.length === 1 ? 'Export Simulation' : `Export Simulation: ${pendingExport.files[0].filename}`}
+                simulation={pendingExport.files[0].simulation}
+              />
+            )}
 
             <div className="export-file-list">
               <h3>Files to export</h3>
@@ -1293,8 +1368,8 @@ function App() {
         <input ref={importProjectRef} className="hidden-file" type="file" accept=".json" onChange={(event) => void importProject(event.target.files)} />
       </section>
 
-      {(issues.length > 0 || preview) && (
-        <section className="diagnostics">
+      {(issues.length > 0 || preview || previewSimulation) && (
+        <section className={`diagnostics ${previewSimulation ? 'with-simulator' : ''}`}>
           {issues.length > 0 && (
             <div className="panel issue-list">
               <h2>Validation</h2>
@@ -1309,11 +1384,20 @@ function App() {
             <div className="panel preview">
               <div className="panel-header">
                 <h2>Combined G-code Preview</h2>
-                <button type="button" onClick={() => setPreview(undefined)}>Close</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreview(undefined)
+                    setPreviewSimulation(undefined)
+                  }}
+                >
+                  Close
+                </button>
               </div>
               <textarea readOnly value={preview} />
             </div>
           )}
+          {previewSimulation && <GCodeSimulationPanel simulation={previewSimulation} />}
         </section>
       )}
     </div>
