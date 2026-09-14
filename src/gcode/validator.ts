@@ -1,7 +1,7 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { rectsOverlap } from '../models/geometry'
-import { depthScaleForPart, scaleZDepth } from './depthOverride'
+import { depthScaleForPart, linesWithDepthOverride } from './depthOverride'
 import { instanceBounds, transformPartProgram } from './transform'
 import { createInitialState, getWord, updatePositionFromLine } from './state'
 
@@ -41,11 +41,11 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
       let state = createInitialState()
       let previousCutZ = 0
       const depthScale = depthScaleForPart(item.part, sheet)
-      for (const line of item.part.parsed.bodyLines) {
+      for (const line of linesWithDepthOverride(item.part, item.part.parsed.bodyLines, depthScale)) {
         const next = updatePositionFromLine(state, line)
         const hasCuttingMove = line.effectiveMotion === 'G01' || line.effectiveMotion === 'G02' || line.effectiveMotion === 'G03'
         const zWord = getWord(line, 'Z')
-        const nextZ = scaleZDepth(next.position.z, depthScale)
+        const nextZ = next.position.z
         if (hasCuttingMove && zWord !== undefined && nextZ < previousCutZ) {
           const stepDown = previousCutZ - nextZ
           if (stepDown > sheet.gcodeSettings.maxDepthOfCut + 0.0001) {

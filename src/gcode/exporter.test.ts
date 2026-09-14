@@ -98,35 +98,44 @@ describe('G-code exporter feed-rate selection', () => {
     expect(result.gcode).toContain('G01 X20 Y10 F4500')
   })
 
-  it('scales imported negative Z depths to the configured final cut depth', () => {
+  it('scales only full-depth operations when final cut depth is configured', () => {
     const part = createPartFromGCode(
       'depth.nc',
       [
         'G21',
         'G90',
+        '(No. 1 Pocketing: Pocket)',
         'G01 X0 Y0',
         'G01 Z-1.5',
         'G01 X10 Y0 Z-3',
         'G01 X20 Y0',
+        'G00 Z5',
+        '(No. 2 Part machining: Profile)',
+        'G01 X30 Y0',
+        'G01 Z-5',
+        'G01 X40 Y0 Z-10',
         'M30',
       ].join('\n'),
     )
     const sheet = makeSheet(makeInstance(part.id))
-    sheet.gcodeSettings.finalCutDepth = 6
+    sheet.gcodeSettings.finalCutDepth = 20
     const result = exportCombinedGCode([part], sheet)
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G01 Z-3 F500')
-    expect(result.gcode).toContain('G01 X20 Y10 Z-6 F600')
+    expect(result.gcode).toContain('G01 Z-1.5 F500')
+    expect(result.gcode).toContain('G01 X20 Y10 Z-3 F600')
     expect(result.gcode).toContain('G01 X30 Y10 F4500')
+    expect(result.gcode).toContain('G01 Z-10 F500')
+    expect(result.gcode).toContain('G01 X50 Y10 Z-20 F600')
   })
 
-  it('does not scale rapid Z clearances when overriding final depth', () => {
+  it('does not scale rapid Z clearances when overriding full-depth operations', () => {
     const part = createPartFromGCode(
       'rapid-depth.nc',
       [
         'G21',
         'G90',
+        '(No. 1 Part machining: Profile)',
         'G01 X0 Y0',
         'G01 Z-5',
         'G00 Z-2',

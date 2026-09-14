@@ -107,7 +107,7 @@ export function GCodeSettings({
           onChange={(event) => onChange({ ...settings, maxDepthOfCut: event.target.value === '' ? undefined : Number(event.target.value) })}
         />
       </label>
-      <label title="Optional final depth override. Negative Z depths from imported G-code are scaled so the deepest cut reaches this depth.">
+      <label title="Optional through-cut depth override. Only operations that already reach the part's deepest cut are scaled; shallower pockets are preserved.">
         Final Cut Depth
         <input
           type="number"

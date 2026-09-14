@@ -1,6 +1,6 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
-import { depthScaleForPart, lineWithDepthOverride } from './depthOverride'
+import { depthScaleForPart, linesWithDepthOverride } from './depthOverride'
 import { formatNumber } from './format'
 import { wordsToLine } from './format'
 import { instanceBounds, transformLocalPoint, transformPartProgram } from './transform'
@@ -143,10 +143,10 @@ function transformedInstanceLines(
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
     const depthScale = depthScaleForPart(part, sheet)
-    const transformedLines = transformed.transformedLines.map((line) => lineWithDepthOverride(line, depthScale))
+    const transformedLines = linesWithDepthOverride(part, transformed.transformedLines, depthScale)
     const rapidBelowSurfaceCount = transformedLines.filter((line) => line.effectiveMotion === 'G00' && (wordValue(line, 'Z') ?? 0) < 0).length
     if (depthScale !== undefined) {
-      warnings.push(`Applied final depth override to ${part.name}: exported deepest Z is -${formatNumber(sheet.gcodeSettings.finalCutDepth ?? 0)} mm.`)
+      warnings.push(`Applied final depth override to full-depth operations in ${part.name}: exported deepest Z is -${formatNumber(sheet.gcodeSettings.finalCutDepth ?? 0)} mm; shallower operations are preserved.`)
     }
     if (rapidBelowSurfaceCount > 0) {
       warnings.push(`${part.name} contains ${rapidBelowSurfaceCount} rapid Z move${rapidBelowSurfaceCount === 1 ? '' : 's'} below Z0; verify the source CAM clearance path before cutting.`)
