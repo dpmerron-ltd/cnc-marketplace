@@ -36,7 +36,7 @@ export function MarketplacePage({
 }: MarketplacePageProps) {
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
   const selectedParts = selectedItem ? parts.filter((part) => part.itemId === selectedItem.id) : []
-  const canEditSelectedItem = Boolean(selectedItem && (!selectedItem.ownerId || selectedItem.ownerId === currentUserId))
+  const canEditSelectedItem = Boolean(currentUserId && selectedItem && selectedItem.ownerId === currentUserId)
 
   return (
     <section className="marketplace-page">
@@ -113,7 +113,6 @@ export function MarketplacePage({
                 <h2>Components</h2>
                 <button type="button" onClick={onOpenSheet}>Open Sheet</button>
               </div>
-              {!canEditSelectedItem && <p className="muted">Shared item. You can add components to sheets; only the owner can edit the item.</p>}
               {selectedParts.length === 0 ? (
                 <p className="muted">Upload one or more pre-generated Estlcam files for this item.</p>
               ) : (

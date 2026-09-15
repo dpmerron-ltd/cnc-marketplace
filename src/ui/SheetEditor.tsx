@@ -5,6 +5,7 @@ import type { Sheet } from '../models/Sheet'
 import { rectsOverlap } from '../models/geometry'
 import { instanceBounds, transformPartProgram } from '../gcode/transform'
 import type { ToolpathSegment } from '../gcode/types'
+import { planScrewPositions } from '../gcode/screwPositions'
 
 interface SheetEditorProps {
   parts: Part[]
@@ -61,6 +62,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
   const scale = Math.min(820 / sheet.width, 620 / sheet.height)
   const svgWidth = sheet.width * scale + viewPadding * 2
   const svgHeight = sheet.height * scale + viewPadding * 2
+  const screwPlan = useMemo(() => planScrewPositions(parts, sheet, sheetIndex), [parts, sheet, sheetIndex])
 
   const placed = useMemo(
     () =>
@@ -159,6 +161,14 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
               ),
             ),
           )}
+          {screwPlan.points.map((point, index) => (
+            <g key={`${point.x},${point.y}`} className="screw-mark" pointerEvents="none">
+              <title>{`Screw mark ${index + 1}: X${point.x} Y${point.y}, depth 2 mm`}</title>
+              <circle cx={point.x} cy={point.y} r={3} />
+              <line x1={point.x - 6} y1={point.y} x2={point.x + 6} y2={point.y} />
+              <line x1={point.x} y1={point.y - 6} x2={point.x} y2={point.y + 6} />
+            </g>
+          ))}
           {placed.map(({ instance, part, bounds }) => {
             const isSelected = selectedId === instance.id
             const outOfBounds = bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > sheet.width || bounds.maxY > sheet.height

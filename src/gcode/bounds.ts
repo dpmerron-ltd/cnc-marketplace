@@ -26,12 +26,15 @@ function angleOnSweep(angle: number, start: number, end: number, clockwise: bool
   return normalizeAngle(a - s) <= sweep + 1e-9
 }
 
-function arcBounds(start: { x: number; y: number }, end: { x: number; y: number }, center: { x: number; y: number }, clockwise: boolean): Bounds {
+export function arcBounds(start: { x: number; y: number }, end: { x: number; y: number }, center: { x: number; y: number }, clockwise: boolean): Bounds {
   const startRadius = Math.hypot(start.x - center.x, start.y - center.y)
   const endRadius = Math.hypot(end.x - center.x, end.y - center.y)
   if (Math.abs(startRadius - endRadius) > 0.01) return lineBounds(start, end)
 
   const radius = startRadius
+  if (Math.hypot(end.x - start.x, end.y - start.y) < 0.000001) {
+    return { minX: center.x - radius, minY: center.y - radius, maxX: center.x + radius, maxY: center.y + radius }
+  }
   const startAngle = Math.atan2(start.y - center.y, start.x - center.x)
   const endAngle = Math.atan2(end.y - center.y, end.x - center.x)
   let bounds = lineBounds(start, end)

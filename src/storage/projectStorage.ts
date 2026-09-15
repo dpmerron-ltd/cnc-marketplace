@@ -1,10 +1,12 @@
 import type { Project } from '../models/Project'
+import { privateProject } from './accountProject'
 
 const storageKey = 'sheet-builder-project'
 
-export function saveProject(project: Project): boolean {
+export function saveProject(project: Project, userId: string | undefined): boolean {
+  if (!userId) return false
   try {
-    localStorage.setItem(storageKey, JSON.stringify(project))
+    localStorage.setItem(`${storageKey}:${userId}`, JSON.stringify(privateProject(project, userId)))
     return true
   } catch (error) {
     console.error('Failed to save project to local storage.', error)
@@ -12,11 +14,13 @@ export function saveProject(project: Project): boolean {
   }
 }
 
-export function loadProject(): Project | undefined {
+export function loadProject(userId: string | undefined): Project | undefined {
+  if (!userId) return undefined
   try {
-    const raw = localStorage.getItem(storageKey)
+    // Never restore the former shared cache into an authenticated account.
+    const raw = localStorage.getItem(`${storageKey}:${userId}`)
     if (!raw) return undefined
-    return JSON.parse(raw) as Project
+    return privateProject(JSON.parse(raw) as Project, userId)
   } catch (error) {
     console.error('Failed to load project from local storage.', error)
     return undefined

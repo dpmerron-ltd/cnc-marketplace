@@ -28,7 +28,6 @@ function makeSheet(instances: PartInstance[]): Sheet {
       spindleStartGcode: '',
       endGcode: '',
       safeZ: 5,
-      reachCheckEnabled: false,
     },
     gcodePresets: [],
   }

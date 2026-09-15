@@ -82,25 +82,25 @@ function fallbackComponentSku(id: string, itemSku: string): string {
   return `${skuBase(itemSku) || 'ITEM'}-C${id.replace(/[^a-z0-9]/gi, '').slice(-6).toUpperCase()}`
 }
 
-export async function loadRemoteProject(): Promise<RemoteProjectState | undefined> {
+export async function loadRemoteProject(expectedUserId: string): Promise<RemoteProjectState | undefined> {
   if (!supabase) return undefined
   const userId = await getUserId()
-  if (!userId) return undefined
+  if (!userId || userId !== expectedUserId) return undefined
 
   const [itemsResult, componentsResult, projectResult, historyResult, presetsResult] = await Promise.all([
-    supabase.from('marketplace_items').select('*').order('created_at'),
-    supabase.from('cnc_components').select('*').order('date_imported'),
-    supabase.from('sheet_projects').select('*').eq('id', userId).maybeSingle<ProjectRow>(),
-    supabase.from('sheet_history').select('*').order('saved_at', { ascending: false }),
-    supabase.from('gcode_presets').select('*').order('name'),
+    supabase.from('marketplace_items').select('*').eq('owner_id', userId).order('created_at'),
+    supabase.from('cnc_components').select('*').eq('owner_id', userId).order('date_imported'),
+    supabase.from('sheet_projects').select('*').eq('owner_id', userId).eq('id', userId).maybeSingle<ProjectRow>(),
+    supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
+    supabase.from('gcode_presets').select('*').eq('owner_id', userId).order('name'),
   ])
 
-  if (itemsResult.error || componentsResult.error || presetsResult.error) {
+  if (itemsResult.error || componentsResult.error || presetsResult.error || projectResult.error || historyResult.error) {
     console.warn('Supabase load failed. Has the schema been created?', itemsResult.error ?? componentsResult.error ?? presetsResult.error)
     return undefined
   }
 
-  const items: MarketplaceItem[] = (itemsResult.data ?? []).map((row) => ({
+  const items: MarketplaceItem[] = (itemsResult.data ?? []).filter((row) => row.owner_id === userId).map((row) => ({
     id: row.id,
     ownerId: row.owner_id,
     uploadedBy: row.uploaded_by ?? undefined,
@@ -112,7 +112,7 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   }))
 
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
-  const parts: Part[] = ((componentsResult.data ?? []) as ComponentRow[]).map((row) => {
+  const parts: Part[] = ((componentsResult.data ?? []) as ComponentRow[]).filter((row) => row.owner_id === userId && itemSkuById.has(row.item_id)).map((row) => {
     const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, row.item_id)
     const itemSku = itemSkuById.get(row.item_id) ?? 'ITEM'
     return {
@@ -156,12 +156,17 @@ export async function loadRemoteProject(): Promise<RemoteProjectState | undefine
   }
 }
 
-export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId?: string): Promise<RemoteSaveResult> {
+export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string): Promise<RemoteSaveResult> {
   if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
-  if (!userId) return { ok: false, error: 'You are not signed in.' }
+  if (!userId || userId !== expectedUserId) return { ok: false, error: 'The signed-in account changed. Please reload.' }
 
-  const saveableItems = items.filter((item) => !item.ownerId || item.ownerId === userId)
+  const saveableItems = items.filter((item) => item.ownerId === userId)
+  const itemIds = new Set(saveableItems.map((item) => item.id))
+  const saveableParts = parts.filter((part) => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
+  if (saveableItems.length !== items.length || saveableParts.length !== parts.length) {
+    return { ok: false, error: 'Cannot save items or components belonging to another account.' }
+  }
   if (saveableItems.length > 0) {
     const itemsResult = await supabase.from('marketplace_items').upsert(
       saveableItems.map((item) => ({
@@ -181,7 +186,6 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     }
   }
 
-  const saveableParts = parts.filter((part) => part.itemId && (!part.ownerId || part.ownerId === userId))
   if (saveableParts.length > 0) {
     const componentsResult = await supabase.from('cnc_components').upsert(
       saveableParts.map((part) => ({
@@ -211,7 +215,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     id: userId,
     owner_id: userId,
     sheet,
-    selected_item_id: selectedItemId ?? null,
+    selected_item_id: itemIds.has(selectedItemId ?? '') ? selectedItemId : null,
     updated_at: new Date().toISOString(),
   })
 
@@ -225,14 +229,16 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
 
 export async function deleteRemoteComponent(partId: string): Promise<void> {
   if (!supabase) return
-  const result = await supabase.from('cnc_components').delete().eq('id', partId)
+  const userId = await getUserId()
+  if (!userId) return
+  const result = await supabase.from('cnc_components').delete().eq('id', partId).eq('owner_id', userId)
   if (result.error) console.warn('Supabase component delete failed.', result.error)
 }
 
-export async function saveRemoteSheetHistory(entry: SheetHistoryEntry): Promise<RemoteSaveResult> {
+export async function saveRemoteSheetHistory(entry: SheetHistoryEntry, expectedUserId: string): Promise<RemoteSaveResult> {
   if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
-  if (!userId) return { ok: false, error: 'You are not signed in.' }
+  if (!userId || userId !== expectedUserId) return { ok: false, error: 'The signed-in account changed. Please reload.' }
 
   const result = await supabase.from('sheet_history').upsert({
     id: entry.id,
@@ -278,6 +284,8 @@ export async function saveRemoteGCodePreset(preset: GCodePreset, uploadedBy?: st
 
 export async function deleteRemoteGCodePreset(presetId: string): Promise<void> {
   if (!supabase) return
-  const result = await supabase.from('gcode_presets').delete().eq('id', presetId)
+  const userId = await getUserId()
+  if (!userId) return
+  const result = await supabase.from('gcode_presets').delete().eq('id', presetId).eq('owner_id', userId)
   if (result.error) console.warn('Supabase G-code preset delete failed.', result.error)
 }

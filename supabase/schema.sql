@@ -1,3 +1,5 @@
+begin;
+
 create table if not exists public.marketplace_items (
   id uuid primary key,
   owner_id uuid not null references auth.users(id) on delete cascade,
@@ -125,7 +127,7 @@ drop policy if exists "owner gcode preset delete" on public.gcode_presets;
 
 create policy "authenticated marketplace item read"
   on public.marketplace_items for select
-  using (auth.uid() is not null);
+  using (auth.uid() = owner_id);
 
 create policy "authenticated marketplace item insert"
   on public.marketplace_items for insert
@@ -142,7 +144,7 @@ create policy "owner marketplace item delete"
 
 create policy "authenticated component read"
   on public.cnc_components for select
-  using (auth.uid() is not null);
+  using (auth.uid() = owner_id);
 
 create policy "authenticated component insert"
   on public.cnc_components for insert
@@ -168,7 +170,7 @@ create policy "owner sheet write"
 
 create policy "authenticated sheet history read"
   on public.sheet_history for select
-  using (auth.uid() is not null);
+  using (auth.uid() = owner_id);
 
 create policy "owner sheet history write"
   on public.sheet_history for all
@@ -177,7 +179,7 @@ create policy "owner sheet history write"
 
 create policy "authenticated gcode preset read"
   on public.gcode_presets for select
-  using (auth.uid() is not null);
+  using (auth.uid() = owner_id);
 
 create policy "authenticated gcode preset insert"
   on public.gcode_presets for insert
@@ -191,3 +193,22 @@ create policy "owner gcode preset update"
 create policy "owner gcode preset delete"
   on public.gcode_presets for delete
   using (auth.uid() = owner_id);
+
+-- Restrictive guards also constrain any legacy permissive policies.
+do $$
+declare table_name text;
+begin
+  foreach table_name in array array['marketplace_items', 'cnc_components', 'sheet_projects', 'sheet_history', 'gcode_presets']
+  loop
+    execute format('drop policy if exists "account isolation" on public.%I', table_name);
+    execute format('create policy "account isolation" on public.%I as restrictive for all using (owner_id = auth.uid()) with check (owner_id = auth.uid())', table_name);
+  end loop;
+end $$;
+
+drop policy if exists "component item ownership" on public.cnc_components;
+create policy "component item ownership"
+  on public.cnc_components as restrictive for all
+  using (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()))
+  with check (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()));
+
+commit;

@@ -5,7 +5,6 @@ export interface GCodeSettings {
   spindleStartGcode: string
   endGcode: string
   safeZ: number
-  reachCheckEnabled?: boolean
 }
 
 export interface GCodePreset {
@@ -23,6 +22,7 @@ export interface Sheet {
   spacing: number
   borderSpacing: number
   instances: PartInstance[]
+  screwMarkingEnabled?: boolean
   gcodeSettings: GCodeSettings
   gcodePresets?: GCodePreset[]
   defaultGcodePresetId?: string

@@ -4,6 +4,7 @@ import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
 import { simulateGCode } from './gcode/simulator'
+import { planScrewPositions } from './gcode/screwPositions'
 import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
@@ -15,6 +16,7 @@ import type { GCodePreset, Sheet } from './models/Sheet'
 import { rectsOverlap } from './models/geometry'
 import { autoNest } from './nesting/nestingEngine'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
+import { copyProjectToAccount, privateProject } from './storage/accountProject'
 import { supabase } from './storage/supabaseClient'
 import {
   canUseSupabase,
@@ -41,12 +43,12 @@ const defaultSheet: Sheet = {
   spacing: 5,
   borderSpacing: 10,
   instances: [],
+  screwMarkingEnabled: true,
   gcodeSettings: {
     startGcode: 'G21\nG17\nG90\nG94',
     spindleStartGcode: 'S18000\nM03',
     endGcode: 'M05\nM30',
     safeZ: 5,
-    reachCheckEnabled: false,
   },
   gcodePresets: [
     {
@@ -57,7 +59,6 @@ const defaultSheet: Sheet = {
         spindleStartGcode: 'S18000\nM03',
         endGcode: 'M05\nM30',
         safeZ: 5,
-        reachCheckEnabled: false,
       },
     },
   ],
@@ -71,7 +72,6 @@ function normalizeGCodeSettings(rawSettings: Partial<Sheet['gcodeSettings']> | u
     spindleStartGcode: raw.spindleStartGcode ?? defaultSheet.gcodeSettings.spindleStartGcode,
     endGcode: raw.endGcode ?? defaultSheet.gcodeSettings.endGcode,
     safeZ: raw.safeZ ?? defaultSheet.gcodeSettings.safeZ,
-    reachCheckEnabled: raw.reachCheckEnabled ?? defaultSheet.gcodeSettings.reachCheckEnabled,
   }
 }
 
@@ -84,6 +84,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
     ...defaultSheet,
     ...sheet,
     name: sheet.name?.trim() || defaultSheet.name,
+    screwMarkingEnabled: sheet.screwMarkingEnabled ?? true,
     instances: sheet.instances.map((instance) => ({ ...instance, sheetIndex: instance.sheetIndex ?? 0 })),
     gcodeSettings,
     gcodePresets: normalizedPresets,
@@ -236,11 +237,12 @@ function newInstance(partId: string, x: number, y: number, sheetIndex: number): 
   }
 }
 
-function newItem(name = 'Untitled Item', uploadedBy?: string): MarketplaceItem {
+function newItem(name = 'Untitled Item', uploadedBy?: string, ownerId?: string): MarketplaceItem {
   const now = new Date().toISOString()
   return {
     id: crypto.randomUUID(),
     uploadedBy,
+    ownerId,
     sku: makeItemSku(name),
     name,
     description: '',
@@ -283,6 +285,7 @@ interface ExportSummary {
   simulationErrors: number
   simulationWarnings: number
   reachCheckEnabled: boolean
+  screwMarkCount: number
   spindleStartEnabled: boolean
   validationErrors: number
   validationWarnings: number
@@ -306,9 +309,9 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
     }
   }
 
-  if (project.items && project.items.length > 0) {
+  if (project.items) {
     const items = project.items.map(normalizeItem)
-    const fallbackItemId = items[0].id
+    const fallbackItemId = items[0]?.id
     const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
     const partSequenceByItem = new Map<string, number>()
     const parts = project.parts.map((part) => {
@@ -385,7 +388,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 }
 
 function App() {
-  const initialState = useMemo(() => projectToAppState(loadProject()), [])
+  const initialState = useMemo(() => projectToAppState(undefined), [])
   const [page, setPage] = useState<'marketplace' | 'sheet' | 'history'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
@@ -410,6 +413,8 @@ function App() {
   const [userEmail, setUserEmail] = useState<string>()
   const importProjectRef = useRef<HTMLInputElement>(null)
   const remoteHydratedRef = useRef(false)
+  const accountRef = useRef<string | undefined>(undefined)
+  const [loadedAccountId, setLoadedAccountId] = useState<string>()
 
   const selectedInstance = sheet.instances.find((instance) => instance.id === selectedInstanceId)
   const selectedInstancePart = selectedInstance ? parts.find((part) => part.id === selectedInstance.partId) : undefined
@@ -422,13 +427,14 @@ function App() {
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
   function canEditItem(item?: MarketplaceItem): boolean {
-    return Boolean(item && (!item.ownerId || item.ownerId === userId))
+    return Boolean(userId && item && item.ownerId === userId)
   }
 
   async function requireAuthSession(): Promise<boolean> {
     if (!supabase) return false
     const sessionResult = await supabase.auth.getSession()
     if (sessionResult.data.session) {
+      if (sessionResult.data.session.user.id !== accountRef.current) return false
       setUserId(sessionResult.data.session.user.id)
       setUserEmail(sessionResult.data.session.user.email)
       return true
@@ -446,6 +452,7 @@ function App() {
 
   async function refreshMfaState(): Promise<boolean> {
     if (!supabase) return true
+    const accountId = accountRef.current
     const hasSession = await requireAuthSession()
     if (!hasSession) return false
 
@@ -453,6 +460,7 @@ function App() {
       supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
       supabase.auth.mfa.listFactors(),
     ])
+    if (accountRef.current !== accountId) return false
 
     if (aalResult.error) {
       setMfaReady(false)
@@ -564,71 +572,58 @@ function App() {
   }
 
   useEffect(() => {
-    if (!userEmail || !mfaReady) return
+    if (!userId || loadedAccountId !== userId || !mfaReady) return
 
     const timeout = window.setTimeout(() => {
-      saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() })
+      if (accountRef.current !== userId) return
+      saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() }, userId)
       if (remoteHydratedRef.current && canUseSupabase()) {
-        void saveRemoteProject(items, parts, sheet, selectedItemId).then((result) => {
-          if (!result.ok) setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
+        void saveRemoteProject(items, parts, sheet, selectedItemId, userId).then((result) => {
+          if (accountRef.current === userId && !result.ok) setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
         })
       }
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, selectedItemId, sheet, sheetHistory, userEmail, mfaReady])
+  }, [items, parts, selectedItemId, sheet, sheetHistory, userId, loadedAccountId, mfaReady])
 
   useEffect(() => {
-    if (!canUseSupabase() || !userEmail || !mfaReady) return
+    if (!canUseSupabase() || !userId || !mfaReady) return
 
     let cancelled = false
-    void loadRemoteProject().then((remoteProject) => {
-      remoteHydratedRef.current = true
-      if (cancelled || !remoteProject) {
-        if (!cancelled) setStatus('Using local browser storage. Run the Supabase schema setup to enable cloud sync.')
-        return
-      }
-
-      if (remoteProject.items.length > 0 || remoteProject.parts.length > 0 || remoteProject.sheet) {
-        setItems(remoteProject.items)
-        setParts(remoteProject.parts)
-        setSheetHistory(remoteProject.sheetHistory)
-        if (remoteProject.sheet) {
-          const remoteSheet = normalizeSheet(remoteProject.sheet)
-          setSheet(pruneMissingSheetInstances({ ...remoteSheet, gcodePresets: mergePresets(remoteSheet.gcodePresets, remoteProject.gcodePresets) }, remoteProject.parts))
-        } else {
-          setSheet((current) => ({ ...current, gcodePresets: mergePresets(current.gcodePresets, remoteProject.gcodePresets) }))
-        }
-        setSelectedItemId(remoteProject.selectedItemId)
-        setSelectedInstanceId(undefined)
-        setActiveSheetIndex(0)
-        setStatus('Loaded marketplace from Supabase.')
-      } else {
-        setStatus('Connected to Supabase. Marketplace is empty.')
-      }
+    remoteHydratedRef.current = false
+    void loadRemoteProject(userId).catch(() => undefined).then((remoteProject) => {
+      if (cancelled || accountRef.current !== userId) return
+      remoteHydratedRef.current = Boolean(remoteProject)
+      const project = remoteProject
+        ? privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
+        : loadProject(userId)
+      const loaded = projectToAppState(project)
+      setItems(loaded.items)
+      setParts(loaded.parts)
+      setSheetHistory(loaded.sheetHistory)
+      setSheet(pruneMissingSheetInstances({ ...loaded.sheet, gcodePresets: mergePresets(loaded.sheet.gcodePresets, remoteProject?.gcodePresets ?? []) }, loaded.parts))
+      setSelectedItemId(loaded.items.some((item) => item.id === remoteProject?.selectedItemId) ? remoteProject?.selectedItemId : loaded.selectedItemId)
+      setSelectedInstanceId(undefined)
+      setActiveSheetIndex(0)
+      setLoadedAccountId(userId)
+      setStatus(remoteProject ? 'Loaded your private item library.' : 'Cloud unavailable. Using this account\'s browser backup; cloud saving is disabled.')
     })
 
     return () => {
       cancelled = true
     }
-  }, [userEmail, mfaReady])
+  }, [userId, mfaReady])
 
   useEffect(() => {
     if (!supabase) return
 
-    void supabase.auth.getSession().then((result) => {
-      setUserId(result.data.session?.user.id)
-      setUserEmail(result.data.session?.user.email)
-      if (result.data.session?.user.email) void refreshMfaState()
-      setAuthReady(true)
-    })
-
     const listener = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user.id)
-      setUserEmail(session?.user.email)
-      if (session?.user.email) void refreshMfaState()
-      if (!session) {
+      const nextUserId = session?.user.id
+      if (accountRef.current !== nextUserId || !session) {
+        accountRef.current = nextUserId
         remoteHydratedRef.current = false
+        setLoadedAccountId(undefined)
         setMfaReady(false)
         setMfaMode('enroll')
         setMfaFactors([])
@@ -644,9 +639,15 @@ function App() {
         setSelectedInstanceId(undefined)
         setPreview(undefined)
         setPreviewSimulation(undefined)
-        setStatus('Signed out.')
-        setUserId(undefined)
+        setPendingExport(undefined)
+        setPage('marketplace')
+        setStatus(session ? 'Loading your account...' : 'Signed out.')
       }
+      setUserId(nextUserId)
+      setUserEmail(session?.user.email)
+      setAuthReady(true)
+      // Supabase auth calls must run outside the auth-state callback's lock.
+      if (session) window.setTimeout(() => { if (accountRef.current === nextUserId) void refreshMfaState() }, 0)
     })
 
     return () => {
@@ -669,9 +670,10 @@ function App() {
   }
 
   async function signOut() {
-    saveProject(buildProject())
-    if (remoteHydratedRef.current && canUseSupabase()) {
-      const result = await saveRemoteProject(items, parts, sheet, selectedItemId)
+    if (userId && loadedAccountId === userId) saveProject(buildProject(), userId)
+    if (userId && loadedAccountId === userId && remoteHydratedRef.current && canUseSupabase()) {
+      const result = await saveRemoteProject(items, parts, sheet, selectedItemId, userId)
+      if (accountRef.current !== userId) return
       if (!result.ok) {
         setStatus(`Sign out blocked. Cloud save failed: ${result.error ?? 'unknown error'}`)
         return
@@ -681,10 +683,10 @@ function App() {
     void supabase?.auth.signOut()
   }
 
-  async function importFilesForItem(itemId: string, fileList: FileList) {
-    const targetItem = items.find((item) => item.id === itemId)
+  async function importFilesForItem(itemId: string, fileList: FileList, createdItem?: MarketplaceItem) {
+    const targetItem = createdItem ?? items.find((item) => item.id === itemId)
     if (!canEditItem(targetItem)) {
-      setStatus('This shared item can be used on sheets, but only its owner can upload components.')
+      setStatus('This item is not in your account.')
       return
     }
 
@@ -700,11 +702,12 @@ function App() {
     const imported: Part[] = []
     for (const file of gcodeFiles) {
       const gcode = await readFile(file)
-      imported.push(createPartFromGCode(file.name, gcode, dxfByStem.get(stem(file.name)), itemId))
+      imported.push({ ...createPartFromGCode(file.name, gcode, dxfByStem.get(stem(file.name)), itemId), ownerId: userId })
     }
 
+    if (accountRef.current !== userId) return
     setParts((current) => {
-      const item = items.find((candidate) => candidate.id === itemId)
+      const item = targetItem
       const itemSku = item?.sku ?? 'ITEM'
       const existingCount = current.filter((part) => part.itemId === itemId).length
       const nextImported = imported.map((part, index) => normalizePart(part, itemSku, existingCount + index))
@@ -716,10 +719,10 @@ function App() {
 
   function importFiles(fileList: FileList) {
     if (!selectedItemId) {
-      const item = newItem('Imported Item', userEmail)
+      const item = newItem('Imported Item', userEmail, userId)
       setItems((current) => [...current, item])
       setSelectedItemId(item.id)
-      void importFilesForItem(item.id, fileList)
+      void importFilesForItem(item.id, fileList, item)
       return
     }
 
@@ -727,7 +730,7 @@ function App() {
   }
 
   function createMarketplaceItem() {
-    const item = newItem(`Item ${items.length + 1}`, userEmail)
+    const item = newItem(`Item ${items.length + 1}`, userEmail, userId)
     setItems((current) => [...current, item])
     setSelectedItemId(item.id)
     setPage('marketplace')
@@ -737,7 +740,7 @@ function App() {
   function updateMarketplaceItem(itemId: string, patch: Partial<MarketplaceItem>) {
     const targetItem = items.find((item) => item.id === itemId)
     if (!canEditItem(targetItem)) {
-      setStatus('Only the owner can edit this shared item.')
+      setStatus('This item is not in your account.')
       return
     }
 
@@ -748,7 +751,7 @@ function App() {
     const part = parts.find((candidate) => candidate.id === partId)
     const item = part?.itemId ? items.find((candidate) => candidate.id === part.itemId) : undefined
     if (!canEditItem(item)) {
-      setStatus('Only the owner can remove components from this shared item.')
+      setStatus('This item is not in your account.')
       return
     }
 
@@ -819,17 +822,19 @@ function App() {
   }
 
   async function saveCurrentProject(): Promise<boolean> {
+    if (!userId || loadedAccountId !== userId) return false
     const historyEntry = buildHistoryEntry()
     const nextHistory = [historyEntry, ...sheetHistory]
-    const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() })
+    const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
     if (!localSaved) {
       setStatus('Could not save project; browser storage may be full.')
       return false
     }
 
     if (remoteHydratedRef.current && canUseSupabase()) {
-      const remoteSaved = await saveRemoteProject(items, parts, sheet, selectedItemId)
-      const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry) : remoteSaved
+      const remoteSaved = await saveRemoteProject(items, parts, sheet, selectedItemId, userId)
+      const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry, userId) : remoteSaved
+      if (accountRef.current !== userId) return false
       if (!historySaved.ok) {
         setStatus(`Cloud save failed: ${historySaved.error ?? 'unknown error'}`)
         return false
@@ -845,7 +850,7 @@ function App() {
   }
 
   function loadSavedProject() {
-    const loadedState = projectToAppState(loadProject())
+    const loadedState = projectToAppState(loadProject(userId))
     if (!loadedState.restored) {
       setStatus('No saved project found in local browser storage.')
       return
@@ -863,9 +868,17 @@ function App() {
 
   async function importProject(fileList: FileList | null) {
     const file = fileList?.[0]
-    if (!file) return
-    const project = JSON.parse(await readFile(file)) as Project
-    const importedState = projectToAppState(project)
+    if (!file || !userId) return
+    let importedState: AppPersistenceState
+    try {
+      const project = JSON.parse(await readFile(file)) as Project
+      if (accountRef.current !== userId) return
+      const normalized = projectToAppState(project)
+      importedState = projectToAppState(copyProjectToAccount({ ...project, ...normalized }, userId))
+    } catch {
+      setStatus('Could not import this project file.')
+      return
+    }
     setItems(importedState.items)
     setSelectedItemId(importedState.selectedItemId)
     setParts(importedState.parts)
@@ -907,7 +920,8 @@ function App() {
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
       simulationWarnings: simulations.reduce((total, simulation) => total + simulation.warnings.length, 0),
-      reachCheckEnabled: Boolean(sheet.gcodeSettings.reachCheckEnabled),
+      reachCheckEnabled: sheet.instances.length > 0,
+      screwMarkCount: Array.from({ length: sheetCount }, (_, index) => planScrewPositions(parts, sheet, index).points.length).reduce((total, count) => total + count, 0),
       spindleStartEnabled: sheet.gcodeSettings.spindleStartGcode.trim().length > 0,
       validationErrors: errors.length,
       validationWarnings: warnings.length,
@@ -923,7 +937,7 @@ function App() {
 
     const result = exportCombinedGCode(parts, sheet)
     if (result.errors.length > 0) {
-      setStatus('Export blocked by G-code transformation errors.')
+      setStatus(`Export blocked: ${result.errors[0]}`)
       setPreview(result.gcode)
       return
     }
@@ -952,7 +966,7 @@ function App() {
     const results = exportPhysicalSheetGCodes(parts, sheet)
     const exportErrors = results.flatMap((result) => result.errors)
     if (exportErrors.length > 0) {
-      setStatus('Export blocked by G-code transformation errors.')
+      setStatus(`Export blocked: ${exportErrors[0]}`)
       setPreview(results.map((result) => result.gcode).join('\n\n'))
       return
     }
@@ -1037,6 +1051,10 @@ function App() {
     )
   }
 
+  if (!userId || loadedAccountId !== userId) {
+    return <main className="login-shell"><div className="login-panel">Loading your account...</div></main>
+  }
+
   return (
     <div className="app">
       <header className="toolbar">
@@ -1070,6 +1088,10 @@ function App() {
           <label>
             Border
             <input type="number" value={sheet.borderSpacing} onChange={(event) => setSheet({ ...sheet, borderSpacing: Number(event.target.value) })} />
+          </label>
+          <label className="screw-mark-control" title="6 mm cutter; recessed screw heads">
+            <input type="checkbox" checked={sheet.screwMarkingEnabled !== false} onChange={(event) => setSheet({ ...sheet, screwMarkingEnabled: event.target.checked })} />
+            Screw marks
           </label>
         </div>
         <div className="toolbar-actions">
@@ -1220,6 +1242,16 @@ function App() {
                 <span>Reach check</span>
                 <strong>{pendingExport.summary.reachCheckEnabled ? 'Enabled' : 'Off'}</strong>
               </div>
+              <div>
+                <span>Screw marks</span>
+                <strong>{pendingExport.summary.screwMarkCount > 0 ? `${pendingExport.summary.screwMarkCount} at 2 mm` : 'Off'}</strong>
+              </div>
+              {pendingExport.summary.screwMarkCount > 0 && (
+                <div>
+                  <span>After marking</span>
+                  <strong>Spindle off / M00 pause</strong>
+                </div>
+              )}
               <div>
                 <span>Spindle start block</span>
                 <strong>{pendingExport.summary.spindleStartEnabled ? 'Configured' : 'Empty'}</strong>

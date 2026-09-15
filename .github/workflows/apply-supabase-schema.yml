@@ -2,6 +2,10 @@ name: Apply Supabase Schema
 
 on:
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      SUPABASE_DB_URL:
+        required: true
 
 jobs:
   apply:

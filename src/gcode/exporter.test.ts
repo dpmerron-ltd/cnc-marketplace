@@ -13,12 +13,12 @@ function makeSheet(instance: PartInstance): Sheet {
     spacing: 5,
     borderSpacing: 10,
     instances: [instance],
+    screwMarkingEnabled: false,
     gcodeSettings: {
       startGcode: 'G21\nG17\nG90\nG94',
       spindleStartGcode: 'S18000\nM03',
       endGcode: 'M05\nM30',
       safeZ: 5,
-      reachCheckEnabled: false,
     },
     gcodePresets: [],
   }
@@ -193,10 +193,11 @@ describe('G-code exporter source machining settings', () => {
     expect(validateSheet([part], sheet)).toEqual(expectedValidation)
   })
 
-  it('emits optional reach check before spindle start', () => {
+  it('always checks the placed machining extent with the spindle off before cutting', () => {
     const part = createPartFromGCode('reach.nc', 'G21\nG90\nG01 X0 Y0\nG01 X50 Y20\nM30')
     const sheet = makeSheet(makeInstance(part.id))
-    sheet.gcodeSettings.reachCheckEnabled = true
+    const legacySettings = { reachCheckEnabled: false }
+    sheet.gcodeSettings = { ...sheet.gcodeSettings, ...legacySettings }
     const result = exportCombinedGCode([part], sheet)
 
     const reachIndex = result.gcode.indexOf('G00 X60 Y30')
@@ -204,6 +205,40 @@ describe('G-code exporter source machining settings', () => {
     expect(result.errors).toEqual([])
     expect(reachIndex).toBeGreaterThan(-1)
     expect(spindleIndex).toBeGreaterThan(reachIndex)
+    expect(result.gcode).toContain('M05\nG21\nG17\nG90\nG94\nG00 Z5\nG00 X60 Y30')
+  })
+
+  it('checks each physical sheet independently in both export modes', () => {
+    const part = createPartFromGCode('rectangle.nc', 'G21\nG90\nG01 X0 Y0 F600\nG01 X50 Y20\nM30')
+    const sheet = makeSheet(makeInstance(part.id))
+    sheet.instances.push({ ...makeInstance(part.id), id: 'i2', sheetIndex: 1, x: 100, y: 200, rotation: 90 })
+    const combined = exportCombinedGCode([part], sheet)
+    const separate = exportPhysicalSheetGCodes([part], sheet)
+
+    expect(combined.errors).toEqual([])
+    expect(combined.gcode).toContain('(Reach check: furthest transformed X/Y extent on physical sheet 1)\nM05\nG21\nG17\nG90\nG94\nG00 Z5\nG00 X60 Y30')
+    expect(combined.gcode).toContain('(Reach check: furthest transformed X/Y extent on physical sheet 2)\nM05\nG21\nG17\nG90\nG94\nG00 Z5\nG00 X120 Y250')
+    expect(separate[0].gcode).toContain('G00 X60 Y30')
+    expect(separate[0].gcode).not.toContain('G00 X120 Y250')
+    expect(separate[1].gcode).toContain('G00 X120 Y250')
+    expect(separate[1].gcode).not.toContain('G00 X60 Y30')
+  })
+
+  it('does not move to a reach-check position for an empty sheet', () => {
+    const sheet = makeSheet(makeInstance('unused'))
+    sheet.instances = []
+    expect(exportCombinedGCode([], sheet).gcode).not.toContain('Reach check:')
+    expect(exportPhysicalSheetGCodes([], sheet)[0].gcode).not.toContain('Reach check:')
+  })
+
+  it('rejects a reach check without positive clearance or valid sheet bounds', () => {
+    const part = createPartFromGCode('rectangle.nc', 'G21\nG90\nG01 X0 Y0 F600\nG01 X50 Y20\nM30')
+    const sheet = makeSheet(makeInstance(part.id))
+    sheet.gcodeSettings.safeZ = 0
+    expect(exportCombinedGCode([part], sheet).errors).toContain('Reach check requires a positive safe Z above the material.')
+    sheet.gcodeSettings.safeZ = 5
+    sheet.instances[0].x = 490
+    expect(exportPhysicalSheetGCodes([part], sheet)[0].errors).toContain('rectangle has invalid or out-of-sheet machining bounds for the reach check.')
   })
 
   it('exports nested Estlcam standalone programs without preserving terminal parking moves', () => {
@@ -262,6 +297,7 @@ describe('G-code exporter source machining settings', () => {
     const second: PartInstance = { ...makeInstance(part.id), id: 'i2', x: 320 }
     const sheet = makeSheet(first)
     sheet.instances = [first, second]
+    sheet.width = 1000
     const result = exportCombinedGCode([part], sheet)
     const operationDepths = collectOperationDepths(result.gcode)
 

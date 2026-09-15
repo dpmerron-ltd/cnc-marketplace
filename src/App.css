@@ -7,8 +7,8 @@
 }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: auto auto auto 1fr;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
@@ -54,6 +54,9 @@
 
 .toolbar-actions {
   justify-self: end;
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 100%;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -69,6 +72,11 @@
 
 .sheet-controls input {
   width: 74px;
+}
+
+.sheet-controls {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .sheet-controls .sheet-name-control input {
@@ -638,6 +646,24 @@ button.danger {
   align-content: start;
 }
 
+.sheet-controls .screw-mark-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sheet-controls .screw-mark-control input {
+  width: 16px;
+  height: 16px;
+}
+
+.screw-mark {
+  fill: none;
+  stroke: #b45309;
+  stroke-width: 1.5;
+}
+
 .button-row.compact {
   flex-wrap: wrap;
 }
@@ -936,6 +962,7 @@ textarea {
 
   .toolbar-actions {
     justify-content: flex-start;
+    margin-left: 0;
   }
 
   .diagnostics {

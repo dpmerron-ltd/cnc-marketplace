@@ -27,7 +27,7 @@ npm run build
 
 ## Supabase Setup
 
-The app can run entirely from browser storage, but it also supports Supabase cloud sync for the marketplace library.
+Sign-in and MFA use Supabase. Each account has its own private item library and browser backup.
 
 1. Open Supabase SQL Editor.
 2. Run `supabase/schema.sql`.
@@ -40,7 +40,11 @@ VITE_SUPABASE_URL=https://bsnndtwbvgrthddmbhoa.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
-The current MVP stores G-code and optional DXF text in Postgres rows. For larger public libraries, move raw files into Supabase Storage and keep only file paths in `cnc_components`.
+The current MVP stores G-code and optional DXF text in Postgres rows. Row-level security restricts items, components, sheet projects, history, and presets to their owner. Components must also belong to an item owned by that account. Existing data stays with its recorded owner; unowned legacy records are not automatically assigned or exposed.
+
+Browser backups are keyed by account ID. The old shared browser cache is never automatically loaded. Explicit project-file imports create independent copies with new IDs in the importing account. Saved placements referencing another account's components are removed when loaded.
+
+The Pages deployment applies `supabase/schema.sql` transactionally before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
 
 ## MVP Features
 
@@ -53,7 +57,8 @@ The current MVP stores G-code and optional DXF text in Postgres rows. For larger
 - Basic shelf auto-nesting for unlocked parts.
 - SVG preview generated from the same transformed representation used for export.
 - Collision and out-of-sheet validation.
-- Editable global start G-code, end G-code, and safe Z.
+- Automatic spindle-off maximum X/Y reach check for the parts on each physical sheet.
+- Optional screw-position marks, enabled by default, with a spindle-off pause before component machining.
 - Export one combined `.nc` program.
 - Save/load from browser local storage.
 - Export/import a JSON project backup.
@@ -66,6 +71,8 @@ The current MVP stores G-code and optional DXF text in Postgres rows. For larger
 - `src/gcode/transform.ts`: normalization, translation, right-angle rotation, and arc I/J vector transformation.
 - `src/gcode/validator.ts`: sheet bounds, collisions, finite coordinate, and transform safety checks.
 - `src/gcode/exporter.ts`: combined program generation with comments and safe Z transitions.
+- `src/gcode/preparationBounds.ts`: machining extents for reach checks and screw clearance, including drilling and arc extremes.
+- `src/gcode/screwPositions.ts`: sparse screw-mark planning outside complete part bounds.
 - `src/nesting/nestingEngine.ts`: MVP rectangle/shelf nesting abstraction.
 - `src/models`: typed part, instance, sheet, project, and geometry models.
 - `src/ui`: React panels and SVG sheet editor.
@@ -81,10 +88,21 @@ The current MVP stores G-code and optional DXF text in Postgres rows. For larger
 - Export is blocked when parts overlap or leave the sheet.
 - Always inspect the preview and air-cut or simulate exported programs before running a CNC machine.
 
+## Sheet Preparation
+
+Each physical sheet starts with a spindle-off move at safe Z to the maximum machining X/Y of its placed components. This exercises the required travel; it does not detect the controller's configured travel limits or verify machine homing.
+
+Screw marking is enabled by default and can be switched off with **Screw marks** on the sheet toolbar when the material is already secured. The planner assumes a 6 mm cutter and recessed screw heads. It selects up to eight waste-area positions, at least 10 mm from each complete machining bounding box and 10 mm from the sheet edges. Positions never extend beyond the components' maximum X/Y travel. Part interiors and pockets are excluded. If no position fits, export is blocked until the layout is changed or marking is switched off.
+
+Marks plunge to Z-2 at F300 (5 mm/s), with Z0 at the material surface. Each mark is followed by a separate safe-Z retract before XY travel. The program then stops the spindle, parks at X0 Y0, and pauses with M00. After the recessed screws are fitted, START resumes the spindle and original component machining. This runs independently for each physical sheet in combined and separate-file exports. The [DDCS 4.1 manual](https://www.hlt-cnc.com/uploads/38006/files/DDCS-V4.1-English-manual.pdf) documents M0 as program pause and M5 as spindle stop.
+
+The sheet preview shows the same planned mark positions as the exporter. Clearance checks identify waste areas; they do not establish how many screws are needed to secure a particular material or job.
+
 ## Known Limitations
 
 - DXF files are associated but not yet parsed into polygon outlines.
 - Auto nesting uses rectangular bounds, not true polygon nesting.
 - Arc preview is currently line-based in SVG; export still preserves transformed arc commands.
-- Start/end section detection is conservative; configure global start/end G-code in the UI before exporting real jobs.
+- Start/end section detection is conservative; exported jobs use the saved machine start/end blocks and safe Z.
+- Automatic sheet preparation requires G21/G90 programs and explicit X/Y with I/J arc geometry; radius-only and implicit-endpoint arcs block export.
 - Unsupported G-code constructs are surfaced as warnings or errors rather than guessed.
