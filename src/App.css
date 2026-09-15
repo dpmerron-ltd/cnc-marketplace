@@ -427,8 +427,7 @@ button.danger {
 }
 
 .library,
-.properties,
-.settings {
+.properties {
   min-height: 160px;
 }
 
@@ -639,40 +638,20 @@ button.danger {
   align-content: start;
 }
 
-.settings-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.settings-title span {
-  color: #667085;
-  font-size: 12px;
-}
-
-.preset-row {
-  display: grid;
-  gap: 8px;
-}
-
 .button-row.compact {
   flex-wrap: wrap;
 }
 
-.properties,
-.settings {
+.properties {
   padding: 10px;
 }
 
-.property-grid,
-.settings {
+.property-grid {
   display: grid;
   gap: 10px;
 }
 
-.property-grid label,
-.settings label {
+.property-grid label {
   display: grid;
   gap: 4px;
   font-size: 13px;

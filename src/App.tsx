@@ -18,15 +18,12 @@ import { downloadText, loadProject, saveProject } from './storage/projectStorage
 import { supabase } from './storage/supabaseClient'
 import {
   canUseSupabase,
-  deleteRemoteGCodePreset,
   deleteRemoteComponent,
   deleteRemoteSheetHistory,
   loadRemoteProject,
-  saveRemoteGCodePreset,
   saveRemoteProject,
   saveRemoteSheetHistory,
 } from './storage/supabaseProjectStore'
-import { GCodeSettings } from './ui/GCodeSettings'
 import { GCodeSimulationPanel } from './ui/GCodeSimulationPanel'
 import { HistoryPage } from './ui/HistoryPage'
 import { LoginPage } from './ui/LoginPage'
@@ -1162,38 +1159,6 @@ function App() {
               onUpdate={(patch) => selectedInstanceId && updateInstance(selectedInstanceId, patch)}
               onDuplicate={duplicateSelected}
               onDelete={deleteSelected}
-            />
-            <GCodeSettings
-              settings={sheet.gcodeSettings}
-              presets={sheet.gcodePresets ?? []}
-              defaultPresetId={sheet.defaultGcodePresetId}
-              onChange={(gcodeSettings) => setSheet({ ...sheet, gcodeSettings })}
-              onLoadPreset={(preset) => setSheet({ ...sheet, gcodeSettings: { ...preset.settings } })}
-              onSavePreset={(name) => {
-                const preset: GCodePreset = { id: crypto.randomUUID(), name, uploadedBy: userEmail, settings: { ...sheet.gcodeSettings } }
-                setSheet({ ...sheet, gcodePresets: [...(sheet.gcodePresets ?? []), preset] })
-                if (canUseSupabase()) {
-                  void saveRemoteGCodePreset(preset, userEmail).then((result) => {
-                    if (!result.ok) setStatus(`Cloud preset save failed: ${result.error ?? 'unknown error'}`)
-                  })
-                }
-              }}
-              onSetDefaultPreset={(presetId) => {
-                const preset = sheet.gcodePresets?.find((candidate) => candidate.id === presetId)
-                setSheet({
-                  ...sheet,
-                  defaultGcodePresetId: presetId,
-                  gcodeSettings: preset ? { ...preset.settings } : sheet.gcodeSettings,
-                })
-              }}
-              onDeletePreset={(presetId) => {
-                setSheet({
-                  ...sheet,
-                  gcodePresets: (sheet.gcodePresets ?? []).filter((preset) => preset.id !== presetId),
-                  defaultGcodePresetId: sheet.defaultGcodePresetId === presetId ? undefined : sheet.defaultGcodePresetId,
-                })
-                void deleteRemoteGCodePreset(presetId)
-              }}
             />
           </div>
         </div>
