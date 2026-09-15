@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createPartFromGCode } from './importPart'
-import { exportCombinedGCode } from './exporter'
+import { exportCombinedGCode, exportPhysicalSheetGCodes } from './exporter'
+import { validateSheet } from './validator'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
 
@@ -18,12 +19,6 @@ function makeSheet(instance: PartInstance): Sheet {
       endGcode: 'M05\nM30',
       safeZ: 5,
       reachCheckEnabled: false,
-      maxDepthOfCut: 6,
-      finalCutDepth: undefined,
-      applyXyFeedRate: true,
-      cuttingFeedRateMmPerSecond: 75,
-      plungeFeedRateMmPerSecond: 500 / 60,
-      rampFeedRateMmPerSecond: 10,
     },
     gcodePresets: [],
   }
@@ -51,8 +46,8 @@ function collectOperationDepths(gcode: string): Map<string, number> {
   return operationDepths
 }
 
-describe('G-code exporter feed-rate selection', () => {
-  it('uses plunge, ramp and cutting feeds without unsafe modal inheritance', () => {
+describe('G-code exporter source machining settings', () => {
+  it('preserves source plunge, ramp and cutting feeds', () => {
     const part = createPartFromGCode(
       'feeds.nc',
       [
@@ -72,21 +67,21 @@ describe('G-code exporter feed-rate selection', () => {
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G01 Z-0.25 F500')
-    expect(result.gcode).toContain('G01 X20 Y10 Z-1.5 F600')
-    expect(result.gcode).toContain('G01 X30 Y10 Z-3 F600')
+    expect(result.gcode).toContain('G01 Z-0.25 F480')
+    expect(result.gcode).toContain('G01 X20 Y10 Z-1.5 F4500')
+    expect(result.gcode).toContain('G01 X30 Y10 Z-3 F4500')
     expect(result.gcode).toContain('G01 X40 Y10 F4500')
-    expect(result.gcode).toContain('G01 Z-4 F500')
-    expect(result.gcode).toContain('G01 X50 Y10 Z-5 F600')
+    expect(result.gcode).toContain('G01 Z-4 F4500')
+    expect(result.gcode).toContain('G01 X50 Y10 Z-5 F4500')
     expect(result.gcode).toContain('G01 X60 Y10 F4500')
   })
 
-  it('uses ramp feed for helical arc moves that enter deeper into material', () => {
+  it('preserves the source feed for helical arc moves', () => {
     const part = createPartFromGCode('arc.nc', 'G21\nG90\nG01 X0 Y0\nG02 X10 Y0 Z-1 I5 J0 F4500\nM30')
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G02 X20 Y10 Z-1 I5 J0 F600')
+    expect(result.gcode).toContain('G02 X20 Y10 Z-1 I5 J0 F4500')
   })
 
   it('positions at the actual first toolpath start before an initial arc move', () => {
@@ -95,7 +90,7 @@ describe('G-code exporter feed-rate selection', () => {
 
     expect(result.errors).toEqual([])
     expect(result.gcode).toContain('G00 X13.125 Y11.9486')
-    expect(result.gcode).toContain('G02 X10 Y10 Z-1 I-2.25 J0 F600')
+    expect(result.gcode).toContain('G02 X10 Y10 Z-1 I-2.25 J0 F4500')
   })
 
   it('emits spindle start before the first cutting or ramping move', () => {
@@ -103,20 +98,20 @@ describe('G-code exporter feed-rate selection', () => {
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
 
     const spindleIndex = result.gcode.indexOf('M03')
-    const firstCutIndex = result.gcode.indexOf('G01 X10 Y10 F4500')
+    const firstCutIndex = result.gcode.indexOf('G01 X10 Y10')
     expect(spindleIndex).toBeGreaterThan(-1)
     expect(firstCutIndex).toBeGreaterThan(spindleIndex)
   })
 
-  it('uses mm/s settings while emitting G-code feed words in mm/min', () => {
-    const part = createPartFromGCode('units.nc', 'G21\nG90\nG01 X0 Y0\nG01 X10 Y0 F1\nM30')
+  it('preserves source feed units and modal feed inheritance', () => {
+    const part = createPartFromGCode('units.nc', 'G21\nG90\nG01 X0 Y0\nG01 X10 Y0 F1\nG01 X20 Y0\nM30')
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G01 X20 Y10 F4500')
+    expect(result.gcode).toContain('G01 X20 Y10 F1\nG01 X30 Y10\n')
   })
 
-  it('scales only full-depth operations when final cut depth is configured', () => {
+  it('preserves pocket and profile pass depths', () => {
     const part = createPartFromGCode(
       'depth.nc',
       [
@@ -136,18 +131,17 @@ describe('G-code exporter feed-rate selection', () => {
       ].join('\n'),
     )
     const sheet = makeSheet(makeInstance(part.id))
-    sheet.gcodeSettings.finalCutDepth = 20
     const result = exportCombinedGCode([part], sheet)
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G01 Z-1.5 F500')
-    expect(result.gcode).toContain('G01 X20 Y10 Z-3 F600')
-    expect(result.gcode).toContain('G01 X30 Y10 F4500')
-    expect(result.gcode).toContain('G01 Z-10 F500')
-    expect(result.gcode).toContain('G01 X50 Y10 Z-20 F600')
+    expect(result.gcode).toContain('G01 Z-1.5\n')
+    expect(result.gcode).toContain('G01 X20 Y10 Z-3\n')
+    expect(result.gcode).toContain('G01 X30 Y10\n')
+    expect(result.gcode).toContain('G01 Z-5\n')
+    expect(result.gcode).toContain('G01 X50 Y10 Z-10\n')
   })
 
-  it('does not scale rapid Z clearances when overriding full-depth operations', () => {
+  it('preserves rapid Z clearances and warns about rapids below the surface', () => {
     const part = createPartFromGCode(
       'rapid-depth.nc',
       [
@@ -162,13 +156,41 @@ describe('G-code exporter feed-rate selection', () => {
       ].join('\n'),
     )
     const sheet = makeSheet(makeInstance(part.id))
-    sheet.gcodeSettings.finalCutDepth = 20
     const result = exportCombinedGCode([part], sheet)
 
     expect(result.errors).toEqual([])
-    expect(result.gcode).toContain('G01 Z-10 F500')
+    expect(result.gcode).toContain('G01 Z-5\n')
     expect(result.gcode).toContain('G00 Z-2')
-    expect(result.gcode).toContain('G01 X20 Y10 Z-20 F600')
+    expect(result.gcode).toContain('G01 X20 Y10 Z-10\n')
+    expect(result.warnings).toContain('rapid-depth contains 1 rapid Z move below Z0; verify the source CAM clearance path before cutting.')
+  })
+
+  it('ignores legacy machining overrides in saved sheets for both export modes and validation', () => {
+    const part = createPartFromGCode('legacy.nc', 'G21\nG90\nG01 X0 Y0 F1200\nG01 Z-3 F480\nG01 X10 Y0 Z-6 F600\nG01 X20 Y0 F1800\nM30')
+    const sheet = makeSheet(makeInstance(part.id))
+    sheet.instances.push({ ...makeInstance(part.id), id: 'i2', sheetIndex: 1 })
+    const expectedCombined = exportCombinedGCode([part], sheet)
+    const expectedSheets = exportPhysicalSheetGCodes([part], sheet)
+    const expectedValidation = validateSheet([part], sheet)
+
+    const legacyOverrides = {
+      maxDepthOfCut: 0.1,
+      finalCutDepth: 20,
+      applyXyFeedRate: true,
+      cuttingFeedRateMmPerSecond: 75,
+      plungeFeedRateMmPerSecond: 10,
+      rampFeedRateMmPerSecond: 10,
+      cuttingFeedRateMmPerMinute: 4500,
+      plungeFeedRateMmPerMinute: 500,
+      rampFeedRateMmPerMinute: 500,
+      xyFeedRateMmPerSecond: 50,
+      xyFeedRate: 3000,
+    }
+    sheet.gcodeSettings = { ...sheet.gcodeSettings, ...legacyOverrides }
+
+    expect(exportCombinedGCode([part], sheet)).toEqual(expectedCombined)
+    expect(exportPhysicalSheetGCodes([part], sheet)).toEqual(expectedSheets)
+    expect(validateSheet([part], sheet)).toEqual(expectedValidation)
   })
 
   it('emits optional reach check before spindle start', () => {
@@ -240,7 +262,6 @@ describe('G-code exporter feed-rate selection', () => {
     const second: PartInstance = { ...makeInstance(part.id), id: 'i2', x: 320 }
     const sheet = makeSheet(first)
     sheet.instances = [first, second]
-    sheet.gcodeSettings.finalCutDepth = 18.2
     const result = exportCombinedGCode([part], sheet)
     const operationDepths = collectOperationDepths(result.gcode)
 

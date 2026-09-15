@@ -25,19 +25,6 @@ export function GCodeSettings({
   const [selectedPresetId, setSelectedPresetId] = useState(defaultPresetId ?? presets[0]?.id ?? '')
   const [presetName, setPresetName] = useState('')
   const selectedPreset = presets.find((preset) => preset.id === selectedPresetId)
-  const parseOptionalNumber = (value: string) => (value === '' ? undefined : Number(value))
-  const updateFeed = (
-    field: 'cuttingFeedRateMmPerSecond' | 'plungeFeedRateMmPerSecond' | 'rampFeedRateMmPerSecond',
-    legacyField: 'cuttingFeedRateMmPerMinute' | 'plungeFeedRateMmPerMinute' | 'rampFeedRateMmPerMinute',
-    value: string,
-  ) => {
-    const feedMmPerSecond = parseOptionalNumber(value)
-    onChange({
-      ...settings,
-      [field]: feedMmPerSecond,
-      [legacyField]: feedMmPerSecond === undefined ? undefined : feedMmPerSecond * 60,
-    })
-  }
 
   return (
     <section className="panel settings">
@@ -95,67 +82,6 @@ export function GCodeSettings({
           type="number"
           value={settings.safeZ}
           onChange={(event) => onChange({ ...settings, safeZ: Number(event.target.value) })}
-        />
-      </label>
-      <label>
-        Max depth of cut
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={settings.maxDepthOfCut ?? ''}
-          onChange={(event) => onChange({ ...settings, maxDepthOfCut: event.target.value === '' ? undefined : Number(event.target.value) })}
-        />
-      </label>
-      <label title="Optional through-cut depth override. Only operations that already reach the part's deepest cut are scaled; shallower pockets are preserved.">
-        Final Cut Depth
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={settings.finalCutDepth ?? ''}
-          onChange={(event) => onChange({ ...settings, finalCutDepth: event.target.value === '' ? undefined : Number(event.target.value) })}
-        />
-      </label>
-      <label className="checkbox">
-        <input
-          type="checkbox"
-          checked={Boolean(settings.applyXyFeedRate)}
-          onChange={(event) => onChange({ ...settings, applyXyFeedRate: event.target.checked })}
-        />
-        Override cutting, plunge and ramp feeds
-      </label>
-      <label>
-        Cutting Feed Rate (mm/s)
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={settings.cuttingFeedRateMmPerSecond ?? ''}
-          disabled={!settings.applyXyFeedRate}
-          onChange={(event) => updateFeed('cuttingFeedRateMmPerSecond', 'cuttingFeedRateMmPerMinute', event.target.value)}
-        />
-      </label>
-      <label title="Feed rate used for pure downward Z cutting moves.">
-        Plunge Feed Rate (mm/s)
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={settings.plungeFeedRateMmPerSecond ?? ''}
-          disabled={!settings.applyXyFeedRate}
-          onChange={(event) => updateFeed('plungeFeedRateMmPerSecond', 'plungeFeedRateMmPerMinute', event.target.value)}
-        />
-      </label>
-      <label title="Feed rate used for cutting moves that simultaneously change XY position and Z depth.">
-        Ramp Feed Rate (mm/s)
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={settings.rampFeedRateMmPerSecond ?? ''}
-          disabled={!settings.applyXyFeedRate}
-          onChange={(event) => updateFeed('rampFeedRateMmPerSecond', 'rampFeedRateMmPerMinute', event.target.value)}
         />
       </label>
       <label className="checkbox" title="At safe Z, rapid to the furthest transformed X/Y machining extent before starting the job.">

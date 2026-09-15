@@ -1,8 +1,6 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
-import { depthScaleForPart, linesWithDepthOverride } from './depthOverride'
 import { formatNumber } from './format'
-import { wordsToLine } from './format'
 import { instanceBounds, transformLocalPoint, transformPartProgram } from './transform'
 import type { ParsedLine } from './types'
 import type { Point } from '../models/geometry'
@@ -17,65 +15,12 @@ export interface SheetExportResult extends ExportResult {
   sheetIndex: number
 }
 
-function lineWithFeedOverride(line: ParsedLine, feedRate?: number): string {
-  if (!feedRate || feedRate <= 0) return line.raw
-  const feedIndex = line.words.findIndex((word) => word.letter === 'F')
-  const words = [...line.words]
-  const feedWord = { letter: 'F', value: feedRate, raw: `F${formatNumber(feedRate)}` }
-  if (feedIndex >= 0) words[feedIndex] = feedWord
-  else words.push(feedWord)
-
-  return wordsToLine(words, line.comment)
-}
-
-function feedRateMmPerMinute(sheet: Sheet, mode: 'cut' | 'plunge' | 'ramp'): number | undefined {
-  const settings = sheet.gcodeSettings
-  const feedMmPerSecond =
-    mode === 'cut'
-      ? settings.cuttingFeedRateMmPerSecond
-      : mode === 'plunge'
-        ? settings.plungeFeedRateMmPerSecond
-        : settings.rampFeedRateMmPerSecond
-  const legacyFeedMmPerMinute =
-    mode === 'cut'
-      ? settings.cuttingFeedRateMmPerMinute
-      : mode === 'plunge'
-        ? settings.plungeFeedRateMmPerMinute
-        : settings.rampFeedRateMmPerMinute
-
-  return feedMmPerSecond !== undefined ? feedMmPerSecond * 60 : legacyFeedMmPerMinute
-}
-
 function instanceStartPoint(part: Part, instance: Sheet['instances'][number], transformed: ReturnType<typeof transformPartProgram>): Point {
   return transformed.segments[0]?.start ?? transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
 }
 
 function wordValue(line: ParsedLine, letter: string): number | undefined {
   return line.words.find((word) => word.letter === letter)?.value
-}
-
-function lineWithToolFeed(line: ParsedLine, previousZ: number | undefined, sheet: Sheet): { raw: string; nextZ: number | undefined; mode?: 'cut' | 'plunge' | 'ramp' } {
-  const z = wordValue(line, 'Z')
-  const nextZ = z ?? previousZ
-  const motion = line.effectiveMotion
-  if (!sheet.gcodeSettings.applyXyFeedRate || (motion !== 'G01' && motion !== 'G02' && motion !== 'G03')) {
-    return { raw: line.raw, nextZ }
-  }
-
-  const hasXy = line.words.some((word) => word.letter === 'X' || word.letter === 'Y')
-  const hasZ = z !== undefined
-  const movesDown = hasZ && previousZ !== undefined && z < previousZ - 0.0001
-  if (movesDown && hasXy) {
-    return { raw: lineWithFeedOverride(line, feedRateMmPerMinute(sheet, 'ramp')), nextZ, mode: 'ramp' }
-  }
-  if (movesDown) {
-    return { raw: lineWithFeedOverride(line, feedRateMmPerMinute(sheet, 'plunge')), nextZ, mode: 'plunge' }
-  }
-  if (hasXy) {
-    return { raw: lineWithFeedOverride(line, feedRateMmPerMinute(sheet, 'cut')), nextZ, mode: 'cut' }
-  }
-
-  return { raw: line.raw, nextZ }
 }
 
 function isBlankOrCommentOnly(line: ParsedLine): boolean {
@@ -135,7 +80,6 @@ function transformedInstanceLines(
   const output: string[] = []
   const errors: string[] = []
   const warnings: string[] = []
-  const feedModes = new Set<'cut' | 'plunge' | 'ramp'>()
   let instanceNumber = startingInstanceNumber
 
   for (const instance of sheet.instances.filter((candidate) => instanceIds.includes(candidate.id))) {
@@ -160,36 +104,12 @@ function transformedInstanceLines(
 
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
-    const depthScale = depthScaleForPart(part, sheet)
-    const transformedLines = withoutSourceFooterRapids(linesWithDepthOverride(part, transformed.transformedLines, depthScale))
+    const transformedLines = withoutSourceFooterRapids(transformed.transformedLines)
     const rapidBelowSurfaceCount = transformedLines.filter((line) => line.effectiveMotion === 'G00' && (wordValue(line, 'Z') ?? 0) < 0).length
-    if (depthScale !== undefined) {
-      warnings.push(`Applied final depth override to full-depth operations in ${part.name}: exported deepest Z is -${formatNumber(sheet.gcodeSettings.finalCutDepth ?? 0)} mm; shallower operations are preserved.`)
-    }
     if (rapidBelowSurfaceCount > 0) {
       warnings.push(`${part.name} contains ${rapidBelowSurfaceCount} rapid Z move${rapidBelowSurfaceCount === 1 ? '' : 's'} below Z0; verify the source CAM clearance path before cutting.`)
     }
-    if (sheet.gcodeSettings.applyXyFeedRate) {
-      let previousZ: number | undefined = 0
-      const feedLines = transformedLines.map((line) => {
-        const result = lineWithToolFeed(line, previousZ, sheet)
-        previousZ = result.nextZ
-        if (result.mode) feedModes.add(result.mode)
-        return result.raw
-      })
-      output.push(...feedLines)
-    } else {
-      output.push(...transformedLines.map((line) => line.raw))
-    }
-  }
-
-  if (feedModes.size > 0) {
-    const cut = feedRateMmPerMinute(sheet, 'cut') ?? 0
-    const plunge = feedRateMmPerMinute(sheet, 'plunge') ?? 0
-    const ramp = feedRateMmPerMinute(sheet, 'ramp') ?? 0
-    warnings.push(
-      `Applied feed overrides: cut ${formatNumber(cut / 60)} mm/s (F${formatNumber(cut)}), plunge ${formatNumber(plunge / 60)} mm/s (F${formatNumber(plunge)}), ramp ${formatNumber(ramp / 60)} mm/s (F${formatNumber(ramp)}).`,
-    )
+    output.push(...transformedLines.map((line) => line.raw))
   }
 
   return { lines: output, errors, warnings, nextInstanceNumber: instanceNumber }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { originalFinalDepth } from './gcode/depthOverride'
+import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
 import { simulateGCode } from './gcode/simulator'
@@ -50,13 +50,6 @@ const defaultSheet: Sheet = {
     endGcode: 'M05\nM30',
     safeZ: 5,
     reachCheckEnabled: false,
-    maxDepthOfCut: 6,
-    finalCutDepth: undefined,
-    cuttingFeedRateMmPerSecond: 75,
-    plungeFeedRateMmPerSecond: 10,
-    rampFeedRateMmPerSecond: 10,
-    xyFeedRateMmPerSecond: 50,
-    applyXyFeedRate: false,
   },
   gcodePresets: [
     {
@@ -68,13 +61,6 @@ const defaultSheet: Sheet = {
         endGcode: 'M05\nM30',
         safeZ: 5,
         reachCheckEnabled: false,
-        maxDepthOfCut: 6,
-        finalCutDepth: undefined,
-        cuttingFeedRateMmPerSecond: 75,
-        plungeFeedRateMmPerSecond: 10,
-        rampFeedRateMmPerSecond: 10,
-        xyFeedRateMmPerSecond: 50,
-        applyXyFeedRate: false,
       },
     },
   ],
@@ -83,45 +69,13 @@ const defaultSheet: Sheet = {
 
 function normalizeGCodeSettings(rawSettings: Partial<Sheet['gcodeSettings']> | undefined): Sheet['gcodeSettings'] {
   const raw = rawSettings ?? {}
-  const settings: Sheet['gcodeSettings'] = {
-    ...defaultSheet.gcodeSettings,
-    ...raw,
+  return {
+    startGcode: raw.startGcode ?? defaultSheet.gcodeSettings.startGcode,
+    spindleStartGcode: raw.spindleStartGcode ?? defaultSheet.gcodeSettings.spindleStartGcode,
+    endGcode: raw.endGcode ?? defaultSheet.gcodeSettings.endGcode,
+    safeZ: raw.safeZ ?? defaultSheet.gcodeSettings.safeZ,
+    reachCheckEnabled: raw.reachCheckEnabled ?? defaultSheet.gcodeSettings.reachCheckEnabled,
   }
-
-  if (raw.xyFeedRateMmPerSecond === undefined && raw.xyFeedRate !== undefined) {
-    settings.xyFeedRateMmPerSecond = raw.xyFeedRate / 60
-  }
-
-  if (raw.cuttingFeedRateMmPerSecond === undefined) {
-    if (raw.cuttingFeedRateMmPerMinute !== undefined) {
-      settings.cuttingFeedRateMmPerSecond = raw.cuttingFeedRateMmPerMinute / 60
-    } else if (settings.xyFeedRateMmPerSecond !== undefined) {
-      settings.cuttingFeedRateMmPerSecond = settings.xyFeedRateMmPerSecond
-    }
-  }
-
-  if (raw.plungeFeedRateMmPerSecond === undefined) {
-    settings.plungeFeedRateMmPerSecond =
-      raw.plungeFeedRateMmPerMinute !== undefined
-        ? raw.plungeFeedRateMmPerMinute / 60
-        : Math.min(settings.cuttingFeedRateMmPerSecond ?? 10, 10)
-  }
-
-  if (raw.rampFeedRateMmPerSecond === undefined) {
-    settings.rampFeedRateMmPerSecond =
-      raw.rampFeedRateMmPerMinute !== undefined
-        ? raw.rampFeedRateMmPerMinute / 60
-        : settings.plungeFeedRateMmPerSecond
-  }
-
-  settings.cuttingFeedRateMmPerMinute =
-    settings.cuttingFeedRateMmPerSecond !== undefined ? settings.cuttingFeedRateMmPerSecond * 60 : undefined
-  settings.plungeFeedRateMmPerMinute =
-    settings.plungeFeedRateMmPerSecond !== undefined ? settings.plungeFeedRateMmPerSecond * 60 : undefined
-  settings.rampFeedRateMmPerMinute =
-    settings.rampFeedRateMmPerSecond !== undefined ? settings.rampFeedRateMmPerSecond * 60 : undefined
-
-  return settings
 }
 
 function normalizeSheet(sheet: Sheet): Sheet {
@@ -208,7 +162,9 @@ function mergePresets(current: GCodePreset[] | undefined, shared: GCodePreset[])
   const byId = new Map<string, GCodePreset>()
   for (const preset of current ?? []) byId.set(preset.id, preset)
   for (const preset of shared) byId.set(preset.id, preset)
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...byId.values()]
+    .map((preset) => ({ ...preset, settings: normalizeGCodeSettings(preset.settings) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function sheetCountFor(sheet: Sheet): number {
@@ -259,9 +215,7 @@ function safeSimulateGCode(source: string): GCodeSimulation {
   }
 }
 
-function deepestConfiguredCut(parts: Part[], sheet: Sheet): number | undefined {
-  if (sheet.gcodeSettings.finalCutDepth && sheet.gcodeSettings.finalCutDepth > 0) return sheet.gcodeSettings.finalCutDepth
-
+function deepestSourceCut(parts: Part[], sheet: Sheet): number | undefined {
   let deepest: number | undefined
   for (const instance of sheet.instances) {
     const part = parts.find((candidate) => candidate.id === instance.partId)
@@ -326,12 +280,7 @@ interface ExportSummary {
   placedParts: number
   uniqueComponents: number
   deepestCutMm?: number
-  finalCutDepthMm?: number
-  maxDepthOfCutMm?: number
   safeZ: number
-  cuttingFeedMmPerSecond?: number
-  plungeFeedMmPerSecond?: number
-  rampFeedMmPerSecond?: number
   estimatedCuttingTimeSeconds: number
   simulatedDistanceMm: number
   simulationErrors: number
@@ -955,13 +904,8 @@ function App() {
       physicalSheets: sheetCount,
       placedParts: sheet.instances.length,
       uniqueComponents: new Set(sheet.instances.map((instance) => instance.partId)).size,
-      deepestCutMm: deepestConfiguredCut(parts, sheet),
-      finalCutDepthMm: sheet.gcodeSettings.finalCutDepth,
-      maxDepthOfCutMm: sheet.gcodeSettings.maxDepthOfCut,
+      deepestCutMm: deepestSourceCut(parts, sheet),
       safeZ: sheet.gcodeSettings.safeZ,
-      cuttingFeedMmPerSecond: sheet.gcodeSettings.cuttingFeedRateMmPerSecond,
-      plungeFeedMmPerSecond: sheet.gcodeSettings.plungeFeedRateMmPerSecond,
-      rampFeedMmPerSecond: sheet.gcodeSettings.rampFeedRateMmPerSecond,
       estimatedCuttingTimeSeconds,
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
@@ -1296,28 +1240,8 @@ function App() {
                 <strong>{formatSetting(pendingExport.summary.deepestCutMm, ' mm')}</strong>
               </div>
               <div>
-                <span>Final depth override</span>
-                <strong>{formatSetting(pendingExport.summary.finalCutDepthMm, ' mm')}</strong>
-              </div>
-              <div>
-                <span>Max depth of cut</span>
-                <strong>{formatSetting(pendingExport.summary.maxDepthOfCutMm, ' mm')}</strong>
-              </div>
-              <div>
                 <span>Safe Z</span>
                 <strong>{formatSetting(pendingExport.summary.safeZ, ' mm')}</strong>
-              </div>
-              <div>
-                <span>Cutting feed</span>
-                <strong>{formatSetting(pendingExport.summary.cuttingFeedMmPerSecond, ' mm/s')}</strong>
-              </div>
-              <div>
-                <span>Plunge feed</span>
-                <strong>{formatSetting(pendingExport.summary.plungeFeedMmPerSecond, ' mm/s')}</strong>
-              </div>
-              <div>
-                <span>Ramp feed</span>
-                <strong>{formatSetting(pendingExport.summary.rampFeedMmPerSecond, ' mm/s')}</strong>
               </div>
               <div>
                 <span>Estimated time</span>

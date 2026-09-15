@@ -29,13 +29,6 @@ function makeSheet(instances: PartInstance[]): Sheet {
       endGcode: '',
       safeZ: 5,
       reachCheckEnabled: false,
-      maxDepthOfCut: 6,
-      finalCutDepth: undefined,
-      cuttingFeedRateMmPerSecond: 75,
-      plungeFeedRateMmPerSecond: 10,
-      rampFeedRateMmPerSecond: 10,
-      xyFeedRateMmPerSecond: 50,
-      applyXyFeedRate: false,
     },
     gcodePresets: [],
   }
