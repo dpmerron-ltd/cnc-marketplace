@@ -235,7 +235,7 @@ describe('G-code exporter source machining settings', () => {
     const part = createPartFromGCode('rectangle.nc', 'G21\nG90\nG01 X0 Y0 F600\nG01 X50 Y20\nM30')
     const sheet = makeSheet(makeInstance(part.id))
     sheet.gcodeSettings.safeZ = 0
-    expect(exportCombinedGCode([part], sheet).errors).toContain('Reach check requires a positive safe Z above the material.')
+    expect(exportCombinedGCode([part], sheet).errors).toContain('Safe Z must be a finite positive height above the material.')
     sheet.gcodeSettings.safeZ = 5
     sheet.instances[0].x = 490
     expect(exportPhysicalSheetGCodes([part], sheet)[0].errors).toContain('rectangle has invalid or out-of-sheet machining bounds for the reach check.')

@@ -17,6 +17,7 @@ const rectangle = () => createPartFromGCode('rectangle.nc', [
 function sheetFor(partId: string): Sheet {
   return {
     name: 'Preparation', width: 1220, height: 1220, spacing: 30, borderSpacing: 20,
+    screwMarkingEnabled: true,
     instances: [
       { id: 'first', partId, x: 20, y: 20, rotation: 0, sheetIndex: 0, locked: false },
       { id: 'second', partId, x: 150, y: 20, rotation: 0, sheetIndex: 0, locked: false },
@@ -68,11 +69,11 @@ describe('screw-position preparation', () => {
     expect(exportCombinedGCode([part], sheet).errors).toContain(plan.errors[0])
   })
 
-  it('does not mark empty sheets or sheets with marking turned off', () => {
+  it.each([false, undefined])('does not mark empty sheets or sheets without explicit opt-in (%s)', (enabled) => {
     const part = rectangle()
     const sheet = sheetFor(part.id)
     expect(planScrewPositions([part], sheet, 1).points).toEqual([])
-    sheet.screwMarkingEnabled = false
+    sheet.screwMarkingEnabled = enabled
     const result = exportCombinedGCode([part], sheet)
     expect(result.errors).toEqual([])
     expect(result.gcode).toContain('Reach check:')

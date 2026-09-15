@@ -5,6 +5,7 @@ import { formatNumber } from './format'
 import { planScrewPositions, screwMarkDepthMm, screwMarkFeedMmPerMinute } from './screwPositions'
 import { parseGCode } from './parser'
 import { preparationBounds } from './preparationBounds'
+import { effectiveSafeZ, overrideClearance } from './safeZ'
 import { transformLocalPoint, transformPartProgram } from './transform'
 import type { ParsedLine } from './types'
 import type { Point } from '../models/geometry'
@@ -176,13 +177,22 @@ function transformedInstanceLines(
     if (rapidBelowSurfaceCount > 0) {
       warnings.push(`${part.name} contains ${rapidBelowSurfaceCount} rapid Z move${rapidBelowSurfaceCount === 1 ? '' : 's'} below Z0; verify the source CAM clearance path before cutting.`)
     }
-    output.push(...transformedLines.map((line) => line.raw))
+    if (sheet.safeZOverrideMm !== undefined) {
+      const overridden = overrideClearance(part, transformedLines, sheet.safeZOverrideMm)
+      errors.push(...overridden.errors)
+      output.push(...overridden.lines)
+    } else {
+      output.push(...transformedLines.map((line) => line.raw))
+    }
   }
 
   return { lines: output, errors, warnings, nextInstanceNumber: instanceNumber }
 }
 
 export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
+  const safeZ = effectiveSafeZ(sheet)
+  if (!Number.isFinite(safeZ) || safeZ <= 0) return { gcode: '', errors: ['Safe Z must be a finite positive height above the material.'], warnings: [] }
+  sheet = { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } }
   const errors: string[] = []
   const warnings: string[] = []
   const output: string[] = []
@@ -232,6 +242,9 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
 
 export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExportResult[] {
   const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
+  const safeZ = effectiveSafeZ(sheet)
+  if (!Number.isFinite(safeZ) || safeZ <= 0) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: ['Safe Z must be a finite positive height above the material.'], warnings: [] }))
+  sheet = { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } }
 
   return Array.from({ length: sheetCount }, (_, sheetIndex) => {
     const output: string[] = []

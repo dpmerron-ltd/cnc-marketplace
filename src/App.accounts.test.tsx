@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
@@ -48,6 +48,27 @@ async function switchAccount(userId: string) {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear() })
   afterEach(cleanup)
+
+  it('makes screw marking opt-in and persists the optional safe Z height', async () => {
+    mock.load.mockResolvedValue(library('alice'))
+    render(<App />)
+    const marking = await screen.findByRole('checkbox', { name: 'Screw marks' })
+    const override = screen.getByRole('checkbox', { name: 'Override safe Z' })
+    const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
+    expect(marking).not.toBeChecked()
+    expect(override).not.toBeChecked()
+    expect(height).toBeDisabled()
+    fireEvent.click(override)
+    expect(height).toBeEnabled()
+    fireEvent.change(height, { target: { value: '20' } })
+    fireEvent.click(marking)
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 20, screwMarkingEnabled: true }), expect.anything(), 'alice'))
+    mock.save.mockClear()
+    fireEvent.click(override)
+    fireEvent.click(marking)
+    expect(height).toBeDisabled()
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: undefined, screwMarkingEnabled: false }), expect.anything(), 'alice'))
+  })
 
   it('clears a previous library when the next account is empty and only saves the new account snapshot', async () => {
     mock.load.mockResolvedValueOnce(library('alice')).mockResolvedValueOnce({ items: [], parts: [], sheetHistory: [], gcodePresets: [] })

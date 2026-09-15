@@ -5,6 +5,7 @@ import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter
 import { createPartFromGCode } from './gcode/importPart'
 import { simulateGCode } from './gcode/simulator'
 import { planScrewPositions } from './gcode/screwPositions'
+import { effectiveSafeZ } from './gcode/safeZ'
 import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
@@ -43,7 +44,7 @@ const defaultSheet: Sheet = {
   spacing: 5,
   borderSpacing: 10,
   instances: [],
-  screwMarkingEnabled: true,
+  screwMarkingEnabled: false,
   gcodeSettings: {
     startGcode: 'G21\nG17\nG90\nG94',
     spindleStartGcode: 'S18000\nM03',
@@ -84,7 +85,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
     ...defaultSheet,
     ...sheet,
     name: sheet.name?.trim() || defaultSheet.name,
-    screwMarkingEnabled: sheet.screwMarkingEnabled ?? true,
+    screwMarkingEnabled: sheet.screwMarkingEnabled ?? false,
     instances: sheet.instances.map((instance) => ({ ...instance, sheetIndex: instance.sheetIndex ?? 0 })),
     gcodeSettings,
     gcodePresets: normalizedPresets,
@@ -915,7 +916,7 @@ function App() {
       placedParts: sheet.instances.length,
       uniqueComponents: new Set(sheet.instances.map((instance) => instance.partId)).size,
       deepestCutMm: deepestSourceCut(parts, sheet),
-      safeZ: sheet.gcodeSettings.safeZ,
+      safeZ: effectiveSafeZ(sheet),
       estimatedCuttingTimeSeconds,
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
@@ -1090,8 +1091,16 @@ function App() {
             <input type="number" value={sheet.borderSpacing} onChange={(event) => setSheet({ ...sheet, borderSpacing: Number(event.target.value) })} />
           </label>
           <label className="screw-mark-control" title="6 mm cutter; recessed screw heads">
-            <input type="checkbox" checked={sheet.screwMarkingEnabled !== false} onChange={(event) => setSheet({ ...sheet, screwMarkingEnabled: event.target.checked })} />
+            <input type="checkbox" checked={sheet.screwMarkingEnabled === true} onChange={(event) => setSheet({ ...sheet, screwMarkingEnabled: event.target.checked })} />
             Screw marks
+          </label>
+          <label className="screw-mark-control" title="Override above-surface rapid clearance; Z0 is the material surface">
+            <input type="checkbox" checked={sheet.safeZOverrideMm !== undefined} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: event.target.checked ? sheet.gcodeSettings.safeZ : undefined })} />
+            Override safe Z
+          </label>
+          <label>
+            Safe Z (mm)
+            <input type="number" min="0.1" step="0.1" disabled={sheet.safeZOverrideMm === undefined} value={sheet.safeZOverrideMm ?? sheet.gcodeSettings.safeZ} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: Number(event.target.value) })} />
           </label>
         </div>
         <div className="toolbar-actions">

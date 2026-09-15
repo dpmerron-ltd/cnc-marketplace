@@ -44,7 +44,7 @@ function axisCandidates(maximum: number, intervals: Array<[number, number]>): nu
 export function planScrewPositions(parts: Part[], sheet: Sheet, sheetIndex: number): ScrewPositionPlan {
   const errors: string[] = []
   const warnings: string[] = []
-  if (sheet.screwMarkingEnabled === false) return { points: [], errors, warnings }
+  if (sheet.screwMarkingEnabled !== true) return { points: [], errors, warnings }
   const bounds: Bounds[] = []
   for (const instance of sheet.instances.filter(instance => instance.sheetIndex === sheetIndex)) {
     const part = parts.find(part => part.id === instance.partId)

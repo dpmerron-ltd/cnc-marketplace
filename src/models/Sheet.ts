@@ -23,6 +23,7 @@ export interface Sheet {
   borderSpacing: number
   instances: PartInstance[]
   screwMarkingEnabled?: boolean
+  safeZOverrideMm?: number
   gcodeSettings: GCodeSettings
   gcodePresets?: GCodePreset[]
   defaultGcodePresetId?: string
