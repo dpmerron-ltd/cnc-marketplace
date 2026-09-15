@@ -56,18 +56,40 @@ describe('account switching', () => {
     const override = screen.getByRole('checkbox', { name: 'Override safe Z' })
     const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
     expect(marking).not.toBeChecked()
-    expect(override).not.toBeChecked()
-    expect(height).toBeDisabled()
-    fireEvent.click(override)
+    expect(override).toBeChecked()
     expect(height).toBeEnabled()
-    fireEvent.change(height, { target: { value: '20' } })
+    expect(height).toHaveValue(20)
+    fireEvent.change(height, { target: { value: '25' } })
     fireEvent.click(marking)
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 20, screwMarkingEnabled: true }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 25, screwMarkingEnabled: true }), expect.anything(), 'alice'))
     mock.save.mockClear()
     fireEvent.click(override)
     fireEvent.click(marking)
     expect(height).toBeDisabled()
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: undefined, screwMarkingEnabled: false }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: null, screwMarkingEnabled: false }), expect.anything(), 'alice'))
+    fireEvent.click(override)
+    expect(height).toHaveValue(20)
+  })
+
+  it.each([undefined, null, 35])('restores saved override %s without losing an explicit off choice', async (safeZOverrideMm) => {
+    const remote = library('alice')
+    remote.sheet = {
+      name: 'Saved', width: 500, height: 500, spacing: 10, borderSpacing: 10, instances: [],
+      safeZOverrideMm,
+      gcodeSettings: { startGcode: 'G21\nG90', spindleStartGcode: 'S18000\nM03', endGcode: 'M05\nM30', safeZ: 5 },
+    }
+    mock.load.mockResolvedValue(JSON.parse(JSON.stringify(remote)))
+    render(<App />)
+    const override = await screen.findByRole('checkbox', { name: 'Override safe Z' })
+    const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
+    expect(height).toHaveValue(safeZOverrideMm ?? 20)
+    if (safeZOverrideMm === null) {
+      expect(override).not.toBeChecked()
+      expect(height).toBeDisabled()
+    } else {
+      expect(override).toBeChecked()
+      expect(height).toBeEnabled()
+    }
   })
 
   it('clears a previous library when the next account is empty and only saves the new account snapshot', async () => {

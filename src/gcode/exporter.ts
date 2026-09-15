@@ -177,7 +177,7 @@ function transformedInstanceLines(
     if (rapidBelowSurfaceCount > 0) {
       warnings.push(`${part.name} contains ${rapidBelowSurfaceCount} rapid Z move${rapidBelowSurfaceCount === 1 ? '' : 's'} below Z0; verify the source CAM clearance path before cutting.`)
     }
-    if (sheet.safeZOverrideMm !== undefined) {
+    if (sheet.safeZOverrideMm != null) {
       const overridden = overrideClearance(part, transformedLines, sheet.safeZOverrideMm)
       errors.push(...overridden.errors)
       output.push(...overridden.lines)

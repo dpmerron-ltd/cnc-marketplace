@@ -42,11 +42,11 @@ describe('safe Z override', () => {
     expect(cutting(result.gcode)).toEqual(cutting(original.gcode))
   })
 
-  it('leaves source clearance unchanged when disabled', () => {
+  it.each([undefined, null])('leaves source clearance unchanged when disabled (%s)', (disabled) => {
     const { part, sheet } = fixture()
     expect(exportCombinedGCode([part], sheet).gcode).toContain('G00 Z5')
     const overridden = { ...sheet, safeZOverrideMm: 20 }
-    expect(exportCombinedGCode([part], { ...overridden, safeZOverrideMm: undefined })).toEqual(exportCombinedGCode([part], sheet))
+    expect(exportCombinedGCode([part], { ...overridden, safeZOverrideMm: disabled })).toEqual(exportCombinedGCode([part], sheet))
   })
 
   it('preserves a first vertical approach above Z0 even when the source start Z is unknown', () => {

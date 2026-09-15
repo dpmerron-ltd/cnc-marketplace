@@ -23,7 +23,8 @@ export interface Sheet {
   borderSpacing: number
   instances: PartInstance[]
   screwMarkingEnabled?: boolean
-  safeZOverrideMm?: number
+  // null records an explicitly disabled override; absent values use the app default.
+  safeZOverrideMm?: number | null
   gcodeSettings: GCodeSettings
   gcodePresets?: GCodePreset[]
   defaultGcodePresetId?: string

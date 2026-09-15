@@ -5,7 +5,7 @@ import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter
 import { createPartFromGCode } from './gcode/importPart'
 import { simulateGCode } from './gcode/simulator'
 import { planScrewPositions } from './gcode/screwPositions'
-import { effectiveSafeZ } from './gcode/safeZ'
+import { defaultSafeZOverrideMm, effectiveSafeZ } from './gcode/safeZ'
 import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
@@ -45,6 +45,7 @@ const defaultSheet: Sheet = {
   borderSpacing: 10,
   instances: [],
   screwMarkingEnabled: false,
+  safeZOverrideMm: defaultSafeZOverrideMm,
   gcodeSettings: {
     startGcode: 'G21\nG17\nG90\nG94',
     spindleStartGcode: 'S18000\nM03',
@@ -86,6 +87,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
     ...sheet,
     name: sheet.name?.trim() || defaultSheet.name,
     screwMarkingEnabled: sheet.screwMarkingEnabled ?? false,
+    safeZOverrideMm: sheet.safeZOverrideMm === undefined ? defaultSafeZOverrideMm : sheet.safeZOverrideMm,
     instances: sheet.instances.map((instance) => ({ ...instance, sheetIndex: instance.sheetIndex ?? 0 })),
     gcodeSettings,
     gcodePresets: normalizedPresets,
@@ -1095,12 +1097,12 @@ function App() {
             Screw marks
           </label>
           <label className="screw-mark-control" title="Override above-surface rapid clearance; Z0 is the material surface">
-            <input type="checkbox" checked={sheet.safeZOverrideMm !== undefined} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: event.target.checked ? sheet.gcodeSettings.safeZ : undefined })} />
+            <input type="checkbox" checked={sheet.safeZOverrideMm != null} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: event.target.checked ? defaultSafeZOverrideMm : null })} />
             Override safe Z
           </label>
           <label>
             Safe Z (mm)
-            <input type="number" min="0.1" step="0.1" disabled={sheet.safeZOverrideMm === undefined} value={sheet.safeZOverrideMm ?? sheet.gcodeSettings.safeZ} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: Number(event.target.value) })} />
+            <input type="number" min="0.1" step="0.1" disabled={sheet.safeZOverrideMm == null} value={sheet.safeZOverrideMm ?? defaultSafeZOverrideMm} onChange={(event) => setSheet({ ...sheet, safeZOverrideMm: Number(event.target.value) })} />
           </label>
         </div>
         <div className="toolbar-actions">

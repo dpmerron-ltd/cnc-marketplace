@@ -59,7 +59,7 @@ The Pages deployment applies `supabase/schema.sql` transactionally before publis
 - Collision and out-of-sheet validation.
 - Automatic spindle-off maximum X/Y reach check for the parts on each physical sheet.
 - Optional screw-position marks, off by default, with a spindle-off pause before component machining.
-- Optional safe Z clearance override, without changing source cutting depths or feeds.
+- Safe Z clearance override enabled at 20 mm by default, without changing source cutting depths or feeds.
 - Export one combined `.nc` program.
 - Save/load from browser local storage.
 - Export/import a JSON project backup.
@@ -93,7 +93,7 @@ The Pages deployment applies `supabase/schema.sql` transactionally before publis
 
 Each physical sheet starts with a spindle-off move at safe Z to the maximum machining X/Y of its placed components. This exercises the required travel; it does not detect the controller's configured travel limits or verify machine homing.
 
-Tick **Override safe Z**, then set **Safe Z (mm)** to change the clearance above the material surface. This applies to preparation, screw-mark retracts, inter-component moves, finishing, and above-surface rapid clearance in imported components. The exporter lifts vertically before above-surface lateral rapids. Source cutting depths, feeds, below-surface tab moves, and vertical approach moves such as Z0.5 are preserved. With the override unticked, source clearance is unchanged. The value must be finite and positive (at least 0.5 mm with screw marking). Verify clearance above clamps and available machine Z travel; the app cannot measure either.
+**Override safe Z** defaults to on at **20 mm** above the material surface. New sheets and older sheets without a saved override use this default; saved heights and an explicitly unticked choice are retained. Set **Safe Z (mm)** to choose a different height. This applies to preparation, screw-mark retracts, inter-component moves, finishing, and above-surface rapid clearance in imported components. The exporter lifts vertically before above-surface lateral rapids. Source cutting depths, feeds, below-surface tab moves, and vertical approach moves such as Z0.5 are preserved. With the override unticked, source clearance is unchanged. The value must be finite and positive (at least 0.5 mm with screw marking). Verify clearance above clamps and available machine Z travel; the app cannot measure either.
 
 Screw marking is off by default on new sheets; tick **Screw marks** on the sheet toolbar to include it. Existing sheets retain their saved choice. The planner assumes a 6 mm cutter and recessed screw heads. It selects up to eight waste-area positions, at least 10 mm from each complete machining bounding box and 10 mm from the sheet edges. Positions never extend beyond the components' maximum X/Y travel. Part interiors and pockets are excluded. If no position fits, export is blocked until the layout is changed or marking is switched off.
 

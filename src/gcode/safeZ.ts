@@ -4,8 +4,10 @@ import { formatNumber, wordsToLine } from './format'
 import { createInitialState, getWord, updatePositionFromLine } from './state'
 import type { ParsedLine } from './types'
 
+export const defaultSafeZOverrideMm = 20
+
 export function effectiveSafeZ(sheet: Sheet): number {
-  return sheet.safeZOverrideMm === undefined ? sheet.gcodeSettings.safeZ : sheet.safeZOverrideMm
+  return sheet.safeZOverrideMm ?? sheet.gcodeSettings.safeZ
 }
 
 export function overrideClearance(part: Part, lines: ParsedLine[], safeZ: number): { lines: string[]; errors: string[] } {
