@@ -24,7 +24,7 @@ export const jobRequestSchema = z.strictObject({
   items: z.array(z.strictObject({ itemId: z.uuid().optional(), sku: text(100).optional(), quantity: z.number().int().min(1).max(20) }).refine(value => Boolean(value.itemId) !== Boolean(value.sku), 'Supply either itemId or sku, not both.')).min(1).max(20),
   sheet: z.strictObject({
     widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.number().positive().max(500).optional(),
-    spacingMm: z.number().min(0).max(100).default(5), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(false),
+    spacingMm: z.number().min(0).max(100).default(30), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(true),
   }).refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.'),
   labels: z.strictObject({ widthMm: z.number().min(40).max(190).default(50), heightMm: z.number().min(20).max(277).default(25) }).default({ widthMm: 50, heightMm: 25 }),
 })

@@ -65,18 +65,19 @@ describe('account switching', () => {
     expect(screen.getByRole('textbox', { name: 'Material' })).toHaveValue('')
   })
 
-  it('makes screw marking opt-in and persists the optional safe Z height', async () => {
+  it('defaults to screw marking with a 30 mm gap and 10 mm border, and persists explicit opt-outs', async () => {
     mock.load.mockResolvedValue(library('alice'))
     render(<App />)
     const marking = await screen.findByRole('checkbox', { name: 'Screw marks' })
     const override = screen.getByRole('checkbox', { name: 'Override safe Z' })
     const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
-    expect(marking).not.toBeChecked()
+    expect(marking).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'Gap' })).toHaveValue(30)
+    expect(screen.getByRole('spinbutton', { name: 'Border' })).toHaveValue(10)
     expect(override).toBeChecked()
     expect(height).toBeEnabled()
     expect(height).toHaveValue(20)
     fireEvent.change(height, { target: { value: '25' } })
-    fireEvent.click(marking)
     await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 25, screwMarkingEnabled: true }), expect.anything(), 'alice'))
     mock.save.mockClear()
     fireEvent.click(override)
@@ -85,6 +86,22 @@ describe('account switching', () => {
     await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: null, screwMarkingEnabled: false }), expect.anything(), 'alice'))
     fireEvent.click(override)
     expect(height).toHaveValue(20)
+  })
+
+  it.each([undefined, false, true])('restores screw marking %s and preserves saved spacing', async (screwMarkingEnabled) => {
+    const remote = library('alice')
+    remote.sheet = {
+      name: 'Saved', width: 500, height: 500, spacing: 5, borderSpacing: 20, instances: [],
+      screwMarkingEnabled,
+      gcodeSettings: { startGcode: 'G21\nG90', spindleStartGcode: 'S18000\nM03', endGcode: 'M05\nM30', safeZ: 5 },
+    }
+    mock.load.mockResolvedValue(JSON.parse(JSON.stringify(remote)))
+    render(<App />)
+    const marking = await screen.findByRole('checkbox', { name: 'Screw marks' })
+    if (screwMarkingEnabled === false) expect(marking).not.toBeChecked()
+    else expect(marking).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'Gap' })).toHaveValue(5)
+    expect(screen.getByRole('spinbutton', { name: 'Border' })).toHaveValue(20)
   })
 
   it.each([undefined, null, 35])('restores saved override %s without losing an explicit off choice', async (safeZOverrideMm) => {

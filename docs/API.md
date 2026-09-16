@@ -30,10 +30,10 @@ curl --fail-with-body "$CNC_API/jobs" \
       "heightMm": 1220,
       "material": "Birch plywood",
       "thicknessMm": 18,
-      "spacingMm": 5,
+      "spacingMm": 30,
       "borderMm": 10,
       "safeZMm": 20,
-      "screwMarks": false
+      "screwMarks": true
     },
     "labels": {"widthMm": 50, "heightMm": 25},
     "notes": "Check grain direction and the loaded cutter before cutting."
@@ -42,7 +42,7 @@ curl --fail-with-body "$CNC_API/jobs" \
 
 Use exactly one of `sku` or `itemId` per line. SKU matching is exact and case-sensitive; duplicate SKUs are rejected as ambiguous. `GET /items` returns valid IDs and SKUs for the caller's account. Repeated lines referencing the same item are combined. Quantity is a positive integer, not a machining-pass count.
 
-Required: `jobName`, `orderNumber`, `items`, and sheet `widthMm`, `heightMm`, `material`. Unknown properties are rejected, including owner IDs and feed/depth overrides. Optional defaults: spacing 5 mm, border 10 mm, safe Z 20 mm, screw marks off, labels 50 x 25 mm. Material thickness and notes are optional. Material declarations are supplied by the caller; the library does not validate that every component uses the same stock or grain direction.
+Required: `jobName`, `orderNumber`, `items`, and sheet `widthMm`, `heightMm`, `material`. Unknown properties are rejected, including owner IDs and feed/depth overrides. Optional defaults: spacing 30 mm, border 10 mm, safe Z 20 mm, screw marks on, labels 50 x 25 mm. Set `screwMarks: false` to disable marking. Explicit settings and already-generated job files are not changed by new defaults. Material thickness and notes are optional. Material declarations are supplied by the caller; the library does not validate that every component uses the same stock or grain direction.
 
 The response is `201 Created` with `Location`, a UUID `id`, job/order names, `status`, timestamps, `manifest`, `files` and `status_history`. Example file metadata:
 

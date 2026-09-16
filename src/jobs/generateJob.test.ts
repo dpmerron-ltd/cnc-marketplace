@@ -11,11 +11,24 @@ describe('automated job generation', () => {
     expect(job.manifest.cuts.map(cut => cut.partNumber)).toEqual(['P001', 'P002', 'P003', 'P004'])
     expect(validateSheet(job.parts, job.sheet).filter(issue => issue.level === 'error')).toEqual([])
     expect(job.manifest.request.labels).toEqual({ widthMm: 50, heightMm: 25 })
+    expect(job.manifest.request.sheet).toMatchObject({ spacingMm: 30, borderMm: 10, screwMarks: true, safeZMm: 20 })
+    expect(job.manifest.sheets.every(sheet => sheet.screwMarks > 0)).toBe(true)
     for (const file of job.exported) {
       expect(file.gcode).toContain('G00 Z20')
       expect(file.gcode).toContain('G01 Z-2 F300')
       expect(file.gcode).toContain('F1000')
+      expect(file.gcode).toContain('(Screw marks:')
+      expect(file.gcode).toContain('M00')
+    }
+  })
+  it('preserves explicit screw marking opt-out and custom spacing', async () => {
+    const request = parseJobRequest({ ...testRequest, sheet: { ...testRequest.sheet, spacingMm: 5, borderMm: 15, screwMarks: false } })
+    const job = await generateJob(request, [testItem], testParts)
+    expect(job.manifest.request.sheet).toMatchObject({ spacingMm: 5, borderMm: 15, screwMarks: false })
+    expect(job.manifest.sheets.every(sheet => sheet.screwMarks === 0)).toBe(true)
+    for (const file of job.exported) {
       expect(file.gcode).not.toContain('(Screw marks:')
+      expect(file.gcode).not.toContain('M00')
     }
   })
   it('combines repeated order lines without duplicating library definitions', async () => {
