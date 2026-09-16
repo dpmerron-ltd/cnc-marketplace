@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { partNumberText } from '../labels/partLabels'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
@@ -174,6 +175,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
             const outOfBounds = bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > sheet.width || bounds.maxY > sheet.height
             return (
               <g key={instance.id}>
+                <title>{`${partNumberText(instance.partNumber!)}: ${part.name}`}</title>
                 <rect
                   x={bounds.minX}
                   y={bounds.minY}
@@ -188,8 +190,8 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
                     setDragging({ id: instance.id, dx: point.x - instance.x, dy: point.y - instance.y })
                   }}
                 />
-                <text transform={`translate(${bounds.minX + 5} ${bounds.maxY - 6}) scale(1 -1)`} className="part-label">
-                  {part.name}
+                <text transform={`translate(${bounds.minX + 3} ${bounds.maxY - 3}) scale(1 -1)`} dominantBaseline="hanging" style={{ fontSize: Math.max(1, Math.min(24, (bounds.maxX - bounds.minX - 6) / (partNumberText(instance.partNumber!).length * 0.7), bounds.maxY - bounds.minY - 6)) }} className="part-label">
+                  {partNumberText(instance.partNumber!)}
                 </text>
               </g>
             )

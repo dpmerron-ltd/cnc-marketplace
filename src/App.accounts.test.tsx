@@ -49,6 +49,21 @@ describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear() })
   afterEach(cleanup)
 
+  it('saves job, order and material details only to the active account', async () => {
+    mock.load.mockResolvedValue(library('alice'))
+    render(<App />)
+    const name = await screen.findByRole('textbox', { name: 'Job name' })
+    fireEvent.change(name, { target: { value: 'Camperlocker' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'ORD-2048' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Material' }), { target: { value: '18 mm plywood' } })
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ name: 'Camperlocker', orderNumber: 'ORD-2048', material: '18 mm plywood' }), expect.anything(), 'alice'))
+    mock.load.mockResolvedValue(library('bob'))
+    await switchAccount('bob')
+    await screen.findByText("bob's private item")
+    expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Material' })).toHaveValue('')
+  })
+
   it('makes screw marking opt-in and persists the optional safe Z height', async () => {
     mock.load.mockResolvedValue(library('alice'))
     render(<App />)

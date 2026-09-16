@@ -617,7 +617,23 @@ button.danger {
   font-size: 13px;
   fill: #1f2933;
   pointer-events: none;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 2px;
 }
+
+.icon-text-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 6px; flex-shrink: 0; }
+.label-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; padding: 20px; border: 1px solid #cbd5e1; border-radius: 8px; color: #1f2933; background: #fff; }
+.label-dialog::backdrop { background: #0008; }
+.label-dialog h2 { font-size: 20px; margin: 0; }
+.label-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.label-fields label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; min-width: 0; }
+.label-fields input, .label-fields select { width: 100%; min-width: 0; box-sizing: border-box; }
+.label-preview { background: #e9edf0; padding: 20px; }
+.label-preview canvas { display: block; width: 100%; max-height: 340px; object-fit: contain; }
+.label-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 12px 0; font-size: 13px; }
 
 .toolpath {
   stroke-width: 1.2;

@@ -1,6 +1,7 @@
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Rotation } from '../models/geometry'
+import { partNumberText } from '../labels/partLabels'
 
 interface PropertiesPanelProps {
   part?: Part
@@ -18,7 +19,7 @@ export function PropertiesPanel({ part, instance, onUpdate, onDuplicate, onDelet
         <p className="muted">Select a placed part to edit its exact position, rotation and lock state.</p>
       ) : (
         <div className="property-grid">
-          <strong>{part.name}</strong>
+          <strong>{partNumberText(instance.partNumber!)}: {part.name}</strong>
           <label>
             Sheet
             <input type="number" min={1} value={instance.sheetIndex + 1} onChange={(event) => onUpdate({ sheetIndex: Math.max(0, Number(event.target.value) - 1) })} />

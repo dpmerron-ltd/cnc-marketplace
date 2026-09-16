@@ -17,6 +17,9 @@ export interface GCodePreset {
 
 export interface Sheet {
   name: string
+  orderNumber?: string
+  material?: string
+  nextPartNumber?: number
   width: number
   height: number
   spacing: number

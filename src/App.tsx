@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { Download } from 'lucide-react'
+import { numberSheetParts } from './labels/partLabels'
+import { PartLabelsDialog } from './ui/PartLabelsDialog'
 import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
@@ -82,7 +85,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
   const presets = sheet.gcodePresets && sheet.gcodePresets.length > 0 ? sheet.gcodePresets : defaultSheet.gcodePresets
   const normalizedPresets = presets?.map((preset) => ({ ...preset, settings: normalizeGCodeSettings(preset.settings) }))
 
-  return {
+  return numberSheetParts({
     ...defaultSheet,
     ...sheet,
     name: sheet.name?.trim() || defaultSheet.name,
@@ -92,7 +95,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
     gcodeSettings,
     gcodePresets: normalizedPresets,
     defaultGcodePresetId: sheet.defaultGcodePresetId ?? defaultSheet.defaultGcodePresetId,
-  }
+  })
 }
 
 function pruneMissingSheetInstances(sheet: Sheet, availableParts: Part[]): Sheet {
@@ -346,7 +349,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
 }
 
 function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[], sheet: Sheet): PartInstance {
-  const copy: PartInstance = { ...source, id: crypto.randomUUID() }
+  const copy: PartInstance = { ...source, id: crypto.randomUUID(), partNumber: undefined }
   const sourceBounds = instanceBounds(part, source)
   const copySize = {
     width: sourceBounds.maxX - sourceBounds.minX,
@@ -404,6 +407,7 @@ function App() {
   const [preview, setPreview] = useState<string>()
   const [previewSimulation, setPreviewSimulation] = useState<GCodeSimulation>()
   const [pendingExport, setPendingExport] = useState<PendingExport>()
+  const [labelsOpen, setLabelsOpen] = useState(false)
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
   const [mfaReady, setMfaReady] = useState(!supabase)
@@ -643,6 +647,7 @@ function App() {
         setPreview(undefined)
         setPreviewSimulation(undefined)
         setPendingExport(undefined)
+        setLabelsOpen(false)
         setPage('marketplace')
         setStatus(session ? 'Loading your account...' : 'Signed out.')
       }
@@ -771,7 +776,7 @@ function App() {
   }
 
   function addPart(partId: string, x = sheet.borderSpacing, y = sheet.borderSpacing) {
-    setSheet((current) => ({
+    setSheet((current) => numberSheetParts({
       ...current,
       instances: [...current.instances, newInstance(partId, x, y, currentSheetIndex)],
     }))
@@ -787,7 +792,7 @@ function App() {
   function duplicateSelected() {
     if (!selectedInstance || !selectedInstancePart) return
     const copy = findDuplicatePlacement(selectedInstancePart, selectedInstance, parts, sheet)
-    setSheet((current) => ({ ...current, instances: [...current.instances, copy] }))
+    setSheet((current) => numberSheetParts({ ...current, instances: [...current.instances, copy] }))
     setSelectedInstanceId(copy.id)
     setStatus('Duplicated part at the nearest open position.')
   }
@@ -1072,8 +1077,16 @@ function App() {
         </nav>
         <div className="sheet-controls">
           <label className="sheet-name-control">
-            Sheet
+            Job name
             <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
+          </label>
+          <label className="sheet-name-control">
+            Order number
+            <input value={sheet.orderNumber ?? ''} onChange={(event) => setSheet({ ...sheet, orderNumber: event.target.value })} />
+          </label>
+          <label className="sheet-name-control">
+            Material
+            <input value={sheet.material ?? ''} onChange={(event) => setSheet({ ...sheet, material: event.target.value })} />
           </label>
           <label>
             W
@@ -1119,6 +1132,7 @@ function App() {
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
           <button type="button" onClick={previewGCode}>Preview</button>
+          <button type="button" className="icon-text-button" disabled={!sheet.instances.length} onClick={() => setLabelsOpen(true)}><Download size={16} /> Download Labels</button>
           <button type="button" onClick={prepareSheetExports}>Export Sheets</button>
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
@@ -1196,6 +1210,8 @@ function App() {
           </div>
         </div>
       )}
+
+      {labelsOpen && <PartLabelsDialog key={userId} parts={parts} items={items} sheet={sheet} sheetIndex={currentSheetIndex} onClose={() => setLabelsOpen(false)} />}
 
       {pendingExport && (
         <div className="modal-backdrop" role="presentation">
