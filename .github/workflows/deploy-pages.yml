@@ -41,7 +41,10 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/tests/setup.sql
           psql --set ON_ERROR_STOP=on --file supabase/schema.sql
           psql --set ON_ERROR_STOP=on --file supabase/schema.sql
+          psql --set ON_ERROR_STOP=on --file supabase/api.sql
+          psql --set ON_ERROR_STOP=on --file supabase/api.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/account-isolation.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/api-isolation.sql
 
   build:
     runs-on: ubuntu-latest
@@ -60,6 +63,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build API
+        run: npm run build:api
 
       - name: Build
         run: npm run build

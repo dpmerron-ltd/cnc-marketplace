@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "es2023", "lib": ["ES2023", "DOM"], "module": "esnext", "moduleResolution": "bundler",
+    "strict": true, "skipLibCheck": true, "noEmit": true, "allowImportingTsExtensions": true,
+    "esModuleInterop": true, "types": ["node"], "noUnusedLocals": true, "noUnusedParameters": true
+  },
+  "include": ["api/**/*.ts"]
+}

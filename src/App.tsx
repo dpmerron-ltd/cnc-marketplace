@@ -3,6 +3,7 @@ import './App.css'
 import { Download } from 'lucide-react'
 import { numberSheetParts } from './labels/partLabels'
 import { PartLabelsDialog } from './ui/PartLabelsDialog'
+import { QueuePage } from './ui/QueuePage'
 import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
 import { createPartFromGCode } from './gcode/importPart'
@@ -395,7 +396,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history'>('marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
@@ -1074,8 +1075,9 @@ function App() {
           <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
           <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
+          <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
         </nav>
-        <div className="sheet-controls">
+        {page !== 'queue' && <><div className="sheet-controls">
           <label className="sheet-name-control">
             Job name
             <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
@@ -1136,10 +1138,11 @@ function App() {
           <button type="button" onClick={prepareSheetExports}>Export Sheets</button>
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
-        </div>
+        </div></>}
+        {page === 'queue' && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
 
-      {page === 'marketplace' ? (
+      {page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           items={items}
           parts={parts}
@@ -1329,7 +1332,7 @@ function App() {
         </div>
       )}
 
-      <section className="bottom-bar">
+      {page !== 'queue' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>
@@ -1342,9 +1345,9 @@ function App() {
         <button type="button" onClick={() => downloadText('sheet-builder-project.json', JSON.stringify(buildProject(), null, 2), 'application/json')}>Export Project</button>
         <button type="button" onClick={() => importProjectRef.current?.click()}>Import Project</button>
         <input ref={importProjectRef} className="hidden-file" type="file" accept=".json" onChange={(event) => void importProject(event.target.files)} />
-      </section>
+      </section>}
 
-      {(issues.length > 0 || preview || previewSimulation) && (
+      {page !== 'queue' && (issues.length > 0 || preview || previewSimulation) && (
         <section className={`diagnostics ${previewSimulation ? 'with-simulator' : ''}`}>
           {issues.length > 0 && (
             <div className="panel issue-list">

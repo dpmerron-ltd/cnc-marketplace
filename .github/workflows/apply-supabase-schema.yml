@@ -28,4 +28,5 @@ jobs:
             exit 1
           fi
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/schema.sql
+          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/api.sql
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "notify pgrst, 'reload schema';"

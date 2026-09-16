@@ -57,4 +57,11 @@ describe('autoNest', () => {
     expect(nested.slice(8).every((instance) => instance.sheetIndex === 1)).toBe(true)
     expect(nested[8]).toMatchObject({ sheetIndex: 1, x: 10, y: 10 })
   })
+
+  it('returns without endless sheet allocation when the footprint disagrees with reported dimensions', () => {
+    const part = makePart('part-a')
+    part.originalBounds = { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
+    const instances = [makeInstance('i1', part.id)]
+    expect(autoNest([part], makeSheet(instances))).toEqual(instances)
+  })
 })

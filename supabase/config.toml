@@ -1,0 +1,6 @@
+project_id = "cnc-marketplace"
+
+[functions.cnc-api]
+# Every non-OPTIONS request is authenticated inside the handler (account API key or verified MFA JWT).
+verify_jwt = false
+import_map = "./functions/cnc-api/deno.json"

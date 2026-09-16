@@ -7,7 +7,7 @@ function envOrDefault(value: string | undefined, fallback: string): string {
   return value && value.trim().length > 0 ? value : fallback
 }
 
-const supabaseUrl = envOrDefault(import.meta.env.VITE_SUPABASE_URL as string | undefined, defaultSupabaseUrl)
+export const supabaseUrl = envOrDefault(import.meta.env.VITE_SUPABASE_URL as string | undefined, defaultSupabaseUrl)
 const supabasePublishableKey = envOrDefault(
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined,
   defaultSupabasePublishableKey,

@@ -109,3 +109,8 @@ The sheet preview shows the same planned mark positions as the exporter. Clearan
 - Start/end section detection is conservative; exported jobs use the saved machine start/end blocks and safe Z.
 - Automatic sheet preparation requires G21/G90 programs and explicit X/Y with I/J arc geometry; radius-only and implicit-endpoint arcs block export.
 - Unsupported G-code constructs are surfaced as warnings or errors rather than guessed.
+# Programmatic Jobs API
+
+The account-scoped jobs API accepts item quantities, auto-nests their components, and queues an immutable job for operator review. It generates a sheet-plan/cutting-list PDF, custom-size labels (50 x 25 mm by default), a JSON manifest, and per-sheet G-code. Manage account API keys and review jobs in **Queue**.
+
+See [API reference and deployment instructions](docs/API.md) for authentication, request examples, retry rules, limits, files, and queue transitions.

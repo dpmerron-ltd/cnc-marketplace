@@ -57,7 +57,9 @@ export function autoNest(parts: Part[], sheet: Sheet): PartInstance[] {
     if (!rotations.some((rotation) => fitsSheet(rotatedSize({ width: part.width, height: part.height }, rotation), sheet))) continue
     let placedInstance: PartInstance | undefined
 
-    for (let sheetIndex = 0; !placedInstance; sheetIndex += 1) {
+    // If a part fails on an empty sheet, searching more empty sheets cannot help.
+    const lastCandidateSheet = Math.max(0, ...placed.map(item => item.sheetIndex)) + 1
+    for (let sheetIndex = 0; !placedInstance && sheetIndex <= lastCandidateSheet; sheetIndex += 1) {
       for (const rotation of rotations) {
         const size = rotatedSize({ width: part.width, height: part.height }, rotation)
         if (!fitsSheet(size, sheet)) continue
@@ -74,6 +76,7 @@ export function autoNest(parts: Part[], sheet: Sheet): PartInstance[] {
       }
     }
 
+    if (!placedInstance) continue
     Object.assign(instance, placedInstance)
     placed.push({ sheetIndex: instance.sheetIndex, bounds: instanceBounds(part, instance) })
   }

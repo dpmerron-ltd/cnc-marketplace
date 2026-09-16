@@ -9,6 +9,7 @@ const mock = vi.hoisted(() => ({
   load: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
 }))
 vi.mock('./storage/supabaseClient', () => ({
+  supabaseUrl: 'https://test.supabase.co',
   supabase: {
     auth: {
       getSession: async () => ({ data: { session: { user: { id: mock.userId, email: `${mock.userId}@example.com` } } } }),
