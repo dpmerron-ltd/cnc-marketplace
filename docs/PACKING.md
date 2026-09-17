@@ -1,11 +1,11 @@
 # Item Packing Estimates
 
-Every catalogue item with components receives a flat-pack box estimate. It includes one copy of each component in that item, not quantities on the current machining sheet. Packing never edits G-code or sheet placements.
+Every catalogue item with components receives a stacked flat-pack estimate. It includes one copy of each component in that item, not quantities on the current machining sheet. Each layer holds exactly one component, with at most **five components per box**. Larger kits spill into two or more boxes; no components are omitted to meet a two-box limit. Packing never edits G-code or sheet placements.
 
 ## Dimensions and Allowances
 
 - The largest outside carton dimension is capped at **1,200 mm**. All three outside dimensions are checked, so a tall stack cannot evade the cap.
-- Default padding is **10 mm on all six sides** of the packed stack. Separation is **2 mm between neighbouring components and between layers**.
+- Default padding is **10 mm on all six sides** of each packed stack. Separation is **2 mm between stacked components**. Parts are never placed side-by-side.
 - Carton wall thickness defaults to **5 mm per wall**. Outside dimensions add twice this value to internal dimensions. Change it to match the proposed carton construction; real folded cartons can have additional dimensional tolerances.
 - Suggested internal dimensions round upwards to 10 mm increments. The suggested size range runs from that size to 20 mm larger per axis, clipped to preserve the outside cap. The displayed arrangement fits any box within that component-wise range. These are suggested dimensions, not verified supplier stock sizes.
 
@@ -15,11 +15,11 @@ Thickness comes from the generator's explicit `Material ... mm` header or a `...
 
 ## Arrangement Search
 
-The search uses [maxrects-packer](https://github.com/soimy/maxrects-packer), a MaxRects rectangle-packing library, with 0/90-degree in-plane rotation. Candidate box footprints include individual and paired part dimensions plus a 50 mm grid, bounded to 36 values per axis. Each candidate is tested in descending area, longest-edge and thickness order. Every resulting bin becomes a flat layer; its height is the thickest component in that layer. Unused footprint is cropped before carton rounding.
+Each stack aligns components' long edges with the box length, rotating 90 degrees where needed. The footprint is the largest length and largest width in that stack. Height is the sum of component thicknesses plus separators and top/bottom padding. All dimensions are then rounded up as described above. Larger-area components are placed at the bottom and smaller components centred above them.
 
-The recommended arrangement has the lowest outside volume among tested candidates. Optional alternatives offer a lower stack or narrower footprint within 25% of that volume. This is a bounded heuristic, **not proof of a global minimum**; it does not consider diagonal packing, bending, assembled goods, interlocking cutouts or arbitrary 3D rotations.
+Grouping first minimises the number of boxes, then their combined rounded outside volume. Kits of up to 12 components use exhaustive, memoised grouping under the five-part and dimension limits. Larger kits compare greedy groupings sorted by area, long edge, short edge and thickness; these are **not proof of a global minimum**. The estimator does not consider diagonal packing, bending, assembled goods, interlocking cutouts or arbitrary 3D rotations.
 
-The numbered layer diagram and its component legend show the actual arrangement. The measurements table uses the same numbers. Layers are stacked from the bottom upwards. Mixed-thickness layers may require levelling dunnage to support the next layer; the height model already reserves the full thickness of the tallest piece in each layer.
+The item grid shows all required box sizes. Item details list each box, its component count and its own size range. Select a box to see the bottom-to-top stack list and numbered layer diagram. The measurements table uses the same component numbers across boxes. Support any overhanging edges with protective inserts during the trial pack.
 
 Loose hardware, carton strength, product weight, compression and courier limits other than the 1,200 mm cap are not modelled. Trial-pack the complete kit before purchasing cartons in quantity. The calculation runs in a cancellable browser worker and supports up to 60 components per item.
 

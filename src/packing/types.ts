@@ -18,7 +18,7 @@ export interface PackingPlan {
   volumeLitres: number; layers: PackingLayer[]
 }
 export interface PackingEstimate {
-  pieces: PackingPiece[]; plans: PackingPlan[]; errors: string[]; warnings: string[]
+  pieces: PackingPiece[]; boxes: PackingPlan[]; errors: string[]; warnings: string[]
   settings: { paddingMm: number; separatorMm: number; wallMm: number }
   candidates: number
 }

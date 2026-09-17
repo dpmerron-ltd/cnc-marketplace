@@ -31,5 +31,13 @@
 .packing-measurements input { width: 85px; }
 .packing-notes { color: #77642d; font-size: 12px; line-height: 1.6; padding-left: 18px; }
 .packing-errors { color: #b42318; font-size: 13px; padding-left: 18px; }
+.packing-shipment { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 8px 0 14px; }
+.packing-shipment span { font-size: 12px; color: #65767e; }
+.packing-box-table { border-collapse: collapse; width: 100%; margin-bottom: 18px; font-size: 13px; text-align: left; }
+.packing-box-table th, .packing-box-table td { padding: 9px; border-bottom: 1px solid #dce2e6; }
+.packing-stack-list { list-style: none; padding: 0; margin: 0 0 18px; font-size: 12px; }
+.packing-stack-list li { display: grid; grid-template-columns: 60px minmax(0, 1fr) auto; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e5ebeb; }
+.packing-stack-list span { overflow-wrap: anywhere; }
+.packing-stack-list small { color: #65767e; }
 .items-box-estimate { display: block; border-top: 1px solid #edf0f1; padding-top: 10px; margin-top: 10px; color: #176e59; font-size: 12px; line-height: 1.5; }
 @media (max-width: 700px) { .packing-summary { grid-template-columns: minmax(0, 1fr); gap: 18px; } .packing-allowances { gap: 12px; } .packing-allowances input { width: 105px; } .packing-layout canvas { max-height: 240px; } }

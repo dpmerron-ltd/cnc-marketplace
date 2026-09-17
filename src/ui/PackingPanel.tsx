@@ -39,7 +39,8 @@ function PackingPreview({ plan, pieces }: { plan: PackingPlan; pieces: PackingPi
 
 export function PackingPanel({ pieces, settings = {}, estimate, error, onChange }: { pieces: PackingPiece[]; settings?: PackingSettings; estimate?: PackingEstimate; error?: string; onChange: (settings: PackingSettings) => void }) {
   const [choice, setChoice] = useState(0)
-  const plan = estimate?.plans[Math.min(choice, estimate.plans.length - 1)]
+  const boxIndex = Math.min(choice, (estimate?.boxes.length ?? 1) - 1)
+  const plan = estimate?.boxes[boxIndex]
   const effective = { ...packingDefaults, ...settings }
   function measurement(id: string, field: 'widthMm' | 'heightMm' | 'thicknessMm', value: string) {
     const current = { ...settings.components?.[id] }
@@ -48,22 +49,25 @@ export function PackingPanel({ pieces, settings = {}, estimate, error, onChange 
     onChange({ ...settings, components: { ...settings.components, [id]: current } })
   }
   return <section className="packing-section" aria-label="Packing estimate">
-    <header className="packing-heading"><h3><Box size={20} /> Packing box</h3><span>Flat pack / max outside dimension 120 cm</span></header>
+    <header className="packing-heading"><h3><Box size={20} /> Packing boxes</h3><span>Stacked / max 5 components per box / max outside 120 cm</span></header>
     <div className="packing-allowances">
       <label>Outer padding (mm)<input type="number" min="0" max="50" step="1" value={effective.paddingMm} onChange={e => onChange({ ...settings, paddingMm: Number(e.target.value) })} /></label>
       <label>Part separation (mm)<input type="number" min="0" max="50" step="1" value={effective.separatorMm} onChange={e => onChange({ ...settings, separatorMm: Number(e.target.value) })} /></label>
       <label>Carton wall (mm)<input type="number" min="0" max="50" step="0.5" value={effective.wallMm} onChange={e => onChange({ ...settings, wallMm: Number(e.target.value) })} /></label>
     </div>
     {error ? <p role="alert">{error}</p> : !estimate ? <p role="status">Calculating packing...</p> : estimate.errors.length ? <ul className="packing-errors" role="alert">{estimate.errors.map(message => <li key={message}>{message}</li>)}</ul> : plan && <>
+      <div className="packing-shipment"><strong>{estimate.boxes.length} box{estimate.boxes.length === 1 ? '' : 'es'} / {pieces.length} components</strong><span>{estimate.boxes.reduce((sum, box) => sum + box.volumeLitres, 0).toFixed(1)} litres total outside volume</span></div>
+      <div className="packing-table-wrap"><table className="packing-box-table"><thead><tr><th>Box</th><th>Internal size</th><th>Components</th></tr></thead><tbody>{estimate.boxes.map((box, i) => <tr key={i}><td>{i + 1}</td><td>{boxSize(box.internal)}</td><td>{box.layers.length}</td></tr>)}</tbody></table></div>
+      {estimate.boxes.length > 1 && <label className="packing-alternatives">Box<select aria-label="Packing box" value={boxIndex} onChange={e => setChoice(Number(e.target.value))}>{estimate.boxes.map((box, i) => <option key={i} value={i}>Box {i + 1}: {boxSize(box.internal)} / {box.layers.length} components</option>)}</select></label>}
       <div className="packing-summary">
-        <div><span>Suggested internal box</span><strong>{boxSize(plan.internal)}</strong><small>Length x width x height</small></div>
+        <div><span>Box {boxIndex + 1} internal size</span><strong>{boxSize(plan.internal)}</strong><small>Length x width x height</small></div>
         <div><span>Internal size range</span><strong className="packing-range">{boxSize(plan.internal)} to {boxSize(plan.rangeMax)}</strong><small>Estimated outside: {boxSize(plan.external)}</small></div>
-        <div><span>Packed layers</span><strong>{plan.layers.length}</strong><small>{plan.volumeLitres.toFixed(1)} litres outside volume</small></div>
+        <div><span>Stack height</span><strong>{plan.layers.length} / 5 parts</strong><small>{plan.volumeLitres.toFixed(1)} litres outside volume</small></div>
       </div>
-      {estimate.plans.length > 1 && <label className="packing-alternatives">Arrangement<select aria-label="Packing arrangement" value={Math.min(choice, estimate.plans.length - 1)} onChange={e => setChoice(Number(e.target.value))}>{estimate.plans.map((option, i) => <option key={i} value={i}>{i === 0 ? 'Lowest tested volume' : 'Alternative'}: {boxSize(option.internal)} / {option.layers.length} layers</option>)}</select></label>}
-      <PackingPreview key={`${plan.internal.length}/${plan.internal.width}/${plan.internal.height}`} plan={plan} pieces={pieces} />
+      <ol className="packing-stack-list" aria-label={`Box ${boxIndex + 1} stack bottom to top`}>{plan.layers.map((layer, i) => <li key={layer.parts[0].id}><strong>{i === 0 ? 'Bottom' : i === plan.layers.length - 1 ? 'Top' : `Layer ${i + 1}`}</strong><span>{pieces.find(piece => piece.id === layer.parts[0].id)?.name}</span><small>{layer.height} mm</small></li>)}</ol>
+      <PackingPreview key={`${boxIndex}/${plan.layers.map(layer => layer.parts[0].id).join('/')}`} plan={plan} pieces={pieces} />
     </>}
     <details className="packing-measurements"><summary>Component measurements ({pieces.length})</summary><div className="packing-table-wrap"><table><thead><tr><th>Component</th><th>Length (mm)</th><th>Width (mm)</th><th>Thickness (mm)</th><th>Source</th></tr></thead><tbody>{pieces.map((piece, i) => <tr key={piece.id}><td>{i + 1}. {piece.name}</td><td><input aria-label={`Packing length for ${piece.name}`} type="number" min="0.1" step="0.1" value={piece.width} onChange={e => measurement(piece.id, 'widthMm', e.target.value)} /></td><td><input aria-label={`Packing width for ${piece.name}`} type="number" min="0.1" step="0.1" value={piece.height} onChange={e => measurement(piece.id, 'heightMm', e.target.value)} /></td><td><input aria-label={`Packing thickness for ${piece.name}`} type="number" min="0.1" step="0.1" value={piece.thickness} onChange={e => measurement(piece.id, 'thicknessMm', e.target.value)} /></td><td>{piece.footprintSource} / {piece.thicknessSource}</td></tr>)}</tbody></table></div></details>
-    {estimate && <ul className="packing-notes">{estimate.warnings.map(warning => <li key={warning}>{warning}</li>)}<li>Mixed-thickness layers need levelling protection. Carton construction, hardware and actual fit require a trial pack.</li></ul>}
+    {estimate && <ul className="packing-notes">{estimate.warnings.map(warning => <li key={warning}>{warning}</li>)}<li>Support overhanging edges with protective inserts. Carton construction, hardware and actual fit require a trial pack.</li></ul>}
   </section>
 }
