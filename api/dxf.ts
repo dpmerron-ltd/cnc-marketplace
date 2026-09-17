@@ -9,6 +9,7 @@ const override = z.strictObject({
   kind: z.enum(['outside', 'inside', 'drill', 'pocket', 'ignore', 'unassigned']).optional(),
   tabs: z.number().int().min(0).max(4).optional(),
   depthMm: z.number().positive().max(18.4).optional(),
+  cornerOvercuts: z.boolean().optional(),
 })
 const overrides = z.record(z.string().min(1).max(160), override).refine(value => Object.keys(value).length <= 100, 'At most 100 operation overrides are allowed.').default({})
 const schema = z.strictObject({
@@ -26,7 +27,7 @@ export async function generateDxfNc(value: unknown) {
   const input = parsed.data
   if (new TextEncoder().encode(input.dxf).length > 2000000) throw new JobError('DXF exceeds 2 MB.', 413)
   let drawing: CamDrawing
-  try { drawing = readDxf(input.dxf) } catch (error) {
+  try { drawing = readDxf(input.dxf, input.units) } catch (error) {
     throw new JobError('DXF could not be processed.', 422, [error instanceof Error ? error.message : 'Invalid DXF.'])
   }
   if (drawing.errors.length) throw new JobError('DXF geometry is invalid.', 422, drawing.errors)
@@ -46,6 +47,7 @@ export async function generateDxfNc(value: unknown) {
     const effective = { ...feature, ...operations[feature.id] }
     if (operations[feature.id].depthMm !== undefined && effective.kind !== 'pocket') throw new JobError(`${feature.id}: depthMm is only supported for pockets; drill and profile depths use the material preset.`, 400)
     if (operations[feature.id].tabs !== undefined && !['inside', 'outside'].includes(effective.kind)) throw new JobError(`${feature.id}: tabs are only supported for inside/outside contours.`, 400)
+    if (operations[feature.id].cornerOvercuts !== undefined && (!['inside', 'pocket'].includes(effective.kind) || effective.circle)) throw new JobError(`${feature.id}: cornerOvercuts is only supported for non-circular pockets and inside contours.`, 400)
   }
   const result = generateCam(drawing, { thickness: input.thicknessMm, units: input.units, operations })
   if (result.errors.length) throw new JobError('DXF machining validation failed.', 422, result.errors)
@@ -65,7 +67,7 @@ export async function generateDxfNc(value: unknown) {
       reachCheck: false, screwMarking: false,
     },
     drawingShiftMm: result.shift,
-    features: result.drawing.features.map(feature => ({ id: feature.id, name: feature.name, layer: feature.layer, kind: feature.kind })),
+    features: result.drawing.features.map(feature => ({ id: feature.id, name: feature.name, layer: feature.layer, kind: feature.kind, hinge: Boolean(feature.hinge), door: Boolean(feature.door) })),
     operations: result.operations.map(operation => ({ featureId: operation.featureId, name: operation.name, kind: operation.kind, depthMm: operation.depthMm, tabCount: operation.tabs.length, firstLine: operation.firstLine, lastLine: operation.lastLine })),
     summary: { bounds: result.simulation.bounds, deepestCutMm: result.simulation.deepestCutMm, operationCount: result.operations.length },
   }

@@ -11,9 +11,11 @@ export interface CamFeature {
   circle?: { center: Point; radius: number }
   kind: OperationKind
   depthMm?: number
+  hinge?: boolean
+  door?: boolean
 }
 export interface CamDrawing { features: CamFeature[]; warnings: string[]; errors: string[]; units: 'mm' | 'inches' | 'unknown' }
-export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number }
+export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number; cornerOvercuts?: boolean }
 export interface CamSettings {
   thickness: 12 | 18
   units: 'auto' | 'mm' | 'inches'
@@ -39,3 +41,4 @@ export interface CamResult {
   shift: Point
 }
 export const camPreset = { diameter: 6.35, spindle: 18000, clearance: 20, rampDegrees: 3, rampFeed: 600, cutFeed: 3000, tabWidth: 10, tabHeight: 6 } as const
+export const defaultTabCount = (feature: Pick<CamFeature, 'kind' | 'layer' | 'door'>) => feature.kind === 'outside' || feature.door || /DOOR/i.test(feature.layer) ? 4 : 0

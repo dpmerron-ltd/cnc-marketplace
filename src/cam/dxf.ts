@@ -2,7 +2,7 @@ import DxfParser from 'dxf-parser'
 import type { IEntity } from 'dxf-parser/dist/entities/geomtry'
 import type { Point } from '../models/geometry'
 import type { CamDrawing, CamFeature } from './types'
-import { arcPoints, area, contains, distance } from './geometry'
+import { arcPoints, area, contains, distance, intersectionArea } from './geometry'
 
 type Vertex = Point & { z?: number; bulge?: number; startWidth?: number; endWidth?: number }
 type Entity = IEntity & { vertices?: Vertex[]; center?: Vertex; position?: Vertex; radius?: number; startAngle?: number; endAngle?: number; shape?: boolean; elevation?: number; width?: number; is3dPolyline?: boolean; is3dPolygonMesh?: boolean; isPolyfaceMesh?: boolean; includesCurveFitVertices?: boolean; includesSplineFitVertices?: boolean; extrusionDirection?: Vertex; extrusionDirectionX?: number; extrusionDirectionY?: number; extrusionDirectionZ?: number }
@@ -24,7 +24,7 @@ function polyline(vertices: Vertex[], closed: boolean): Point[] {
   return result
 }
 
-export function readDxf(source: string): CamDrawing {
+export function readDxf(source: string, selectedUnits: 'auto' | 'mm' | 'inches' = 'auto'): CamDrawing {
   if (source.length > 2000000) throw new Error('DXF exceeds 2 MB.')
   if (source.startsWith('AutoCAD Binary DXF')) throw new Error('Use an ASCII DXF export.')
   const warnings: string[] = [], errors: string[] = []
@@ -43,6 +43,7 @@ export function readDxf(source: string): CamDrawing {
   if (dxf.entities.length > 1000) throw new Error('DXF exceeds 1,000 entities. Split the drawing.')
   const unitCode = Number(dxf.header.$INSUNITS ?? 0)
   const units = unitCode === 4 ? 'mm' : unitCode === 1 ? 'inches' : 'unknown'
+  const unitFactor = (selectedUnits === 'auto' ? units : selectedUnits) === 'inches' ? 25.4 : 1
   if (unitCode && units === 'unknown') errors.push(`DXF unit code ${unitCode} is unsupported. Export in millimetres or inches.`)
   if (!unitCode) warnings.push('DXF units are unspecified. Confirm the drawing units and dimensions.')
   const features: CamFeature[] = []
@@ -110,16 +111,22 @@ export function readDxf(source: string): CamDrawing {
     if (f.kind === 'drill') continue
     if (!f.closed) { warnings.push(`${f.name} is open and needs to be closed or explicitly excluded.`); continue }
     const layer = f.layer.toUpperCase()
-    if (f.circle && /POCKET/.test(layer)) { f.kind = 'pocket'; f.depthMm = Number(layer.match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)?.[1]) || undefined }
+    if (/POCKET|HINGE/.test(layer)) { f.kind = 'inside'; f.depthMm = Number(layer.match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)?.[1]) || undefined }
     else if (f.circle && /DRILL|BORE/.test(layer)) f.kind = 'drill'
-    else if (f.circle && /INNER|INSIDE/.test(layer)) f.kind = 'pocket'
     else if (/DOOR|INNER|INSIDE/.test(layer)) f.kind = 'inside'
     else if (/OUTER|PROFILE|OUTSIDE/.test(layer)) f.kind = 'outside'
-    else if (f.circle && f.circle.radius * 2 <= (units === 'inches' ? 0.25 : 6.35) + 0.001) f.kind = 'drill'
+    else if (f.circle && f.circle.radius * 2 * unitFactor <= 6.35 + 0.001) f.kind = 'drill'
     else {
       const nesting = features.filter(other => other !== f && other.closed && Math.abs(area(other.points)) > Math.abs(area(f.points)) && contains(other.points, f.points[0])).length
       f.kind = nesting % 2 ? 'inside' : 'outside'
     }
+  }
+  for (const f of features) {
+    if (!f.circle || Math.abs(f.circle.radius * 2 * unitFactor - 35) > 0.02) continue
+    const doors = features.filter(other => other !== f && other.closed && !other.circle && other.kind === 'inside' && Math.abs(intersectionArea(other.points, f.points) - Math.abs(area(f.points))) * unitFactor ** 2 < 0.01)
+    if (!doors.length) continue
+    f.hinge = true; f.kind = 'pocket'; f.depthMm = 12
+    for (const door of doors) door.door = true
   }
   if (!features.length) errors.push('No supported machining geometry found.')
   return { features, errors: [...new Set(errors)], warnings: [...new Set(warnings)], units }

@@ -37,9 +37,25 @@ describe('DXF API generation', () => {
   })
   it('supports pocket depths and contour tab counts without changing material presets', async () => {
     const source = dxf([profile, [0, 'CIRCLE', 8, 'POCKET_D35_DEPTH12', 10, 50, 20, 50, 40, 17.5]])
-    const result = await generateDxfNc({ dxf: source, thicknessMm: 18, layerOperations: { CUT_OUTER: { tabs: 2 }, POCKET_D35_DEPTH12: { depthMm: 8 } } })
+    const result = await generateDxfNc({ dxf: source, thicknessMm: 18, layerOperations: { CUT_OUTER: { tabs: 2 }, POCKET_D35_DEPTH12: { kind: 'pocket', depthMm: 8 } } })
     expect(result.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 8 })
     expect(result.operations[1]).toMatchObject({ kind: 'outside', depthMm: 18.4, tabCount: 2 })
+  })
+  it.each([12, 18] as const)('supports non-circular pockets with browser parity in %s mm stock', async thicknessMm => {
+    const source = dxf([profile])
+    const result = await generateDxfNc({ dxf: source, thicknessMm, operations: { f0: { kind: 'pocket', depthMm: 6 } } })
+    const browser = generateCam(readDxf(source), { thickness: thicknessMm, units: 'auto', operations: { f0: { kind: 'pocket', depthMm: 6 } } })
+    expect(result.gcode).toBe(browser.gcode)
+    expect(result.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 6, tabCount: 0 })
+    expect(result.summary.deepestCutMm).toBe(6)
+    expect(result.reviewRequired).toBe(true)
+  })
+  it('supports corner relief overrides and rejects through-depth blind pockets', async () => {
+    const source = dxf([profile])
+    const result = await generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { kind: 'pocket', depthMm: 12, cornerOvercuts: false } } })
+    expect(result.gcode).not.toContain('Automatic corner overcuts')
+    await expect(generateDxfNc({ dxf: source, thicknessMm: 12, operations: { f0: { kind: 'pocket', depthMm: 12 } } })).rejects.toMatchObject({ status: 422 })
+    await expect(generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { cornerOvercuts: true } } })).rejects.toMatchObject({ status: 400 })
   })
   it.each([
     { thicknessMm: 15 }, { ownerId: 'someone' }, { feed: 2000 }, { filename: '../part.dxf' }, { filename: 'part.nc' },

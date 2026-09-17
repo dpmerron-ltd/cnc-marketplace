@@ -14,8 +14,8 @@ function dxf(entities: Array<Array<string | number>>, units = 4) {
 const rectangle = (x = 0, y = 0, width = 300, height = 200, layer = 'CUT_OUTER') => [0, 'LWPOLYLINE', 8, layer, 90, 4, 70, 1, 10, x, 20, y, 10, x + width, 20, y, 10, x + width, 20, y + height, 10, x, 20, y + height]
 const circle = (x: number, y: number, radius: number, layer = 'DRILL') => [0, 'CIRCLE', 8, layer, 10, x, 20, y, 40, radius]
 const settings: CamSettings = { thickness: 18, units: 'auto', operations: {} }
-const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELEASE'), circle(20, 20, 3.175), circle(260, 50, 17.5, 'POCKET_D35_DEPTH12')])
-const result = (thickness: 12 | 18 = 18) => generateCam(readDxf(source()), { ...settings, thickness })
+const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELEASE'), circle(20, 20, 3.175), circle(100, 100, 17.5, 'POCKET_D35_DEPTH12')])
+const result = (thickness: 12 | 18 = 18) => generateCam(readDxf(source()), { ...settings, thickness, operations: thickness === 12 ? { f3: { kind: 'ignore' } } : {} })
 
 describe('DXF geometry', () => {
   it('recognizes layer operations, millimetres and circular pocket depth', () => {
@@ -71,13 +71,13 @@ describe('CNC generation', () => {
     const profile = job.operations.find(o => o.kind === 'outside')!
     const profileCode = job.gcode.split('\n').slice(profile.firstLine - 1, profile.lastLine).join('\n')
     expect((profileCode.match(/\(Pass depth/g) ?? []).length).toBe(preset.passes.length)
-    expect(job.operations.map(o => o.kind)).toEqual(['drill', 'pocket', 'inside', 'outside'])
+    expect(job.operations.map(o => o.kind)).toEqual(thickness === 18 ? ['drill', 'pocket', 'inside', 'outside'] : ['drill', 'inside', 'outside'])
     for (const move of job.simulation.moves.filter(m => m.type === 'rapid' && distance(m.start, m.end) > 0.001)) {
       expect(move.start.z).toBe(20); expect(move.end.z).toBe(20)
     }
   })
   it('compensates profiles outward and doors inward by the 3.175 mm radius', () => {
-    const job = result()
+    const job = generateCam(readDxf(source()), { ...settings, operations: { f1: { cornerOvercuts: false } } })
     for (const op of job.operations.filter(o => ['outside', 'inside'].includes(o.kind))) {
       const feature = job.drawing.features.find(f => f.id === op.featureId)!
       if (op.kind === 'outside') expect(feature.points.every(p => contains(op.path, p))).toBe(true)
@@ -128,7 +128,7 @@ describe('CNC generation', () => {
   it('rejects invalid tab counts, pocket depths, tiny pockets and intersecting profiles', () => {
     expect(generateCam(readDxf(source()), { ...settings, operations: { f0: { tabs: 5 } } }).gcode).toBe('')
     expect(generateCam(readDxf(source()), { ...settings, operations: { f3: { depthMm: 99 } } }).gcode).toBe('')
-    expect(generateCam(readDxf(dxf([circle(20, 20, 2, 'POCKET')])), settings).gcode).toBe('')
+    expect(generateCam(readDxf(dxf([circle(20, 20, 2, 'POCKET')])), { ...settings, operations: { f0: { kind: 'pocket', depthMm: 6 } } }).gcode).toBe('')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(200, 0)])), settings).errors.join()).toContain('overlap')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(305, 0)])), settings).errors.join()).toContain('cutter paths overlap')
   })
@@ -166,13 +166,41 @@ describe('CNC generation', () => {
     const drawing: CamDrawing = { features: [feature], errors: [], warnings: [], units: 'mm' }
     expect(generateCam(drawing, settings).errors).toEqual([])
   })
-  it('clears named circular internal cutouts without leaving loose slugs', () => {
+  it('cuts named circular internal openings through without tabs or pocket clearing', () => {
     const drawing = readDxf(dxf([circle(40, 40, 13, 'CUT_INNER')]))
     const job = generateCam(drawing, settings)
-    expect(drawing.features[0].kind).toBe('pocket')
+    expect(drawing.features[0].kind).toBe('inside')
     expect(job.errors).toEqual([])
     expect(job.operations[0].depthMm).toBe(18.4)
-    expect(job.gcode).toContain('G02')
+    expect(job.operations[0].tabs).toEqual([])
+    expect(job.gcode).not.toContain('G02')
+    expect(job.warnings.join()).toContain('workholding')
+  })
+  it.each([12, 18] as const)('keeps doors tabbed and ordinary openings tab-free in %s mm stock', thickness => {
+    const parsed = readDxf(dxf([rectangle(), rectangle(20, 20, 80, 100, 'CUT_DOOR'), rectangle(150, 20, 100, 70, 'CUT_INNER'), circle(130, 150, 17.5, 'POCKET_D35_DEPTH12')]))
+    const job = generateCam(parsed, { ...settings, thickness })
+    expect(job.errors).toEqual([])
+    expect(job.operations.find(op => op.featureId === 'f3')).toMatchObject({ kind: 'inside', depthMm: materialPreset(thickness).depth, tabs: [] })
+    expect(job.operations.find(op => op.featureId === 'f1')!.tabs.length).toBeGreaterThan(0)
+    expect(job.operations.find(op => op.featureId === 'f2')).toMatchObject({ kind: 'inside', depthMm: materialPreset(thickness).depth, tabs: [] })
+  })
+  it('identifies 35 mm circles inside doors as 12 mm blind hinge pockets and blocks 12 mm stock', () => {
+    const parsed = readDxf(dxf([rectangle(0, 0, 300, 200, '0'), rectangle(20, 20, 100, 140, '0'), circle(55, 60, 17.5, '0')]))
+    expect(parsed.features[1]).toMatchObject({ kind: 'inside', door: true })
+    expect(parsed.features[2]).toMatchObject({ kind: 'pocket', hinge: true, depthMm: 12 })
+    const thick = generateCam(parsed, settings)
+    expect(thick.errors).toEqual([])
+    expect(thick.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 12, tabs: [] })
+    expect(thick.operations.find(o => o.featureId === 'f1')!.tabs.length).toBeGreaterThan(0)
+    const thin = generateCam(parsed, { ...settings, thickness: 12 })
+    expect(thin.gcode).toBe(''); expect(thin.errors.join()).toContain('only supported in 18 mm stock')
+  })
+  it('uses selected drawing units and full containment for hinge detection', () => {
+    const source = dxf([rectangle(0, 0, 10, 8, 'CUT_DOOR'), circle(2, 2, 17.5 / 25.4, '0')], 0)
+    expect(readDxf(source, 'inches').features[1]).toMatchObject({ hinge: true, depthMm: 12 })
+    expect(readDxf(source, 'mm').features[1].hinge).toBeUndefined()
+    const crossing = readDxf(dxf([rectangle(0, 0, 100, 100, 'CUT_DOOR'), circle(95, 50, 17.5, '0')]))
+    expect(crossing.features[1].hinge).toBeUndefined()
   })
   it('reimports generated components and exports two copies without an early program stop', () => {
     const generated = result()

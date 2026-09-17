@@ -2,8 +2,8 @@ import type { Point } from '../models/geometry'
 import { simulateGCode } from '../gcode/simulator'
 import { calculateMachiningBounds } from '../gcode/bounds'
 import { parseGCode } from '../gcode/parser'
-import { area, contains, distance, intersectionArea, offset, pathMetric } from './geometry'
-import { camPreset } from './types'
+import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
+import { camPreset, defaultTabCount } from './types'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
 
 const toolRadius = camPreset.diameter / 2
@@ -65,6 +65,17 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const linear = (point: Point, depth: number, feed: number) => emit(`G01 ${xy(point)} Z${n(-depth)} F${feed}`)
   const approach = (point: Point) => emit('G00 Z20', `G00 ${xy(point)}`, 'G00 Z0.5', 'G01 Z0 F600')
   const contours: Array<{ feature: CamFeature; path: Point[] }> = []
+  const overcuts: Array<{ feature: CamFeature; centers: Point[] }> = []
+  const relieve = (feature: CamFeature, paths: Point[][]) => {
+    if (feature.circle || settings.operations[feature.id]?.cornerOvercuts === false) return paths
+    const result = cornerOvercuts(feature.points, paths, toolRadius)
+    if (result.centers.length) {
+      overcuts.push({ feature, centers: result.centers })
+      emit(`(Automatic corner overcuts: ${result.centers.length})`)
+      warnings.push(`${feature.name}: ${result.centers.length} dogbone corner overcuts extend beyond the DXF outline.`)
+    }
+    return result.paths
+  }
 
   // Reject intersecting/duplicate outlines before applying tool compensation.
   const closed = active.filter(f => f.closed && f.kind !== 'drill' && f.kind !== 'unassigned')
@@ -72,6 +83,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     const a = closed[i], overlap = intersectionArea(a.points, b.points), aa = Math.abs(area(a.points)), ba = Math.abs(area(b.points))
     if (overlap > 0.05 && (Math.abs(aa - ba) < 0.05 && Math.abs(overlap - aa) < 0.05 || overlap < Math.min(aa, ba) - 0.05)) errors.push(`${a.name} and ${b.name} overlap or duplicate each other.`)
     if (a.kind === 'outside' && b.kind === 'outside' && (contains(a.points, b.points[0]) || contains(b.points, a.points[0]))) errors.push(`${a.name} and ${b.name}: nested outer profiles need an inside/outside review.`)
+    if ((a.kind === 'pocket' && overlap > 0.05 && Math.abs(overlap - ba) < 0.05) || (b.kind === 'pocket' && overlap > 0.05 && Math.abs(overlap - aa) < 0.05)) errors.push(`${a.name} and ${b.name}: nested geometry inside a pocket may define an island. Island pockets are not supported; review or explicitly exclude the inner geometry.`)
   }
   const sorted = [...active].sort((a, b) => {
     const rank = { drill: 0, pocket: 1, inside: 2, outside: 3, unassigned: 4, ignore: 5 }
@@ -79,6 +91,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   })
   for (const f of sorted) {
     try {
+      if (f.hinge && settings.thickness === 12) throw new Error('35 mm hinge pockets are only supported in 18 mm stock. Select 18 mm stock or explicitly exclude the hinge geometry.')
       if (f.kind === 'unassigned') throw new Error('Assign an operation or explicitly exclude this geometry.')
       if (f.kind !== 'drill' && !f.closed) throw new Error('An open contour cannot be machined as a closed profile.')
       if (f.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x > 10000 || p.y > 10000)) throw new Error('Machining coordinates exceed 10,000 mm.')
@@ -96,14 +109,40 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         continue
       }
       if (f.kind === 'pocket') {
-        if (!f.circle) throw new Error('Pocket clearing currently requires a circle. Non-circular pockets are not supported.')
-        const depth = f.depthMm ?? material.depth
-        if (!Number.isFinite(depth) || depth <= 0 || depth > material.depth) throw new Error(`Pocket depth must be between 0 and ${material.depth} mm.`)
+        const depth = f.depthMm
+        if (depth === undefined || !Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind pocket depth greater than 0 and less than ${settings.thickness} mm. Use an inside cut for a through-hole.`)
+        const passes = settings.thickness === 18 && depth > 9.2 ? [9.2, depth] : [depth]
+        if (!f.circle) {
+          const paths = relieve(f, pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4))
+          let previous = 0
+          for (const target of passes) {
+            emit(`(Pass depth ${n(target)} mm)`)
+            for (const path of paths) {
+              const metric = pathMetric(path)
+              approach(path[0])
+              if (previous) emit(`G01 Z-${n(previous)} F600`)
+              // Each closed loop is ramped independently; no uncleared linking cuts.
+              const turns = Math.ceil((target - previous) / (metric.length * slope))
+              if (turns > 1000) throw new Error('Pocket entry is too small for a ramp.')
+              let current = previous
+              for (let turn = 0; turn < turns; turn++) {
+                const next = Math.min(target, current + metric.length * slope)
+                for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, camPreset.rampFeed)
+                current = next
+              }
+              for (const entry of metric.between(0, metric.length)) linear(entry.point, target, camPreset.cutFeed)
+              emit('G00 Z20')
+            }
+            previous = target
+          }
+          operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: paths.flat(), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
+          warnings.push(`${f.name}: internal corners and narrow recesses are limited by the 6.35 mm cutter; verify the pocket preview.`)
+          continue
+        }
         const radius = f.circle.radius - toolRadius, center = f.circle.center
         if (radius < 0.1) throw new Error('Pocket is too small for the 6.35 mm cutter; use cutter-size drilling where appropriate.')
         const entryRadius = Math.min(toolRadius * 0.75, radius)
         const entry = { x: center.x + entryRadius, y: center.y }
-        const passes = settings.thickness === 18 && depth > 9.2 ? [9.2, depth] : [depth]
         let previous = 0
         for (const target of passes) {
           approach(entry)
@@ -133,9 +172,10 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         continue
       }
       let path = offset(f.points, f.kind === 'outside' ? toolRadius : -toolRadius)
+      if (f.kind === 'inside') path = relieve(f, [path])[0]
       if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
       let metric = pathMetric(path)
-      const requestedTabs = settings.operations[f.id]?.tabs ?? 4
+      const requestedTabs = settings.operations[f.id]?.tabs ?? defaultTabCount(f)
       if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
       let intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
       if (requestedTabs && !intervals.length) throw new Error('No straight segment can hold a 10 mm tab. Change the geometry or explicitly set zero tabs after reviewing workholding.')
@@ -192,6 +232,17 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     } catch (error) { errors.push(`${f.name} (${f.layer}): ${(error as Error).message}`) }
   }
   const outer = contours.filter(c => c.feature.kind === 'outside')
+  for (const { feature, centers } of overcuts) for (const other of active.filter(f => f.id !== feature.id && f.closed)) {
+    const enclosing = Math.abs(intersectionArea(feature.points, other.points) - Math.abs(area(feature.points))) < 0.05
+    for (const center of centers) {
+      const footprint = arcPoints(center, toolRadius, 0, Math.PI * 2).slice(0, -1)
+      const overlap = intersectionArea(footprint, other.points)
+      if (enclosing ? Math.abs(area(footprint)) - overlap > 0.05 : overlap > 0.05) {
+        errors.push(`${feature.name}: corner overcut ${enclosing ? 'breaks through' : 'intersects'} ${other.name}. Disable corner overcuts or change the geometry.`)
+        break
+      }
+    }
+  }
   for (let i = 0; i < outer.length; i++) for (const other of outer.slice(i + 1)) {
     if (intersectionArea(outer[i].path, other.path) > 0.01) errors.push(`${outer[i].feature.name} and ${other.feature.name}: outside cutter paths overlap. Increase drawing spacing.`)
   }
