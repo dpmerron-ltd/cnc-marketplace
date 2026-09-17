@@ -2,7 +2,7 @@
 
 Local-first MVP for arranging pre-generated Estlcam CNC G-code files on a sheet and exporting one combined G-code program.
 
-The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. It does not regenerate CAM toolpaths. It parses the existing G-code, normalizes the part footprint, transforms XY coordinates for placement and 0/90/180/270 degree rotation, and exports one combined program with global start/end G-code and safe Z transitions.
+The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. The sheet workflow preserves their existing CAM toolpaths, normalizes the part footprint, transforms XY coordinates for placement and 0/90/180/270 degree rotation, and exports combined programs with safe Z transitions. The separate **Generate** page creates new component G-code from DXF using 12 mm or 18 mm material presets, reviewed operation assignments, cutter compensation, ramps, and holding tabs. See [DXF generator settings and limitations](docs/CAM.md).
 
 ## Run
 

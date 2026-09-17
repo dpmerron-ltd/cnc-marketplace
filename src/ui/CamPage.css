@@ -1,0 +1,75 @@
+.cam-page { background: #fff; color: #22313a; min-width: 0; }
+.cam-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 16px 20px; border-bottom: 1px solid #dce3e7; }
+.cam-heading h2 { font-size: 20px; margin: 0; }
+.cam-heading > span { color: #67737d; font-size: 13px; overflow-wrap: anywhere; flex: 1; }
+.cam-settings { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #dce3e7; background: #f5f8f8; }
+.cam-page label { display: flex; gap: 5px; font-size: 12px; color: #4e5c65; }
+.cam-settings > label, .cam-export-actions > label { flex-direction: column; }
+.cam-page select, .cam-page input[type=number] { min-width: 0; max-width: 100%; border: 1px solid #c4cfd4; border-radius: 4px; background: white; color: #22313a; padding: 7px; font: inherit; }
+.cam-settings dl { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0; }
+.cam-settings dt { font-size: 11px; color: #62717b; }
+.cam-settings dd { margin: 4px 0 0; font-size: 12px; font-weight: 600; }
+.cam-workspace { display: grid; grid-template-columns: 340px minmax(0, 1fr); }
+.cam-operations { border-right: 1px solid #dce3e7; max-height: 780px; overflow: auto; min-width: 0; }
+.cam-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 48px; padding: 0 14px; border-bottom: 1px solid #dce3e7; font-size: 12px; }
+.cam-section-heading h3 { font-size: 14px; margin: 0; }
+.cam-empty { padding: 24px 14px; color: #6b7780; font-size: 13px; }
+.cam-layer { border-bottom: 1px solid #cfd9dd; }
+.cam-layer summary { padding: 12px 14px; font-size: 12px; font-weight: 600; background: #f1f5f5; overflow-wrap: anywhere; cursor: pointer; }
+.cam-layer summary span { float: right; margin-left: 8px; font-weight: 400; }
+.cam-layer-kind { padding: 8px 12px; align-items: center; justify-content: space-between; }
+.cam-layer-kind select { max-width: 170px; }
+.cam-operation { padding: 10px 12px; border-top: 1px solid #e6ecee; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 7px; }
+.cam-operation.is-selected { background: #eaf4f6; box-shadow: inset 3px 0 #008797; }
+.cam-operation-name { border: 0; padding: 0; background: transparent; color: #293c46; text-align: left; font-size: 12px; display: flex; gap: 7px; align-items: center; overflow-wrap: anywhere; }
+.cam-operation-name i, .cam-legend i { width: 9px; height: 9px; display: inline-block; flex: 0 0 9px; }
+.cam-operation > select { font-size: 11px; }
+.cam-operation-fields { display: flex; gap: 10px; align-items: center; grid-column: 1 / -1; flex-wrap: wrap; font-size: 11px; color: #62727c; }
+.cam-operation-fields label { align-items: center; }
+.cam-operation-fields input { width: 62px; }
+.cam-diameter-approval { grid-column: 1 / -1; align-items: flex-start; }
+.cam-main { min-width: 0; }
+.cam-view-tabs { display: flex; gap: 0; align-self: stretch; }
+.cam-view-tabs button { border: none; border-radius: 0; background: transparent; font-size: 12px; padding: 0 14px; border-bottom: 2px solid transparent; }
+.cam-view-tabs button[aria-selected=true] { border-bottom-color: #007b82; color: #00666c; }
+.cam-preview-tools { display: flex; align-items: center; gap: 16px; padding: 8px 12px; border-bottom: 1px solid #e0e7e9; }
+.cam-preview-tools label { align-items: center; }
+.cam-icon-group { display: flex; gap: 5px; margin-right: auto; }
+.cam-icon-group button, .cam-playback button { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: 4px; }
+.cam-canvas-wrap { width: 100%; height: 520px; overflow: hidden; background: #f7fafb; }
+.cam-canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.cam-canvas-wrap canvas:active { cursor: grabbing; }
+.cam-playback { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid #e0e7e9; }
+.cam-playback input { flex: 1; min-width: 0; accent-color: #087f89; }
+.cam-playback output { width: 36px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cam-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 14px; border-top: 1px solid #e0e7e9; font-size: 11px; }
+.cam-legend span { display: flex; align-items: center; gap: 6px; }
+.cam-code { width: 100%; height: 630px; resize: vertical; box-sizing: border-box; border: 0; padding: 16px; background: #f7fafb; color: #203039; font: 12px/1.6 monospace; }
+.cam-extents { display: flex; flex-wrap: wrap; gap: 9px 20px; padding: 12px 14px; border-top: 1px solid #dce3e7; font-size: 11px; color: #5c6c75; }
+.cam-problems, .cam-warnings { margin: 0; padding: 12px 16px; border-top: 1px solid #e0e7e9; font-size: 12px; }
+.cam-problems { color: #962f2f; background: #fff7f6; }
+.cam-problems h3 { font-size: 13px; margin: 0 0 8px; }
+.cam-problems ul { max-height: 160px; overflow: auto; padding-left: 18px; }
+.cam-problems li, .cam-warnings li { margin: 6px 0; overflow-wrap: anywhere; }
+.cam-warnings { color: #7c580e; background: #fffcf1; }
+.cam-warnings summary { cursor: pointer; }
+.cam-export { border-top: 1px solid #ccd7dc; padding: 16px 20px; }
+.cam-review { align-items: flex-start; line-height: 1.5; margin-bottom: 12px; }
+.cam-export-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.cam-export-actions select { max-width: 260px; }
+.cam-page button:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 900px) { .cam-workspace { grid-template-columns: 290px minmax(0, 1fr); } .cam-operation { grid-template-columns: 1fr; } .cam-operation > select { width: 100%; } }
+@media (max-width: 650px) {
+  .cam-workspace { display: flex; flex-direction: column-reverse; }
+  .cam-operations { max-height: 400px; border-right: 0; border-top: 1px solid #ccd7dc; }
+  .cam-operation { grid-template-columns: minmax(0, 1fr) 150px; }
+  .cam-heading, .cam-settings, .cam-export { padding: 12px; }
+  .cam-heading > span { order: 2; flex-basis: 100%; }
+  .cam-heading > button { margin-left: auto; }
+  .cam-settings { gap: 12px; }
+  .cam-settings dl { gap: 10px 16px; }
+  .cam-canvas-wrap { height: 350px; }
+  .cam-export-actions { align-items: stretch; flex-direction: column; }
+  .cam-export-actions select { max-width: 100%; }
+  .cam-code { height: 430px; }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { Download } from 'lucide-react'
 import { numberSheetParts } from './labels/partLabels'
@@ -40,6 +40,9 @@ import type { MfaEnrollment } from './ui/MfaPage'
 import { PartLibrary } from './ui/PartLibrary'
 import { PropertiesPanel } from './ui/PropertiesPanel'
 import { SheetEditor } from './ui/SheetEditor'
+import type { CamSave } from './ui/CamPage'
+
+const CamPage = lazy(() => import('./ui/CamPage').then(module => ({ default: module.CamPage })))
 
 const defaultSheet: Sheet = {
   name: 'Untitled Sheet',
@@ -396,7 +399,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue'>('marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
@@ -724,6 +727,15 @@ function App() {
     })
     setItems((current) => current.map((item) => (item.id === itemId ? { ...item, updatedAt: new Date().toISOString() } : item)))
     setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
+  }
+
+  function saveGeneratedComponent(value: CamSave) {
+    const target = items.find(item => item.id === value.itemId)
+    if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
+    const part = { ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), ownerId: userId }
+    setParts(current => [...current, normalizePart(part, target!.sku, current.filter(p => p.itemId === value.itemId).length)])
+    setItems(current => current.map(item => item.id === value.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
+    setStatus(`Generated component added to ${target!.name}.`)
   }
 
   function importFiles(fileList: FileList) {
@@ -1076,8 +1088,9 @@ function App() {
           <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
+          <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
         </nav>
-        {page !== 'queue' && <><div className="sheet-controls">
+        {page !== 'queue' && page !== 'generate' && <><div className="sheet-controls">
           <label className="sheet-name-control">
             Job name
             <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
@@ -1139,10 +1152,10 @@ function App() {
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {page === 'queue' && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'queue' || page === 'generate') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
 
-      {page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'generate' ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} /></Suspense> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           items={items}
           parts={parts}
@@ -1332,7 +1345,7 @@ function App() {
         </div>
       )}
 
-      {page !== 'queue' && <section className="bottom-bar">
+      {page !== 'queue' && page !== 'generate' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>
@@ -1347,7 +1360,7 @@ function App() {
         <input ref={importProjectRef} className="hidden-file" type="file" accept=".json" onChange={(event) => void importProject(event.target.files)} />
       </section>}
 
-      {page !== 'queue' && (issues.length > 0 || preview || previewSimulation) && (
+      {page !== 'queue' && page !== 'generate' && (issues.length > 0 || preview || previewSimulation) && (
         <section className={`diagnostics ${previewSimulation ? 'with-simulator' : ''}`}>
           {issues.length > 0 && (
             <div className="panel issue-list">
