@@ -107,12 +107,23 @@ describe('CNC generation', () => {
       }
     }
   })
-  it('requires explicit consent for drill diameters that differ from the cutter', () => {
-    const drawing = readDxf(dxf([circle(30, 30, 3)]))
-    expect(generateCam(drawing, settings).errors.join()).toContain('6.35 mm hole')
-    const accepted = generateCam(drawing, { ...settings, operations: { f0: { useToolDiameter: true } } })
-    expect(accepted.errors).toEqual([])
-    expect(accepted.warnings.join()).toContain('explicitly approved')
+  it.each([12, 18] as const)('drills at circle centres with the cutter regardless of DXF diameter in %s mm stock', thickness => {
+    for (const diameter of [4, 6, 6.35, 12]) {
+      const drawing = readDxf(dxf([circle(30, 30, diameter / 2, 'BORE_D6_DEPTH10')]))
+      const job = generateCam(drawing, { ...settings, thickness })
+      expect(job.errors).toEqual([])
+      expect(job.warnings).toEqual([])
+      expect(job.operations[0].depthMm).toBe(materialPreset(thickness).drill)
+      const center = job.drawing.features[0].circle!.center
+      const cuts = job.simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < 0)
+      expect(cuts.length).toBeGreaterThan(0)
+      for (const move of cuts) {
+        expect(move.start.x).toBeCloseTo(center.x, 3)
+        expect(move.end.x).toBeCloseTo(center.x, 3)
+        expect(move.start.y).toBeCloseTo(center.y, 3)
+        expect(move.end.y).toBeCloseTo(center.y, 3)
+      }
+    }
   })
   it('rejects invalid tab counts, pocket depths, tiny pockets and intersecting profiles', () => {
     expect(generateCam(readDxf(source()), { ...settings, operations: { f0: { tabs: 5 } } }).gcode).toBe('')
@@ -120,6 +131,19 @@ describe('CNC generation', () => {
     expect(generateCam(readDxf(dxf([circle(20, 20, 2, 'POCKET')])), settings).gcode).toBe('')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(200, 0)])), settings).errors.join()).toContain('overlap')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(305, 0)])), settings).errors.join()).toContain('cutter paths overlap')
+  })
+  it.each([12, 18] as const)('uses 2 mm pecks with full Z20 retraction and no component reach check for %s mm stock', thickness => {
+    const job = generateCam(readDxf(dxf([circle(30, 30, 3)])), { ...settings, thickness })
+    expect(job.errors).toEqual([])
+    expect(job.gcode).not.toMatch(/reach check/i)
+    expect(job.gcode.split('S18000 M03')[0]).not.toMatch(/G0[01].*[XY]/)
+    const depths = thickness === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
+    const plunges = job.simulation.moves.filter(move => move.type !== 'rapid' && move.end.z < 0)
+    expect(plunges.map(move => -move.end.z)).toEqual(depths)
+    for (const depth of depths) expect(job.gcode).toContain(`G01 Z-${depth} F600\nG00 Z20`)
+    expect(job.gcode).not.toMatch(/G0?4\b|G8[13]\b/)
+    const rapidsDown = job.simulation.moves.filter(move => move.type === 'rapid' && move.end.z < move.start.z)
+    expect(rapidsDown.every(move => move.end.z >= 0.5)).toBe(true)
   })
   it('supports explicit exclusions without corrupting remaining operations', () => {
     const drawing = readDxf(dxf([rectangle(), [0, 'LINE', 10, 0, 20, 0, 11, 100, 21, 100]]))
@@ -161,6 +185,7 @@ describe('CNC generation', () => {
     })
     expect(exported.errors).toEqual([])
     expect((exported.gcode.match(/^M30$/gm) ?? []).length).toBe(1)
+    expect((exported.gcode.match(/Reach check:/g) ?? []).length).toBe(1)
     expect((exported.gcode.match(/\(No\. 1 drill machining/g) ?? []).length).toBe(2)
     expect(simulateGCode(exported.gcode).errors).toEqual([])
     expect(simulateGCode(exported.gcode).deepestCutMm).toBe(18.4)

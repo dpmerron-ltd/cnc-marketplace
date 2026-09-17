@@ -756,6 +756,7 @@ function App() {
     setSelectedItemId(item.id)
     setPage('marketplace')
     setStatus('Created new marketplace item.')
+    return item.id
   }
 
   function updateMarketplaceItem(itemId: string, patch: Partial<MarketplaceItem>) {
@@ -1090,7 +1091,7 @@ function App() {
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
         </nav>
-        {page !== 'queue' && page !== 'generate' && <><div className="sheet-controls">
+        {(page === 'sheet' || page === 'history') && <><div className="sheet-controls">
           <label className="sheet-name-control">
             Job name
             <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
@@ -1152,24 +1153,21 @@ function App() {
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {(page === 'queue' || page === 'generate') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'queue' || page === 'generate' || page === 'marketplace') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
 
       {page === 'generate' ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} /></Suspense> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
+          key={userId}
           items={items}
           parts={parts}
-          selectedItemId={selectedItemId}
           currentUserId={userId}
           onCreateItem={createMarketplaceItem}
           onSelectItem={setSelectedItemId}
           onUpdateItem={updateMarketplaceItem}
           onImportComponents={(itemId, files) => void importFilesForItem(itemId, files)}
           onDeleteComponent={deleteComponent}
-          onAddToSheet={(partId) => {
-            addPart(partId)
-            setPage('sheet')
-          }}
+          onAddToSheet={addPart}
           onOpenSheet={() => setPage('sheet')}
         />
       ) : page === 'history' ? (
@@ -1184,6 +1182,7 @@ function App() {
             selectedItemId={selectedItemId}
             selectedPartId={selectedPartId}
             onSelectItem={setSelectedItemId}
+            onManageItems={() => setPage('marketplace')}
             canImport={canEditItem(selectedItem)}
             onImport={importFiles}
             onAdd={addPart}
@@ -1349,18 +1348,18 @@ function App() {
         <div>
           <strong>Status:</strong> {status}
         </div>
-        <div className={errors.length > 0 ? 'issue error' : 'issue'}>
+        {page !== 'marketplace' && <><div className={errors.length > 0 ? 'issue error' : 'issue'}>
           {errors.length} errors
         </div>
         <div className={warnings.length > 0 ? 'issue warning' : 'issue'}>
           {warnings.length} warnings
-        </div>
+        </div></>}
         <button type="button" onClick={() => downloadText('sheet-builder-project.json', JSON.stringify(buildProject(), null, 2), 'application/json')}>Export Project</button>
         <button type="button" onClick={() => importProjectRef.current?.click()}>Import Project</button>
         <input ref={importProjectRef} className="hidden-file" type="file" accept=".json" onChange={(event) => void importProject(event.target.files)} />
       </section>}
 
-      {page !== 'queue' && page !== 'generate' && (issues.length > 0 || preview || previewSimulation) && (
+      {(page === 'sheet' || page === 'history') && (issues.length > 0 || preview || previewSimulation) && (
         <section className={`diagnostics ${previewSimulation ? 'with-simulator' : ''}`}>
           {issues.length > 0 && (
             <div className="panel issue-list">

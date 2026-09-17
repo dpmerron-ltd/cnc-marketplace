@@ -1,5 +1,6 @@
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
+import { LayoutGrid } from 'lucide-react'
 
 interface PartLibraryProps {
   items?: MarketplaceItem[]
@@ -10,6 +11,7 @@ interface PartLibraryProps {
   selectedPartId?: string
   canImport?: boolean
   onSelectItem?: (itemId: string) => void
+  onManageItems?: () => void
   onImport: (files: FileList) => void
   onAdd: (partId: string) => void
   onSelect: (partId: string) => void
@@ -24,6 +26,7 @@ export function PartLibrary({
   selectedPartId,
   canImport = true,
   onSelectItem,
+  onManageItems,
   onImport,
   onAdd,
   onSelect,
@@ -32,20 +35,8 @@ export function PartLibrary({
     <aside className="panel library">
       {items.length > 0 && onSelectItem && (
         <div className="library-items">
-          <h2>Items</h2>
-          <div className="library-item-list">
-            {items.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className={`library-item ${selectedItemId === item.id ? 'selected' : ''}`}
-                onClick={() => onSelectItem(item.id)}
-              >
-                <strong>{item.name}</strong>
-                <small>{item.sku}</small>
-              </button>
-            ))}
-          </div>
+          <div className="panel-header"><h2>Item</h2>{onManageItems && <button type="button" aria-label="Manage items" title="Manage items" onClick={onManageItems}><LayoutGrid size={17} /></button>}</div>
+          <select aria-label="Sheet item" value={selectedItemId ?? ''} onChange={event => onSelectItem(event.target.value)} style={{ width: '100%' }}><option value="" disabled>Select an item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name} ({item.sku})</option>)}</select>
         </div>
       )}
       <div className="panel-header">
@@ -68,14 +59,16 @@ export function PartLibrary({
       <div className="part-list">
         {parts.length === 0 && <p className="muted">{emptyText}</p>}
         {parts.map((part) => (
-          <button
-            type="button"
+          <div
             key={part.id}
             className={`part-row ${selectedPartId === part.id ? 'selected' : ''}`}
             draggable
             onDragStart={(event) => event.dataTransfer.setData('text/part-id', part.id)}
             onClick={() => onSelect(part.id)}
             onDoubleClick={() => onAdd(part.id)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelect(part.id) } }}
           >
             <span>{part.name}</span>
             <small>{part.sku}</small>
@@ -84,13 +77,13 @@ export function PartLibrary({
               {part.dxf ? ' + DXF' : ''}
             </small>
             <span className="row-actions">
-              <span onClick={(event) => event.stopPropagation()}>
+              <span onClick={(event) => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
                 <button type="button" onClick={() => onAdd(part.id)}>
                   Add
                 </button>
               </span>
             </span>
-          </button>
+          </div>
         ))}
       </div>
     </aside>

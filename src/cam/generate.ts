@@ -86,13 +86,12 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       emit(`(No. ${operations.length + 1} ${f.kind} machining: ${comment(f.name)})`, `(Feature: ${f.id} / Layer: ${comment(f.layer)})`)
       if (f.kind === 'drill') {
         if (!f.circle && f.points.length !== 1) throw new Error('Drilling requires a circle or DXF point.')
-        if (f.circle && Math.abs(f.circle.radius * 2 - camPreset.diameter) > 0.05) {
-          if (!f.useToolDiameter) throw new Error(`DXF hole is ${n(f.circle.radius * 2)} mm; the loaded cutter makes a 6.35 mm hole. Confirm cutter-size drilling or use a circular pocket.`)
-          warnings.push(`${f.name}: DXF diameter ${n(f.circle.radius * 2)} mm replaced by an explicitly approved 6.35 mm drilled hole.`)
-        }
         const center = f.circle?.center ?? f.points[0]
         approach(center)
-        emit(`G01 Z-${n(material.drill)} F600`, 'G00 Z20')
+        for (let peck = 1; peck <= Math.ceil(material.drill / 2); peck++) {
+          if (peck > 1) emit('G00 Z0.5')
+          emit(`G01 Z-${n(Math.min(peck * 2, material.drill))} F600`, 'G00 Z20')
+        }
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [center], tabs: [], depthMm: material.drill, firstLine, lastLine: lines.length })
         continue
       }
@@ -201,7 +200,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = ['(DXF CAM - DDCS 4.1 - OPERATOR REVIEW REQUIRED)', `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm)`, '(Ramp 3 degrees F600 / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)', `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, 'G21', 'G17', 'G90', 'G94', 'M05', 'G00 Z20', `(Reach check X${n(maxX)} Y${n(maxY)})`, `G00 X${n(maxX)} Y${n(maxY)}`, 'S18000 M03']
+  const header = ['(DXF CAM - DDCS 4.1 - OPERATOR REVIEW REQUIRED)', `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, '(Ramp 3 degrees F600 / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)', `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, 'G21', 'G17', 'G90', 'G94', 'M05', 'G00 Z20', 'S18000 M03']
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
   const candidate = [...header, ...lines, 'G00 Z20', 'M05', 'M30', ''].join('\n')
   const simulation = simulateGCode(candidate)

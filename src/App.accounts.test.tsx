@@ -46,13 +46,32 @@ async function switchAccount(userId: string) {
   })
 }
 
+async function openSheet() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+}
+
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear() })
   afterEach(cleanup)
 
+  it('keeps sheet controls off the dedicated items page', async () => {
+    mock.load.mockResolvedValue(library('alice'))
+    render(<App />)
+    await screen.findByRole('button', { name: "Open alice's private item" })
+    expect(screen.getByRole('textbox', { name: 'Search items' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Job name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Auto Nest' })).not.toBeInTheDocument()
+    await openSheet()
+    expect(screen.getByRole('textbox', { name: 'Job name' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Sheet item' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage items' }))
+    expect(screen.getByRole('textbox', { name: 'Search items' })).toBeInTheDocument()
+  })
+
   it('saves job, order and material details only to the active account', async () => {
     mock.load.mockResolvedValue(library('alice'))
     render(<App />)
+    await openSheet()
     const name = await screen.findByRole('textbox', { name: 'Job name' })
     fireEvent.change(name, { target: { value: 'Camperlocker' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'ORD-2048' } })
@@ -61,6 +80,7 @@ describe('account switching', () => {
     mock.load.mockResolvedValue(library('bob'))
     await switchAccount('bob')
     await screen.findByText("bob's private item")
+    await openSheet()
     expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: 'Material' })).toHaveValue('')
   })
@@ -68,6 +88,7 @@ describe('account switching', () => {
   it('defaults to screw marking with a 30 mm gap and 10 mm border, and persists explicit opt-outs', async () => {
     mock.load.mockResolvedValue(library('alice'))
     render(<App />)
+    await openSheet()
     const marking = await screen.findByRole('checkbox', { name: 'Screw marks' })
     const override = screen.getByRole('checkbox', { name: 'Override safe Z' })
     const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
@@ -97,6 +118,7 @@ describe('account switching', () => {
     }
     mock.load.mockResolvedValue(JSON.parse(JSON.stringify(remote)))
     render(<App />)
+    await openSheet()
     const marking = await screen.findByRole('checkbox', { name: 'Screw marks' })
     if (screwMarkingEnabled === false) expect(marking).not.toBeChecked()
     else expect(marking).toBeChecked()
@@ -113,6 +135,7 @@ describe('account switching', () => {
     }
     mock.load.mockResolvedValue(JSON.parse(JSON.stringify(remote)))
     render(<App />)
+    await openSheet()
     const override = await screen.findByRole('checkbox', { name: 'Override safe Z' })
     const height = screen.getByRole('spinbutton', { name: 'Safe Z (mm)' })
     expect(height).toHaveValue(safeZOverrideMm ?? 20)
@@ -131,7 +154,7 @@ describe('account switching', () => {
     await screen.findByText("alice's private item")
     await switchAccount('bob')
     await waitFor(() => expect(mock.load).toHaveBeenCalledWith('bob'))
-    await screen.findByRole('button', { name: 'New Item' })
+    await screen.findByRole('button', { name: 'New item' })
     expect(screen.queryByText("alice's private item")).not.toBeInTheDocument()
     await waitFor(() => expect(mock.save).toHaveBeenCalled(), { timeout: 1500 })
     const bobSaves = mock.save.mock.calls.filter((args) => args[4] === 'bob')

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileUp, Save } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
+import { camPreset } from '../cam/types'
 import { materialPreset } from '../cam/generate'
 import { downloadText } from '../storage/projectStorage'
 import { CamPreview } from './CamPreview'
@@ -79,23 +80,19 @@ export function CamPage({ items, onSave }: { items: MarketplaceItem[]; onSave: (
         {layers.map(layer => {
           const group = features.filter(f => f.layer === layer)
           const same = group.every(f => f.kind === group[0].kind)
-          const mismatches = group.filter(f => f.kind === 'drill' && f.circle && Math.abs(f.circle.radius * 2 - 6.35) > 0.05)
           return <details key={layer} open className="cam-layer"><summary>{layer}<span>{group.length}</span></summary>
             <label className="cam-layer-kind">Layer operation<select aria-label={`Operation for layer ${layer}`} value={same ? group[0].kind : ''} onChange={e => operation(group.map(f => f.id), { kind: e.target.value as OperationKind })}><option value="" disabled>Mixed</option>{kinds.map(kind => <option key={kind} value={kind}>{operationNames[kind]}</option>)}</select></label>
-            {!!mismatches.length && <label className="cam-layer-kind"><input type="checkbox" checked={mismatches.every(f => settings.operations[f.id]?.useToolDiameter)} onChange={e => operation(mismatches.map(f => f.id), { useToolDiameter: e.target.checked })} />Approve 6.35 mm holes for this layer ({mismatches.length})</label>}
             {group.map(f => {
               const override = settings.operations[f.id] ?? {}
-              const mismatch = f.kind === 'drill' && f.circle && Math.abs(f.circle.radius * 2 - 6.35) > 0.05
               return <div key={f.id} className={`cam-operation ${selected === f.id ? 'is-selected' : ''}`}>
                 <button type="button" className="cam-operation-name" onClick={() => setSelected(f.id)}><i style={{ backgroundColor: operationColors[f.kind] }} />{f.name}</button>
                 <select aria-label={`Operation for ${f.name}`} value={f.kind} onChange={e => operation([f.id], { kind: e.target.value as OperationKind })}>{kinds.map(kind => <option key={kind} value={kind}>{operationNames[kind]}</option>)}</select>
                 <div className="cam-operation-fields">
                   {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min="0" max="4" step="1" value={override.tabs ?? 4} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
                   {f.kind === 'pocket' && <label>Depth (mm)<input aria-label={`Pocket depth for ${f.name}`} type="number" min="0.1" max={material.depth} step="0.1" value={override.depthMm ?? f.depthMm ?? material.depth} onChange={e => operation([f.id], { depthMm: Number(e.target.value) })} /></label>}
-                  {f.circle && <span>DXF diameter {(f.circle.radius * 2).toFixed(2)} mm</span>}
-                  {f.kind === 'drill' && <span>Depth {material.drill} mm</span>}
+                  {f.kind === 'drill' ? <span>Hole diameter {camPreset.diameter} mm</span> : f.circle && <span>DXF diameter {(f.circle.radius * 2).toFixed(2)} mm</span>}
+                  {f.kind === 'drill' && <span>Depth {material.drill} mm / 2 mm pecks</span>}
                 </div>
-                {mismatch && <label className="cam-diameter-approval"><input type="checkbox" checked={override.useToolDiameter ?? false} onChange={e => operation([f.id], { useToolDiameter: e.target.checked })} />Approve 6.35 mm hole instead</label>}
               </div>
             })}
           </details>
@@ -104,7 +101,7 @@ export function CamPage({ items, onSave }: { items: MarketplaceItem[]; onSave: (
       <section className="cam-main">
         <div className="cam-section-heading"><div className="cam-view-tabs" role="tablist" aria-label="CAM view"><button type="button" role="tab" aria-selected={view === 'preview'} onClick={() => setView('preview')}>Toolpaths</button><button type="button" role="tab" aria-selected={view === 'code'} onClick={() => setView('code')}>G-code</button></div><span role="status">{busy ? 'Generating...' : result ? `${result.operations.length} operations / ${Math.ceil(result.simulation.estimatedSeconds / 60)} min` : ''}</span></div>
         {view === 'preview' ? <CamPreview result={result} selected={selected} onSelect={setSelected} /> : <textarea className="cam-code" aria-label="Generated G-code" readOnly value={busy ? '' : result?.gcode ?? ''} />}
-        {result && <div className="cam-extents"><span>Reach X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
+        {result && <div className="cam-extents"><span>Extent X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
         {problems.length > 0 && <section className="cam-problems" role="alert"><h3>Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
         {!!result?.warnings.length && <details className="cam-warnings"><summary>Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
       </section>

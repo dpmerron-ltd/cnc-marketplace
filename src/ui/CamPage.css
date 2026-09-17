@@ -27,7 +27,6 @@
 .cam-operation-fields { display: flex; gap: 10px; align-items: center; grid-column: 1 / -1; flex-wrap: wrap; font-size: 11px; color: #62727c; }
 .cam-operation-fields label { align-items: center; }
 .cam-operation-fields input { width: 62px; }
-.cam-diameter-approval { grid-column: 1 / -1; align-items: flex-start; }
 .cam-main { min-width: 0; }
 .cam-view-tabs { display: flex; gap: 0; align-self: stretch; }
 .cam-view-tabs button { border: none; border-radius: 0; background: transparent; font-size: 12px; padding: 0 14px; border-bottom: 2px solid transparent; }

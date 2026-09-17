@@ -6,6 +6,8 @@ The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable m
 
 ## Run
 
+The **Items** page is a private grid library with toolpath thumbnails, name/SKU/component search, sorting, and empty-item filtering. Open an item to edit its details, upload or remove components, and add components to the current sheet. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library.
+
 ```bash
 npm install
 npm run dev

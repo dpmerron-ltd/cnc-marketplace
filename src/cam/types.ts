@@ -13,7 +13,7 @@ export interface CamFeature {
   depthMm?: number
 }
 export interface CamDrawing { features: CamFeature[]; warnings: string[]; errors: string[]; units: 'mm' | 'inches' | 'unknown' }
-export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number; useToolDiameter?: boolean }
+export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number }
 export interface CamSettings {
   thickness: 12 | 18
   units: 'auto' | 'mm' | 'inches'
