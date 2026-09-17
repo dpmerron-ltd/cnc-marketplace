@@ -20,6 +20,9 @@ alter table public.marketplace_items
 alter table public.marketplace_items
   add column if not exists uploaded_by text not null default '';
 
+alter table public.marketplace_items
+  add column if not exists packing jsonb not null default '{}';
+
 update public.marketplace_items
 set sku = upper(regexp_replace(coalesce(nullif(name, ''), 'ITEM'), '[^a-zA-Z0-9]+', '-', 'g')) || '-' || upper(left(replace(id::text, '-', ''), 6))
 where sku = '';

@@ -1,3 +1,5 @@
+import type { PackingSettings } from '../packing/types'
+
 export interface MarketplaceItem {
   id: string
   ownerId?: string
@@ -7,4 +9,5 @@ export interface MarketplaceItem {
   description: string
   createdAt: string
   updatedAt: string
+  packing?: PackingSettings
 }

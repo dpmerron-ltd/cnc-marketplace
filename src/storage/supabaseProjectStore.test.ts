@@ -50,4 +50,11 @@ describe('cloud account boundaries', () => {
     }
     expect(mock.queries).toEqual([])
   })
+  it('persists packing measurements on the owner item without changing components', async () => {
+    const packing = { paddingMm: 20, separatorMm: 3, components: { panel: { thicknessMm: 12 } } }
+    const item = { id: 'item', ownerId: 'alice', name: 'Cabinet', sku: 'CAB', description: '', createdAt: '', updatedAt: '', packing }
+    expect((await saveRemoteProject([item], [], sheet, undefined, 'alice')).ok).toBe(true)
+    expect(mock.queries.find(q => q.table === 'marketplace_items')?.write).toEqual([expect.objectContaining({ owner_id: 'alice', packing })])
+    expect(mock.queries.some(q => q.table === 'cnc_components')).toBe(false)
+  })
 })

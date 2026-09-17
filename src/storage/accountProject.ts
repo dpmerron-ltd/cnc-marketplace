@@ -37,7 +37,9 @@ export function copyProjectToAccount(project: Project, userId: string): Project 
   })
   return {
     ...project,
-    items: project.items?.map((item) => ({ ...item, id: itemIds.get(item.id)!, ownerId: userId, uploadedBy: undefined })),
+    items: project.items?.map((item) => ({ ...item, id: itemIds.get(item.id)!, ownerId: userId, uploadedBy: undefined,
+      packing: item.packing ? { ...item.packing, components: Object.fromEntries(Object.entries(item.packing.components ?? {}).filter(([id]) => partIds.has(id)).map(([id, value]) => [partIds.get(id)!, value])) } : undefined,
+    })),
     parts: project.parts.map((part) => ({ ...part, id: partIds.get(part.id)!, itemId: itemIds.get(part.itemId ?? ''), ownerId: userId })),
     sheet: copySheet(project.sheet),
     sheetHistory: project.sheetHistory?.map((entry) => ({

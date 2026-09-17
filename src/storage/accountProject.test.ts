@@ -53,12 +53,14 @@ describe('account-local projects', () => {
 
   it('imports independent account-owned copies with remapped references', () => {
     const original = fixture()
+    original.items![0].packing = { paddingMm: 10, components: { 'alice-part': { thicknessMm: 12 }, deleted: { thicknessMm: 18 } } }
     const imported = copyProjectToAccount(original, 'charlie')
     expect(imported.items?.every((item) => item.ownerId === 'charlie')).toBe(true)
     expect(imported.parts.every((part) => part.ownerId === 'charlie')).toBe(true)
     expect(imported.items?.[0].id).not.toBe(original.items?.[0].id)
     expect(imported.parts[0].id).not.toBe(original.parts[0].id)
     expect(imported.parts[0].itemId).toBe(imported.items?.[0].id)
+    expect(imported.items?.[0].packing).toEqual({ paddingMm: 10, components: { [imported.parts[0].id]: { thicknessMm: 12 } } })
     expect(imported.sheet.instances[0].partId).toBe(imported.parts[0].id)
     expect(privateProject(imported, 'charlie').parts).toHaveLength(2)
   })

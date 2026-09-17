@@ -109,6 +109,7 @@ export async function loadRemoteProject(expectedUserId: string): Promise<RemoteP
     description: row.description ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    packing: row.packing ?? undefined,
   }))
 
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
@@ -178,6 +179,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
         description: item.description,
         created_at: item.createdAt,
         updated_at: item.updatedAt,
+        packing: item.packing ?? {},
       })),
     )
     if (itemsResult.error) {

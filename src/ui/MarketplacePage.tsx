@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileUp, Package, Plus, Search, Trash2, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import { ItemPreview } from './ItemPreview'
+import { PackingPanel } from './PackingPanel'
+import { boxSize } from '../packing/format'
+import { packingPieces } from '../packing/packing'
+import type { PackingEstimate } from '../packing/types'
 import './MarketplacePage.css'
 
 interface MarketplacePageProps {
@@ -41,6 +45,18 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
     }
     return map
   }, [parts, currentUserId])
+  const packingJobs = JSON.stringify(ownItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing })))
+  const [packingState, setPackingState] = useState<{ input: string; results: Record<string, { result?: PackingEstimate; error?: string }> }>({ input: '', results: {} })
+  const estimates = packingState.input === packingJobs ? packingState.results : {}
+  useEffect(() => {
+    if (typeof Worker === 'undefined') return
+    const worker = new Worker(new URL('../packing/worker.ts', import.meta.url), { type: 'module' })
+    let active = true
+    worker.onmessage = event => { if (active) setPackingState(state => ({ input: packingJobs, results: { ...(state.input === packingJobs ? state.results : {}), [event.data.id]: event.data } })) }
+    worker.onerror = () => { if (active) setPackingState({ input: packingJobs, results: Object.fromEntries(JSON.parse(packingJobs).map((item: { id: string }) => [item.id, { error: 'Packing calculation unavailable.' }])) }) }
+    worker.postMessage(JSON.parse(packingJobs))
+    return () => { active = false; worker.terminate() }
+  }, [packingJobs])
   const selectedItem = ownItems.find(item => item.id === detailId)
   const selectedParts = selectedItem ? partsByItem.get(selectedItem.id) ?? [] : []
   const term = query.trim().toLowerCase()
@@ -81,6 +97,7 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
         <label>Description<textarea aria-label="Description" rows={2} value={selectedItem.description} onChange={event => onUpdateItem(selectedItem.id, { description: event.target.value })} /></label>
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
+      {selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedParts.length}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}
       {visibleParts.length ? <div className="items-grid items-components">
@@ -105,7 +122,7 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
           const components = partsByItem.get(item.id) ?? []
           return <button type="button" className="items-grid-card" key={item.id} aria-label={`Open ${item.name || 'Untitled item'}`} onClick={() => openItem(item.id)}>
             <ItemPreview parts={components} label={`${item.name} components`} />
-            <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p></div>
+            <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{components.length > 0 && <span className="items-box-estimate">{estimates[item.id]?.result?.plans[0] ? `Box estimate: ${boxSize(estimates[item.id].result!.plans[0].internal)}` : estimates[item.id]?.error || (estimates[item.id]?.result?.errors.length ? 'Box estimate: review dimensions' : 'Calculating box...')}</span>}</div>
             <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>Updated {dateLabel(item.updatedAt)}</small></div>
           </button>
         })}
