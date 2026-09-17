@@ -1,8 +1,10 @@
-# CNC Jobs API v1
+# CNC API v1
 
 Base URL: `https://bsnndtwbvgrthddmbhoa.supabase.co/functions/v1/cnc-api/v1`
 
 Creates immutable, private cutting jobs from the authenticated account's item library. One ordered item adds one copy of every component in that item; `quantity` multiplies that set. Components are automatically nested, with overflow placed on additional physical sheets. Every job starts in `awaiting_review`. The API never starts or controls a machine.
+
+It also converts uploaded DXF text into new component NC through `POST /dxf-to-nc`, using the same generator as the site's **Generate** page.
 
 ## Authentication
 
@@ -11,6 +13,66 @@ In the site, open **Queue > API Access**, create a named key, and copy it before
 Send `Authorization: Bearer <account API key>` on every request. A verified Supabase user access token with MFA (`aal2`) is also accepted for the operator UI. Do not use the project's public key as authentication, and never give integrations the service-role key or Supabase personal access token. Account API keys can read that account's catalog/jobs/files and create or transition its jobs; they cannot edit the component library or manage keys.
 
 Store the key in your automation's secret store, not source control, browser code or order payloads. All non-OPTIONS routes require authentication. Files are private authenticated downloads, not public URLs.
+
+## Generate NC from DXF
+
+`POST /dxf-to-nc` takes JSON and returns JSON containing the generated `gcode`. Send the actual DXF text, not a local path, URL or base64 string. `jq --rawfile` handles newlines and escaping:
+
+```bash
+export CNC_API='https://bsnndtwbvgrthddmbhoa.supabase.co/functions/v1/cnc-api/v1'
+# Populate CNC_API_KEY from your secret store.
+jq -n --rawfile dxf component.dxf \
+  '{dxf: $dxf, filename: "component.dxf", thicknessMm: 18}' \
+  | curl --fail-with-body "$CNC_API/dxf-to-nc" \
+      -H "Authorization: Bearer $CNC_API_KEY" \
+      -H 'Content-Type: application/json' \
+      --data-binary @- --output component-result.json
+
+# Only extract the program after the request succeeds.
+jq -ej '.gcode // error("No NC was generated")' component-result.json > component.nc
+```
+
+Request fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `dxf` | Yes | ASCII DXF text, at most 2,000,000 UTF-8 bytes |
+| `thicknessMm` | Yes | `12` or `18` |
+| `filename` | No | DXF basename, default `component.dxf`; no directories; letters, digits, spaces, dots, underscores and hyphens |
+| `units` | No | `auto` (default), `mm`, or `inches`; output is always metric |
+| `layerOperations` | No | Exact DXF layer names mapped to operation overrides |
+| `operations` | No | Feature IDs mapped to overrides, applied after layer overrides |
+
+An override can contain `kind` (`outside`, `inside`, `drill`, `pocket`, `ignore`, or `unassigned`), `tabs` (integer 0-4, contours only), and `depthMm` (pockets only). Layer names are case-sensitive. Unknown layers, feature IDs, request properties and ineffective depth/tab overrides are rejected, not silently ignored. Individual feature properties take precedence over layer properties. With no overrides, the same layer-name and geometry classification as the browser is used. For example:
+
+```json
+{
+  "layerOperations": {
+    "HOLES": {"kind": "drill"},
+    "DOORS": {"kind": "inside", "tabs": 4},
+    "PROFILES": {"kind": "outside", "tabs": 4},
+    "REFERENCE": {"kind": "ignore"}
+  }
+}
+```
+
+Include that object alongside `dxf` and `thicknessMm`. Returned `features` identify the classified feature IDs and layers for subsequent requests. Invalid machining returns `422` with error details and **no G-code**. Unsupported entities must be corrected in the source drawing, not merely ignored through overrides.
+
+The successful `200` response includes:
+- `filename` (ending `.nc`), `contentType`, `bytes`, `sha256`, and `gcode`. The hash and byte count cover the exact UTF-8 `gcode` string. The example uses `jq -j` to avoid adding an extra newline.
+- `reviewRequired: true`, and `warnings`, including unspecified drawing units or insufficient room for all tabs. Neither an empty warnings list nor HTTP 200 certifies a machine setup.
+- `settings`: resolved material thickness, assumed drawing units, cutter, spindle, clearance, depths, peck size and feeds.
+- `features`: IDs, names, layers and resolved operation kinds, including ignored features.
+- `operations`: machining order, depth, actual tab count and inclusive 1-based NC line ranges.
+- `drawingShiftMm` and `summary`: toolpath bounds (including clearance/travel), deepest cut and operation count.
+
+Presets match the site: 6.35 mm cutter, 18,000 rpm, Z20 clearance, 3-degree ramps, F600 drilling/ramping, F3000 contour cutting, and up to four tabs per contour. Drills use the cutter diameter regardless of nominal DXF circle diameter. In 18 mm stock, drills peck to 2, 4, 6, 8 and 9.2 mm; in 12 mm stock, to 2, 4 and 4.5 mm. Every peck retracts to Z20. Profiles cut to 18.4 mm in two 9.2 mm passes or 12.2 mm in one pass. Profiles offset outside; doors offset inside. Explicit circular pockets retain their drawing diameter. See [CAM details and supported geometry](CAM.md).
+
+Component NC has **no reach check and no screw marking**; those belong to sheet export after placement. The response always requires operator review. This endpoint does not save a component, alter an item, create a queued job, generate PDFs/labels, or send anything to the machine. To use the result with the existing jobs API, import its NC into an account item first. API keys still cannot edit the library.
+
+Conversion is synchronous and stateless. `Idempotency-Key` is not required or stored for this route; retrying does not create duplicates. Repeated identical requests against the same deployed generator produce the same NC. Generator updates may change output, so retain the response/hash for an approved revision.
+
+Limits: 4 MiB JSON request, 2 MB DXF text, the shared parser's 1,000-entity limit, 100 parsed features, 10,000 sampled curve points, and output at most 10,000 NC lines / 2 MB. The feature/point limits include ignored geometry. These limits are lower than the browser worker because [Supabase Edge Functions have a 2-second CPU budget](https://supabase.com/docs/guides/functions/limits). Split complex drawings if the platform reports a resource limit; retrying an oversized drawing unchanged will not help. The existing per-account 60 requests/minute limit is shared with all API routes.
 
 ## Create a Job
 
@@ -74,6 +136,7 @@ Job names and order numbers are not unique keys. To intentionally create a new r
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/items?limit=25&offset=0` | Own items, SKUs and component summaries |
+| POST | `/dxf-to-nc` | Stateless DXF-to-component-NC generation, operator review required |
 | POST | `/jobs` | Create nested job and all files |
 | GET | `/jobs?status=awaiting_review&limit=25&offset=0` | Queue summaries, newest first |
 | GET | `/jobs/{id}` | Full manifest, status, file metadata and audit history |

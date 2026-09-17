@@ -4,6 +4,7 @@ import type { CuttingJob, JobFile, JobManifest, JobRequest, JobStatus, JobSummar
 import type { MarketplaceItem } from '../src/models/Item'
 import type { Part } from '../src/models/Part'
 import { jobPdfs } from './pdf'
+import { dxfBodyLimit, generateDxfNc } from './dxf'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
@@ -30,7 +31,7 @@ export function decodeBase64(value: string) { return Uint8Array.from(atob(value)
 function publicJob(job: StoredJob): CuttingJob {
   return { id: job.id, job_name: job.job_name, order_number: job.order_number, status: job.status, created_at: job.created_at, updated_at: job.updated_at, manifest: job.manifest, files: job.files, status_history: job.status_history }
 }
-async function body(request: Request): Promise<unknown> {
+async function body(request: Request, maxBytes = 65536): Promise<unknown> {
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new JobError('Use Content-Type: application/json.', 415)
   const reader = request.body?.getReader()
   if (!reader) throw new JobError('A JSON request body is required.', 400)
@@ -40,7 +41,7 @@ async function body(request: Request): Promise<unknown> {
     const chunk = await reader.read()
     if (chunk.done) break
     total += chunk.value.length
-    if (total > 65536) { await reader.cancel(); throw new JobError('Request body exceeds 64 KiB.', 413) }
+    if (total > maxBytes) { await reader.cancel(); throw new JobError(`Request body exceeds ${maxBytes / 1024} KiB.`, 413) }
     value += decoder.decode(chunk.value, { stream: true })
   }
   try { return JSON.parse(value + decoder.decode()) } catch { throw new JobError('Invalid JSON.', 400) }
@@ -58,6 +59,7 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
       if (!await repository.allowRequest(owner)) return json({ error: 'Account rate limit exceeded. Retry in 60 seconds.', requestId }, 429, { 'Retry-After': '60' })
       const url = new URL(request.url)
       const path = url.pathname.replace(/^.*?\/cnc-api(?=\/|$)/, '')
+      if (path === '/v1/dxf-to-nc' && request.method === 'POST') return json(await generateDxfNc(await body(request, dxfBodyLimit)))
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })

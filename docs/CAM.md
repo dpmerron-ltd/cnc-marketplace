@@ -2,6 +2,8 @@
 
 Open **Generate** while signed in. Upload an ASCII DXF, select 12 mm or 18 mm stock, review operations and the toolpath preview, then download a component program or add it to an item in your own account. The drawing stays in the browser until you explicitly add the generated component to an item. Switching accounts unmounts the generator and clears its draft.
 
+Programmatic conversion is available through authenticated `POST /v1/dxf-to-nc`, using the same generator and presets. See the [DXF API request and response contract](API.md#generate-nc-from-dxf). API conversion is stateless and does not save components or create queued jobs.
+
 ## Machining Preset
 
 | Setting | 18 mm stock | 12 mm stock |

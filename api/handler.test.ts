@@ -38,6 +38,39 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('offers authenticated stateless DXF generation without touching account libraries or jobs', async () => {
+    const f = fixture()
+    const dxf = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', '0', 'CIRCLE', '8', 'DRILL', '10', '20', '20', '20', '40', '3', '0', 'ENDSEC', '0', 'EOF', ''].join('\n')
+    const value = { dxf, thicknessMm: 18 }
+    expect((await f.call('/dxf-to-nc', 'POST', value, 'invalid')).status).toBe(401)
+    const response = await f.call('/dxf-to-nc', 'POST', value, 'alice', '')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    const result = await response.json()
+    expect(result.reviewRequired).toBe(true)
+    expect(result.gcode).toContain('G01 Z-9.2 F600\nG00 Z20')
+    const replay = await f.call('/dxf-to-nc', 'POST', value, 'bob', '')
+    expect((await replay.json()).gcode).toBe(result.gcode)
+    expect(f.jobs.size).toBe(0)
+    expect(f.repo.loadComponents).not.toHaveBeenCalled()
+    f.repo.allowRequest = async () => false
+    expect((await f.call('/dxf-to-nc', 'POST', value)).status).toBe(429)
+  })
+  it('keeps the larger DXF body allowance separate from job requests and validates transport', async () => {
+    const f = fixture()
+    const path = 'http://localhost/v1/dxf-to-nc'
+    const request = (body: string, contentType = 'application/json') => f.api(new Request(path, { method: 'POST', headers: { Authorization: 'Bearer alice', 'Content-Type': contentType }, body }))
+    expect((await request('{}', 'text/plain')).status).toBe(415)
+    expect((await request('{')).status).toBe(400)
+    expect((await request('x'.repeat(4 * 1024 * 1024 + 1))).status).toBe(413)
+    expect((await f.call('/dxf-to-nc', 'POST', { dxf: 'x'.repeat(70000), thicknessMm: 18 })).status).toBe(422)
+    expect((await f.call('/jobs', 'POST', { ...testRequest, notes: 'x'.repeat(70000) })).status).toBe(413)
+    const invalid = await f.call('/dxf-to-nc', 'POST', { dxf: 'invalid', thicknessMm: 18 })
+    const error = await invalid.json()
+    expect(error.requestId).toBeTruthy()
+    expect(error.details.length).toBeGreaterThan(0)
+    expect(error.gcode).toBeUndefined()
+  })
   it('requires authentication and applies rate limits', async () => {
     const f = fixture()
     expect((await f.call('/items', 'GET', undefined, 'invalid')).status).toBe(401)
