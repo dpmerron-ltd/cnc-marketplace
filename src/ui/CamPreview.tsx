@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Maximize, Pause, Play, ZoomIn, ZoomOut } from 'lucide-react'
 import type { CamResult } from '../cam/types'
 import type { Point } from '../models/geometry'
-import { operationColors, operationNames } from './camAppearance'
+import { operationColors, operationDashes, operationNames, tabColor, tabOutlineColor } from './camAppearance'
+import { CamOperationSwatch } from './CamOperationSwatch'
 
 export function CamPreview({ result, selected, onSelect }: { result?: CamResult; selected?: string; onSelect: (id: string) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -44,11 +45,11 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
     const x = (size.width - maxX * scale) / 2 + pan.x, y = (size.height + maxY * scale) / 2 + pan.y
     transform.current = { scale, x, y }
     const screen = (p: Point) => ({ x: x + p.x * scale, y: y - p.y * scale })
-    const path = (points: Point[], color: string, width: number, closed = false) => {
+    const path = (points: Point[], color: string, width: number, closed = false, dash: number[] = []) => {
       if (!points.length) return
       ctx.beginPath(); points.forEach((p, i) => { const q = screen(p); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y) })
       if (closed) ctx.closePath()
-      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke()
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.setLineDash(dash); ctx.stroke(); ctx.setLineDash([])
     }
     const step = 10 ** Math.floor(Math.log10(Math.max(maxX, maxY) / 8))
     ctx.strokeStyle = '#e0e7ea'; ctx.lineWidth = 1
@@ -57,7 +58,7 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
     ctx.fillStyle = '#57626c'; ctx.font = '11px system-ui'; ctx.fillText('X0 Y0', x, y + 18)
     if (!result) { ctx.fillText('No drawing', size.width / 2 - 28, size.height / 2); return }
     if (drawing) for (const f of result.drawing.features) {
-      ctx.setLineDash([3, 4]); path(f.points, f.id === selected ? '#1f2933' : '#a9b4bc', f.id === selected ? 2 : 1, f.closed); ctx.setLineDash([])
+      path(f.points, f.id === selected ? '#1f2933' : '#a9b4bc', f.id === selected ? 2 : 1, f.closed, [3, 4])
     }
     const moves = result.simulation.moves
     const visible = moves.slice(0, Math.ceil(moves.length * progress / 100))
@@ -65,14 +66,23 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
     for (const move of visible) {
       while (operationIndex < result.operations.length - 1 && move.lineNumber > result.operations[operationIndex].lastLine) operationIndex++
       const operation = result.operations[operationIndex]
-      if (move.type === 'rapid') { if (rapids) { ctx.setLineDash([4, 5]); path([move.start, move.end], '#96a2aa', 1); ctx.setLineDash([]) }; continue }
-      const color = operationColors[operation?.kind ?? 'unassigned']
-      path(move.points, color, operation?.featureId === selected ? 2.4 : 1.25)
+      if (move.type === 'rapid') { if (rapids) path([move.start, move.end], '#96a2aa', 1, false, [4, 5]); continue }
+      const kind = operation?.kind ?? 'unassigned'
+      const color = operationColors[kind]
+      path(move.points, color, operation?.featureId === selected ? 3 : 1.75, false, operationDashes[kind])
       if (Math.hypot(move.end.x - move.start.x, move.end.y - move.start.y) < 0.001 && move.end.z < 0) {
-        const p = screen(move.end); ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 3.175 * scale), 0, Math.PI * 2); ctx.strokeStyle = color; ctx.stroke()
+        const p = screen(move.end), radius = Math.max(kind === 'drill' ? 4.5 : 2, 3.175 * scale)
+        ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.stroke()
+        if (kind === 'drill') {
+          ctx.beginPath(); ctx.moveTo(p.x - radius * 0.6, p.y); ctx.lineTo(p.x + radius * 0.6, p.y)
+          ctx.moveTo(p.x, p.y - radius * 0.6); ctx.lineTo(p.x, p.y + radius * 0.6); ctx.stroke()
+        }
       }
     }
-    for (const op of result.operations) for (const tab of op.tabs) path(tab.points, '#ba8100', 5)
+    for (const op of result.operations) for (const tab of op.tabs) {
+      path(tab.points, tabOutlineColor, 7)
+      path(tab.points, tabColor, 4)
+    }
     const head = visible.at(-1)?.end
     if (head && progress < 100) { const p = screen(head); ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fillStyle = '#17242d'; ctx.fill() }
   }, [result, selected, zoom, pan, progress, rapids, drawing, size])
@@ -88,7 +98,7 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
       <label><input type="checkbox" checked={rapids} onChange={e => setRapids(e.target.checked)} />Rapids</label>
     </div>
     <div className="cam-canvas-wrap">
-      <canvas ref={canvas} aria-label="Colour-coded DXF and generated G-code toolpaths"
+      <canvas ref={canvas} aria-label="DXF and generated G-code toolpaths with operation colours, line patterns and drill symbols"
         onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, moved: false }; e.currentTarget.setPointerCapture(e.pointerId) }}
         onPointerMove={e => { const d = drag.current; if (!d) return; const dx = e.clientX - d.x, dy = e.clientY - d.y; if (Math.hypot(dx, dy) > 2 || d.moved) { d.moved = true; setPan(p => ({ x: p.x + dx, y: p.y + dy })); d.x = e.clientX; d.y = e.clientY } }}
         onPointerUp={e => {
@@ -112,6 +122,6 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
       <input aria-label="Toolpath progress" type="range" min="0" max="100" step="0.1" value={progress} onChange={e => { setPlaying(false); setProgress(Number(e.target.value)) }} />
       <output>{Math.round(progress)}%</output>
     </div>
-    <div className="cam-legend">{(['outside', 'inside', 'drill', 'pocket'] as const).map(kind => <span key={kind}><i style={{ backgroundColor: operationColors[kind] }} />{operationNames[kind]}</span>)}<span><i style={{ backgroundColor: '#ba8100' }} />Tabs</span></div>
+    <div className="cam-legend" aria-label="Operation legend">{(['outside', 'inside', 'drill', 'pocket'] as const).map(kind => <span key={kind}><CamOperationSwatch kind={kind} />{operationNames[kind]}</span>)}<span><i className="cam-tab-swatch" aria-hidden="true" style={{ backgroundColor: tabColor, borderColor: tabOutlineColor }} />Tabs</span></div>
   </section>
 }

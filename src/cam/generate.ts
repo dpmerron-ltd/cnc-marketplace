@@ -182,7 +182,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       const requestedTabs = settings.operations[f.id]?.tabs ?? defaultTabCount(f)
       if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
       const tabsRequired = requiresHoldingTabs(f)
-      if (tabsRequired && !requestedTabs) throw new Error('Doors and through-cut parts/holes larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
+      if (tabsRequired && !requestedTabs) throw new Error('Doors and outside profiles larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
       let intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
       if (requestedTabs && !intervals.length) throw new Error(tabsRequired ? 'No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.' : 'No straight segment can hold a 10 mm tab. Change the geometry or explicitly set zero tabs after reviewing workholding.')
       if (intervals.length < requestedTabs) warnings.push(`${f.name}: ${intervals.length} of ${requestedTabs} tabs fit with the required spacing.`)

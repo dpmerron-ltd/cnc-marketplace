@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Download, FileUp, Save, SkipForward } from 'lucide-react'
+import { Check, CircleAlert, Download, FileUp, Save, SkipForward, TriangleAlert } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
 import { camPreset, defaultTabCount, requiresHoldingTabs } from '../cam/types'
 import { materialPreset } from '../cam/generate'
 import { downloadText } from '../storage/projectStorage'
 import { CamPreview } from './CamPreview'
-import { operationColors, operationNames } from './camAppearance'
+import { operationNames } from './camAppearance'
+import { CamOperationSwatch } from './CamOperationSwatch'
 import './CamPage.css'
 import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
 
@@ -144,7 +145,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
             {group.map(f => {
               const override = settings.operations[f.id] ?? {}
               return <div key={f.id} className={`cam-operation ${selected === f.id ? 'is-selected' : ''}`}>
-                <button type="button" className="cam-operation-name" onClick={() => setSelected(f.id)}><i style={{ backgroundColor: operationColors[f.kind] }} />{f.name}</button>
+                <button type="button" className="cam-operation-name" aria-pressed={selected === f.id} onClick={() => setSelected(f.id)}><CamOperationSwatch kind={f.kind} />{f.name}</button>
                 <select aria-label={`Operation for ${f.name}`} value={f.kind} onChange={e => operation([f.id], { kind: e.target.value as OperationKind })}>{kinds.map(kind => <option key={kind} value={kind}>{operationNames[kind]}</option>)}</select>
                 <div className="cam-operation-fields">
                   {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min={requiresHoldingTabs(f) ? 1 : 0} max="4" step="1" value={override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
@@ -163,13 +164,13 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
         <div className="cam-section-heading"><div className="cam-view-tabs" role="tablist" aria-label="CAM view"><button type="button" role="tab" aria-selected={view === 'preview'} onClick={() => setView('preview')}>Toolpaths</button><button type="button" role="tab" aria-selected={view === 'code'} onClick={() => setView('code')}>G-code</button></div><span role="status">{busy ? 'Generating...' : result ? `${result.operations.length} operations / ${Math.ceil(result.simulation.estimatedSeconds / 60)} min` : ''}</span></div>
         {view === 'preview' ? <CamPreview key={`${fileIndex}:${filename}`} result={result} selected={selected} onSelect={setSelected} /> : <textarea className="cam-code" aria-label="Generated G-code" readOnly value={busy ? '' : result?.gcode ?? ''} />}
         {result && <div className="cam-extents"><span>Extent X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
-        {problems.length > 0 && <section className="cam-problems" role="alert"><h3>Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
-        {!!result?.warnings.length && <details className="cam-warnings"><summary>Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
+        {problems.length > 0 && <section className="cam-problems" role="alert"><h3><CircleAlert size={16} aria-hidden="true" />Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
+        {!!result?.warnings.length && <details className="cam-warnings"><summary><TriangleAlert size={15} aria-hidden="true" />Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
       </section>
     </div>
     <footer className="cam-export">
       <label className="cam-review"><input type="checkbox" checked={reviewed} disabled={!result?.gcode || busy || saving || problems.length > 0} onChange={e => setReviewed(e.target.checked)} />Units, operations, hole sizes, tabs, stock, cutter, origin, clamps and DDCS spindle delay reviewed</label>
-      {actionError && <p className="cam-action-error" role="alert">{actionError}</p>}
+      {actionError && <p className="cam-action-error" role="alert"><CircleAlert size={16} aria-hidden="true" />{actionError}</p>}
       <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? 'Added to item' : batch ? 'Confirm & add component' : 'Add component'}</button></div>
     </footer>
   </main>

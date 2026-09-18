@@ -43,17 +43,21 @@ describe('DXF API generation', () => {
     expect(result.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 8 })
     expect(result.operations[1]).toMatchObject({ kind: 'outside', depthMm: 18.4, tabCount: 2 })
   })
-  it.each([12, 15, 18] as const)('requires holding tabs on non-circular inside cuts in the API for %s mm stock', async thicknessMm => {
+  it.each([12, 15, 18] as const)('allows explicit tab removal on non-door inside cuts in the API for %s mm stock', async thicknessMm => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm, operations: { f0: { kind: 'inside' }, f1: { kind: 'ignore' } } })
     expect(result.operations[0]).toMatchObject({ kind: 'inside', tabCount: 4 })
     expect(result.warnings.join()).not.toContain('no holding tabs')
-    await expect(generateDxfNc({ dxf: drawing, thicknessMm, layerOperations: { CUT_OUTER: { kind: 'inside', tabs: 0 } } })).rejects.toMatchObject({ status: 422, details: expect.arrayContaining([expect.stringContaining('require holding tabs')]) })
+    const untabbed = await generateDxfNc({ dxf: drawing, thicknessMm, layerOperations: { CUT_OUTER: { kind: 'inside', tabs: 0 } } })
+    expect(untabbed.operations.find(op => op.kind === 'inside')!.tabCount).toBe(0)
+    expect(untabbed.warnings.join()).toContain('no holding tabs')
   })
-  it('tabs circular through-holes over 12 mm and rejects zero tabs, without adding tabs to blind pockets', async () => {
+  it('defaults circular through-holes to tabs but accepts zero, without adding tabs to blind pockets', async () => {
     const source = dxf([[0, 'CIRCLE', 8, 'CUT_INNER', 10, 50, 20, 50, 40, 20]])
     const result = await generateDxfNc({ dxf: source, thicknessMm: 18 })
     expect(result.operations[0].tabCount).toBeGreaterThan(0)
-    await expect(generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { tabs: 0 } } })).rejects.toMatchObject({ status: 422 })
+    const untabbed = await generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { tabs: 0 } } })
+    expect(untabbed.operations[0]).toMatchObject({ tabCount: 0, depthMm: 18.4 })
+    expect(untabbed.gcode).not.toContain('(Tab ')
     const pocket = await generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { kind: 'pocket', depthMm: 6 } } })
     expect(pocket.operations[0]).toMatchObject({ kind: 'pocket', tabCount: 0 })
   })

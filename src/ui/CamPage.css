@@ -1,8 +1,8 @@
-.cam-page { background: #fff; color: #22313a; min-width: 0; }
+.cam-page { background: #fff; color: #22313a; min-width: 0; accent-color: #005ea8; }
 .cam-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 16px 20px; border-bottom: 1px solid #dce3e7; }
 .cam-heading h2 { font-size: 20px; margin: 0; }
 .cam-heading > span { color: #67737d; font-size: 13px; overflow-wrap: anywhere; flex: 1; }
-.cam-queue { padding: 12px 20px; border-bottom: 1px solid #dce3e7; background: #f3f8f6; font-size: 12px; }
+.cam-queue { padding: 12px 20px; border-bottom: 1px solid #dce3e7; background: #f4f6f8; font-size: 12px; }
 .cam-queue-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; }
 .cam-queue-heading > span:first-child { font-weight: 600; }
 .cam-queue-heading > button { margin-left: auto; }
@@ -10,10 +10,11 @@
 .cam-queue summary { cursor: pointer; color: #4e5c65; }
 .cam-queue ol { list-style: none; padding: 0; margin: 8px 0 0; max-height: 180px; overflow: auto; }
 .cam-queue li { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 12px; padding: 7px 8px; border-top: 1px solid #dce3e7; }
-.cam-queue li[aria-current=step] { background: #e2efeb; }
+.cam-queue li[aria-current=step] { background: #e6effa; border-left: 3px solid #005ea8; }
 .cam-queue li > span:first-child { overflow-wrap: anywhere; }
 .cam-queue li > span:last-child { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #4e5c65; }
-.cam-action-error { color: #962f2f; font-size: 12px; overflow-wrap: anywhere; }
+.cam-action-error { color: #242424; font-size: 12px; overflow-wrap: anywhere; display: flex; gap: 8px; align-items: flex-start; }
+.cam-action-error svg { flex-shrink: 0; }
 .cam-settings { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #dce3e7; background: #f5f8f8; }
 .cam-page label { display: flex; gap: 5px; font-size: 12px; color: #4e5c65; }
 .cam-settings > label, .cam-export-actions > label { flex-direction: column; }
@@ -32,9 +33,11 @@
 .cam-layer-kind { padding: 8px 12px; align-items: center; justify-content: space-between; }
 .cam-layer-kind select { max-width: 170px; }
 .cam-operation { padding: 10px 12px; border-top: 1px solid #e6ecee; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 7px; }
-.cam-operation.is-selected { background: #eaf4f6; box-shadow: inset 3px 0 #008797; }
+.cam-operation.is-selected { background: #e6effa; box-shadow: inset 3px 0 #005ea8; }
 .cam-operation-name { border: 0; padding: 0; background: transparent; color: #293c46; text-align: left; font-size: 12px; display: flex; gap: 7px; align-items: center; overflow-wrap: anywhere; }
-.cam-operation-name i, .cam-legend i { width: 9px; height: 9px; display: inline-block; flex: 0 0 9px; }
+.cam-operation-swatch { width: 24px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; }
+.cam-operation-swatch i { width: 24px; border-top-width: 3px; border-top-color: currentColor; }
+.cam-tab-swatch { width: 24px; height: 8px; border: 2px solid; border-radius: 2px; display: inline-block; flex: 0 0 24px; box-sizing: border-box; }
 .cam-operation > select { font-size: 11px; }
 .cam-operation-fields { display: flex; gap: 10px; align-items: center; grid-column: 1 / -1; flex-wrap: wrap; font-size: 11px; color: #62727c; }
 .cam-operation-fields label { align-items: center; }
@@ -42,7 +45,7 @@
 .cam-main { min-width: 0; }
 .cam-view-tabs { display: flex; gap: 0; align-self: stretch; }
 .cam-view-tabs button { border: none; border-radius: 0; background: transparent; font-size: 12px; padding: 0 14px; border-bottom: 2px solid transparent; }
-.cam-view-tabs button[aria-selected=true] { border-bottom-color: #007b82; color: #00666c; }
+.cam-view-tabs button[aria-selected=true] { border-bottom-color: #005ea8; color: #005ea8; }
 .cam-preview-tools { display: flex; align-items: center; gap: 16px; padding: 8px 12px; border-bottom: 1px solid #e0e7e9; }
 .cam-preview-tools label { align-items: center; }
 .cam-icon-group { display: flex; gap: 5px; margin-right: auto; }
@@ -51,19 +54,21 @@
 .cam-canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .cam-canvas-wrap canvas:active { cursor: grabbing; }
 .cam-playback { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid #e0e7e9; }
-.cam-playback input { flex: 1; min-width: 0; accent-color: #087f89; }
+.cam-playback input { flex: 1; min-width: 0; accent-color: #005ea8; }
 .cam-playback output { width: 36px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
 .cam-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 14px; border-top: 1px solid #e0e7e9; font-size: 11px; }
 .cam-legend span { display: flex; align-items: center; gap: 6px; }
 .cam-code { width: 100%; height: 630px; resize: vertical; box-sizing: border-box; border: 0; padding: 16px; background: #f7fafb; color: #203039; font: 12px/1.6 monospace; }
 .cam-extents { display: flex; flex-wrap: wrap; gap: 9px 20px; padding: 12px 14px; border-top: 1px solid #dce3e7; font-size: 11px; color: #5c6c75; }
 .cam-problems, .cam-warnings { margin: 0; padding: 12px 16px; border-top: 1px solid #e0e7e9; font-size: 12px; }
-.cam-problems { color: #962f2f; background: #fff7f6; }
-.cam-problems h3 { font-size: 13px; margin: 0 0 8px; }
+.cam-problems { color: #242424; background: #f2f4f7; border-left: 4px solid #242424; }
+.cam-problems h3 { font-size: 13px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+.cam-problems h3 svg { flex-shrink: 0; }
 .cam-problems ul { max-height: 160px; overflow: auto; padding-left: 18px; }
 .cam-problems li, .cam-warnings li { margin: 6px 0; overflow-wrap: anywhere; }
-.cam-warnings { color: #7c580e; background: #fffcf1; }
+.cam-warnings { color: #654a00; background: #fffbea; border-left: 4px solid #946600; }
 .cam-warnings summary { cursor: pointer; }
+.cam-warnings summary svg { vertical-align: middle; margin-right: 7px; }
 .cam-export { border-top: 1px solid #ccd7dc; padding: 16px 20px; }
 .cam-review { align-items: flex-start; line-height: 1.5; margin-bottom: 12px; }
 .cam-export-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }

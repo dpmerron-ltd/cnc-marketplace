@@ -45,11 +45,12 @@ export interface CamResult {
 export const camPreset = { diameter: 6.35, spindle: 18000, clearance: 20, rampDegrees: 3, rampFeed: 600, cutFeed: 3000, tabWidth: 10, tabHeight: 6 } as const
 type TabFeature = Pick<CamFeature, 'kind' | 'layer' | 'door' | 'circle' | 'points'>
 // Feature coordinates must be in millimetres, before cutter compensation.
-export function requiresHoldingTabs(feature: TabFeature): boolean {
+function defaultsToHoldingTabs(feature: TabFeature): boolean {
   if (feature.kind !== 'inside' && feature.kind !== 'outside') return false
   if (feature.door || /DOOR/i.test(feature.layer)) return true
   const xs = feature.points.map(p => p.x), ys = feature.points.map(p => p.y)
   const span = feature.circle ? feature.circle.radius * 2 : Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
   return span > 12 + 1e-6
 }
-export const defaultTabCount = (feature: TabFeature) => requiresHoldingTabs(feature) ? 4 : 0
+export const defaultTabCount = (feature: TabFeature) => defaultsToHoldingTabs(feature) ? 4 : 0
+export const requiresHoldingTabs = (feature: TabFeature) => defaultsToHoldingTabs(feature) && (feature.kind === 'outside' || Boolean(feature.door) || /DOOR/i.test(feature.layer))

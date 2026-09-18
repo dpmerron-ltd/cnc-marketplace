@@ -208,18 +208,24 @@ describe('CNC generation', () => {
       }
     }
   })
-  it.each(['0', 'CUT_INNER', 'CUT_DOOR'])('rejects zero-tab overrides on inside contours on layer %s', layer => {
+  it.each(['0', 'CUT_INNER', 'CUT_DOOR'])('allows hole tab removal but protects named doors on layer %s', layer => {
     const parsed = readDxf(dxf([rectangle(), rectangle(40, 40, 180, 120, layer)]))
     const job = generateCam(parsed, { ...settings, operations: { f1: { tabs: 0 } } })
-    expect(job.gcode).toBe('')
-    expect(job.errors.join()).toContain('require holding tabs')
+    if (layer === 'CUT_DOOR') {
+      expect(job.gcode).toBe('')
+      expect(job.errors.join()).toContain('require holding tabs')
+    } else {
+      expect(job.errors).toEqual([])
+      expect(job.operations.find(op => op.featureId === 'f1')!.tabs).toEqual([])
+      expect(job.warnings.join()).toContain('no holding tabs')
+    }
     const valid = generateCam(parsed, { ...settings, operations: { f1: { tabs: 2 } } })
     expect(valid.errors).toEqual([])
     expect(valid.operations.find(op => op.featureId === 'f1')!.tabs).toHaveLength(2)
   })
-  it('enforces tabs after inside-cut overrides and on named doors cut outside', () => {
+  it('allows tab removal after an inside-cut override but protects named doors cut outside', () => {
     const parsed = readDxf(dxf([rectangle()]))
-    expect(generateCam(parsed, { ...settings, operations: { f0: { kind: 'inside', tabs: 0 } } }).errors.join()).toContain('require holding tabs')
+    expect(generateCam(parsed, { ...settings, operations: { f0: { kind: 'inside', tabs: 0 } } }).errors).toEqual([])
     const door = readDxf(dxf([rectangle(0, 0, 300, 200, 'DOOR')]))
     expect(generateCam(door, { ...settings, operations: { f0: { kind: 'outside', tabs: 0 } } }).errors.join()).toContain('require holding tabs')
   })
@@ -231,20 +237,26 @@ describe('CNC generation', () => {
   })
   it.each([[12, 12, false], [12.001, 8, true], [8, 12.001, true], [100, 8, true], [8, 100, true]])('uses uncompensated X/Y size %s x %s mm to require tabs: %s', (width, height, required) => {
     const feature = readDxf(dxf([rectangle(0, 0, Number(width), Number(height), 'CUT_INNER')])).features[0]
-    expect(requiresHoldingTabs(feature)).toBe(required)
+    expect(requiresHoldingTabs(feature)).toBe(false)
     expect(defaultTabCount(feature)).toBe(required ? 4 : 0)
     expect(requiresHoldingTabs({ ...feature, kind: 'outside' })).toBe(required)
     expect(requiresHoldingTabs({ ...feature, kind: 'pocket' })).toBe(false)
     expect(requiresHoldingTabs({ ...feature, kind: 'drill' })).toBe(false)
   })
-  it.each([12, 15, 18] as const)('enforces tabs on circles and outer profiles above 12 mm in %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('allows circle tab removal but protects outer profiles above 12 mm in %s mm stock', thickness => {
     for (const entity of [circle(50, 50, 20, 'CUT_INNER'), rectangle()]) {
       const parsed = readDxf(dxf([entity]))
       const valid = generateCam(parsed, { ...settings, thickness })
       expect(valid.errors).toEqual([])
       expect(valid.operations[0].tabs.length).toBeGreaterThan(0)
       expect(valid.operations[0].tabs.length).toBeLessThanOrEqual(4)
-      expect(generateCam(parsed, { ...settings, thickness, operations: { f0: { tabs: 0 } } }).errors.join()).toContain('require holding tabs')
+      const untabbed = generateCam(parsed, { ...settings, thickness, operations: { f0: { tabs: 0 } } })
+      if (parsed.features[0].circle) {
+        expect(untabbed.errors).toEqual([])
+        expect(untabbed.operations[0].tabs).toEqual([])
+        expect(untabbed.operations[0].depthMm).toBe(materialPreset(thickness).depth)
+        expect(untabbed.gcode).not.toContain('(Tab ')
+      } else expect(untabbed.errors.join()).toContain('require holding tabs')
     }
   })
   it('applies the size threshold in millimetres after inch conversion, and leaves 12 mm circles tab-free', () => {
@@ -254,7 +266,7 @@ describe('CNC generation', () => {
     const job = generateCam(inch, settings)
     expect(job.errors).toEqual([])
     expect(job.operations[0].tabs.length).toBeGreaterThan(0)
-    expect(generateCam(inch, { ...settings, operations: { f0: { tabs: 0 } } }).errors.join()).toContain('require holding tabs')
+    expect(generateCam(inch, { ...settings, operations: { f0: { tabs: 0 } } }).operations[0].tabs).toEqual([])
   })
   it.each([15, 18] as const)('identifies 12 mm blind hinge pockets in %s mm stock and blocks 12 mm stock', thickness => {
     const parsed = readDxf(dxf([rectangle(0, 0, 300, 200, '0'), rectangle(20, 20, 100, 140, '0'), circle(55, 60, 17.5, '0')]))
@@ -264,6 +276,7 @@ describe('CNC generation', () => {
     expect(thick.errors).toEqual([])
     expect(thick.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 12, tabs: [] })
     expect(thick.operations.find(o => o.featureId === 'f1')!.tabs.length).toBeGreaterThan(0)
+    expect(generateCam(parsed, { ...settings, thickness, operations: { f1: { tabs: 0 } } }).errors.join()).toContain('require holding tabs')
     const thin = generateCam(parsed, { ...settings, thickness: 12 })
     expect(thin.gcode).toBe(''); expect(thin.errors.join()).toContain('only supported in 15 mm or 18 mm stock')
   })
