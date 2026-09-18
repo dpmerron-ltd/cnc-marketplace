@@ -3,6 +3,7 @@ import { createPartFromGCode } from '../src/gcode/importPart'
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import type { JobRequest, JobStatus, JobManifest, JobFile } from '../src/jobs/types'
 import type { Artifact, JobRepository, StoredJob } from './handler'
+import { normalizePrograms } from '../src/gcode/programSettings'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
@@ -30,6 +31,10 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       return { ownerId: user.data.user.id, actor: `user:${user.data.user.id}` }
     },
     async allowRequest(owner) { return checked(await db.rpc('allow_cnc_api_request', { p_owner: owner })) === true },
+    async programSettings(owner) {
+      const row = checked(await db.from('user_program_settings').select('start_gcode,spindle_start_gcode,end_gcode').eq('owner_id', owner).maybeSingle())
+      return row ? normalizePrograms({ startGcode: row.start_gcode, spindleStartGcode: row.spindle_start_gcode, endGcode: row.end_gcode }) : undefined
+    },
     async catalog(owner, limit, offset) {
       return checked(await db.from('marketplace_items').select('id,sku,name,description,cnc_components(id,sku,name,width,height)').eq('owner_id', owner).eq('cnc_components.owner_id', owner).order('id').range(offset, offset + limit - 1)) ?? []
     },

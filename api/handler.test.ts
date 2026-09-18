@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib'
 import { createApi, type Artifact, type JobRepository, type StoredJob } from './handler'
 import { JobError } from '../src/jobs/generateJob'
 import { testItem, testParts, testRequest } from '../src/test/jobFixtures'
+import { defaultProgramSettings } from '../src/gcode/programSettings'
 
 const font = new Uint8Array(await readFile(new URL('./assets/NotoSans-Regular.ttf', import.meta.url)))
 function fixture() {
@@ -12,6 +13,7 @@ function fixture() {
   const repo: JobRepository = {
     authenticate: async token => ['alice', 'bob'].includes(token) ? { ownerId: token, actor: `api_key:${token}` } : undefined,
     allowRequest: async () => true,
+    programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
     catalog: async owner => owner === 'alice' ? [testItem] : [],
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
@@ -38,6 +40,22 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('uses owner-specific programs, requires setup, and preserves old idempotent jobs after settings change', async () => {
+    const f = fixture()
+    f.repo.programSettings = vi.fn(async owner => owner === 'alice' ? { ...defaultProgramSettings, startGcode: '(Alice profile)\nG21 G90' } : undefined)
+    const response = await f.call('/jobs', 'POST', testRequest)
+    expect(response.status).toBe(201)
+    const job = await response.json()
+    expect(job.manifest.programSettings.startGcode).toContain('Alice profile')
+    const nc = await f.call(`/jobs/${job.id}/artifacts/sheet-1.nc`)
+    expect(await nc.text()).toContain('Alice profile')
+    f.repo.programSettings = vi.fn(async () => undefined)
+    expect((await f.call('/jobs', 'POST', testRequest)).status).toBe(200)
+    expect(f.repo.programSettings).not.toHaveBeenCalled()
+    expect((await f.call('/jobs', 'POST', testRequest, 'alice', 'new-order')).status).toBe(422)
+    expect(f.jobs.size).toBe(1)
+    expect((await f.call('/dxf-to-nc', 'POST', { dxf: 'test', thicknessMm: 18 }, 'bob')).status).toBe(422)
+  })
   it('offers authenticated stateless DXF generation without touching account libraries or jobs', async () => {
     const f = fixture()
     const dxf = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', '0', 'CIRCLE', '8', 'DRILL', '10', '20', '20', '20', '40', '3', '0', 'ENDSEC', '0', 'EOF', ''].join('\n')

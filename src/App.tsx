@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { Download } from 'lucide-react'
+import { Download, UserRound } from 'lucide-react'
+import { ProfilePage } from './ui/ProfilePage'
+import { loadProgramSettings, saveProgramSettings } from './storage/programSettingsStore'
+import type { ProgramSettings } from './gcode/programSettings'
 import { numberSheetParts } from './labels/partLabels'
 import { PartLabelsDialog } from './ui/PartLabelsDialog'
 import { QueuePage } from './ui/QueuePage'
@@ -399,7 +402,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate'>('marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
@@ -426,6 +429,41 @@ function App() {
   const remoteHydratedRef = useRef(false)
   const accountRef = useRef<string | undefined>(undefined)
   const [loadedAccountId, setLoadedAccountId] = useState<string>()
+  const [programState, setProgramState] = useState<{ ownerId?: string; programs?: ProgramSettings; loading: boolean; error?: string }>({ loading: true })
+  const [programReload, setProgramReload] = useState(0)
+  const programs = programState.ownerId === userId && !programState.loading && !programState.error ? programState.programs : undefined
+  const programSheet = programs ? { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } : sheet
+
+  useEffect(() => {
+    if (!userId || !mfaReady) return
+    let active = true
+    void loadProgramSettings(userId).then(value => {
+      if (active && accountRef.current === userId) setProgramState({ ownerId: userId, programs: value, loading: false })
+    }).catch(error => {
+      if (active && accountRef.current === userId) setProgramState({ ownerId: userId, loading: false, error: errorMessage(error) })
+    })
+    return () => { active = false }
+  }, [userId, mfaReady, programReload])
+
+  function reloadAccountPrograms() {
+    setProgramState({ ownerId: userId, loading: true })
+    setProgramReload(value => value + 1)
+  }
+
+  async function saveAccountPrograms(value: ProgramSettings) {
+    if (!userId) throw new Error('Sign in before saving settings.')
+    const saved = await saveProgramSettings(userId, value)
+    if (accountRef.current !== userId) return
+    setProgramState({ ownerId: userId, programs: saved, loading: false })
+    setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+  }
+
+  function requirePrograms() {
+    if (programs) return true
+    setStatus('Configure your CNC program settings in User Profile before exporting.')
+    setPage('profile')
+    return false
+  }
 
   const selectedInstance = sheet.instances.find((instance) => instance.id === selectedInstanceId)
   const selectedInstancePart = selectedInstance ? parts.find((part) => part.id === selectedInstance.partId) : undefined
@@ -635,6 +673,7 @@ function App() {
         accountRef.current = nextUserId
         remoteHydratedRef.current = false
         setLoadedAccountId(undefined)
+        setProgramState({ loading: true })
         setMfaReady(false)
         setMfaMode('enroll')
         setMfaFactors([])
@@ -826,7 +865,7 @@ function App() {
   }
 
   function buildProject(): Project {
-    return { version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() }
+    return { version: 1, items, parts, sheet: programSheet, sheetHistory, savedAt: new Date().toISOString() }
   }
 
   function buildHistoryEntry(): SheetHistoryEntry {
@@ -835,7 +874,7 @@ function App() {
       id: crypto.randomUUID(),
       name: sheet.name.trim() || `Sheet ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`,
       savedAt: now.toISOString(),
-      sheet: normalizeSheet({ ...sheet, instances: sheet.instances.map((instance) => ({ ...instance })) }),
+      sheet: normalizeSheet({ ...programSheet, instances: sheet.instances.map((instance) => ({ ...instance })) }),
       selectedItemId,
       itemCount: items.length,
       componentCount: parts.length,
@@ -912,8 +951,9 @@ function App() {
   }
 
   function previewGCode() {
+    if (!requirePrograms()) return
     try {
-      const result = exportCombinedGCode(parts, sheet)
+      const result = exportCombinedGCode(parts, sheet, programs)
       const simulation = safeSimulateGCode(result.gcode)
       setPreview(result.gcode)
       setPreviewSimulation(simulation)
@@ -952,12 +992,13 @@ function App() {
   }
 
   function prepareCombinedExport() {
+    if (!requirePrograms()) return
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
     }
 
-    const result = exportCombinedGCode(parts, sheet)
+    const result = exportCombinedGCode(parts, sheet, programs)
     if (result.errors.length > 0) {
       setStatus(`Export blocked: ${result.errors[0]}`)
       setPreview(result.gcode)
@@ -980,12 +1021,13 @@ function App() {
   }
 
   function prepareSheetExports() {
+    if (!requirePrograms()) return
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
     }
 
-    const results = exportPhysicalSheetGCodes(parts, sheet)
+    const results = exportPhysicalSheetGCodes(parts, sheet, programs)
     const exportErrors = results.flatMap((result) => result.errors)
     if (exportErrors.length > 0) {
       setStatus(`Export blocked: ${exportErrors[0]}`)
@@ -1090,6 +1132,7 @@ function App() {
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
+          <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
         </nav>
         {(page === 'sheet' || page === 'history') && <><div className="sheet-controls">
           <label className="sheet-name-control">
@@ -1153,10 +1196,10 @@ function App() {
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {(page === 'queue' || page === 'generate' || page === 'marketplace') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
 
-      {page === 'generate' ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} /></Suspense> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1344,7 +1387,7 @@ function App() {
         </div>
       )}
 
-      {page !== 'queue' && page !== 'generate' && <section className="bottom-bar">
+      {page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>

@@ -8,6 +8,7 @@ import { originalFinalDepth } from '../gcode/depth'
 import { instanceBounds } from '../gcode/transform'
 import { preparationBounds } from '../gcode/preparationBounds'
 import { planScrewPositions } from '../gcode/screwPositions'
+import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../gcode/programSettings'
 import type { Sheet } from '../models/Sheet'
 import type { Part } from '../models/Part'
 import type { MarketplaceItem } from '../models/Item'
@@ -41,7 +42,7 @@ export async function sha256(value: string | Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export async function generateJob(request: JobRequest, catalog: MarketplaceItem[], components: Part[]) {
+export async function generateJob(request: JobRequest, catalog: MarketplaceItem[], components: Part[], programs: ProgramSettings = defaultProgramSettings) {
   const counts = new Map<string, number>()
   for (const line of request.items) {
     const matches = catalog.filter(item => line.itemId ? item.id === line.itemId : item.sku === line.sku)
@@ -64,7 +65,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
     name: request.jobName, orderNumber: request.orderNumber, material: settings.material,
     width: settings.widthMm, height: settings.heightMm, spacing: settings.spacingMm, borderSpacing: settings.borderMm,
     safeZOverrideMm: settings.safeZMm, screwMarkingEnabled: settings.screwMarks,
-    gcodeSettings: { startGcode: 'G21\nG17\nG90\nG94', spindleStartGcode: 'S18000\nM03', endGcode: 'M05\nM30', safeZ: settings.safeZMm },
+    gcodeSettings: { ...programs, safeZ: settings.safeZMm },
     instances: [],
   }
   for (const part of parts) {
@@ -76,7 +77,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   sheet = numberSheetParts(sheet)
   sheet.instances = autoNest(parts, sheet)
   const issues = validateSheet(parts, sheet)
-  const exported = exportPhysicalSheetGCodes(parts, sheet)
+  const exported = exportPhysicalSheetGCodes(parts, sheet, programs)
   const simulations = exported.map(result => simulateGCode(result.gcode))
   const errors = [...issues.filter(issue => issue.level === 'error').map(issue => issue.message), ...exported.flatMap(file => file.errors), ...simulations.flatMap(simulation => simulation.errors)]
   if (errors.length) throw new JobError('The job failed machining validation and has not been queued.', 422, [...new Set(errors)])
@@ -89,7 +90,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   })
   if (settings.thicknessMm && cuts.some(cut => cut.deepestCutMm > settings.thicknessMm! + 1)) warnings.push('Some source cuts exceed the stated material thickness by more than 1 mm. Verify the stock, work zero and spoilboard allowance.')
   const manifest: JobManifest = {
-    version: 1, request, items: manifestItems, cuts,
+    version: 1, request, items: manifestItems, cuts, programSettings: { ...programs },
     sheets: exported.map((file, i) => {
       const instances = sheet.instances.filter(instance => instance.sheetIndex === i)
       const bounds = instances.map(instance => preparationBounds(parts.find(part => part.id === instance.partId)!, instance, settings.safeZMm).bounds)
@@ -100,7 +101,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
       'Generated for operator review. Queue status changes do not start or control the CNC.',
       'Verify stock, cutter, work origin, hold-downs, grain direction and clearances before approving. Automatic nesting may rotate parts.',
       `Millimetres; absolute coordinates; Z0 at material surface; safe Z ${settings.safeZMm} mm.`,
-      'Spindle start is S18000 M03. Source machining feeds and cutting depths are preserved. Verify tool, spindle speed and DDCS start-up delay.',
+      `Account program settings applied; spindle start S${spindleRpm(programs)} M03. Source machining feeds and cutting depths are preserved. Verify tool, startup/end programs and DDCS start-up delay.`,
       'Spindle-off maximum X/Y reach check precedes each sheet. Confirm the physical machine can reach these coordinates.',
       settings.screwMarks ? 'Screw marking enabled: 6 mm cutter, recessed screws, 2 mm marking depth, followed by M05 / M00 pause to fit screws.' : 'Screw marking is disabled. Secure the material before starting.',
       'Load each physical sheet separately, align its origin and use its matching sheet-N.nc file. Apply labels only with the machine and spindle stopped.',

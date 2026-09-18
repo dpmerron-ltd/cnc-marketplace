@@ -3,6 +3,7 @@ import { readDxf } from '../src/cam/dxf'
 import { generateCam, materialPreset } from '../src/cam/generate'
 import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/types'
 import { JobError, sha256 } from '../src/jobs/generateJob'
+import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -21,7 +22,7 @@ const schema = z.strictObject({
   operations: overrides,
 })
 
-export async function generateDxfNc(value: unknown) {
+export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
   if (!parsed.success) throw new JobError('Invalid DXF generation request.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
   const input = parsed.data
@@ -49,7 +50,7 @@ export async function generateDxfNc(value: unknown) {
     if (operations[feature.id].tabs !== undefined && !['inside', 'outside'].includes(effective.kind)) throw new JobError(`${feature.id}: tabs are only supported for inside/outside contours.`, 400)
     if (operations[feature.id].cornerOvercuts !== undefined && (!['inside', 'pocket'].includes(effective.kind) || effective.circle)) throw new JobError(`${feature.id}: cornerOvercuts is only supported for non-circular pockets and inside contours.`, 400)
   }
-  const result = generateCam(drawing, { thickness: input.thicknessMm, units: input.units, operations })
+  const result = generateCam(drawing, { thickness: input.thicknessMm, units: input.units, operations, programs })
   if (result.errors.length) throw new JobError('DXF machining validation failed.', 422, result.errors)
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 10000 || bytes > 2000000) throw new JobError('Generated NC exceeds 10,000 lines or 2 MB. Split the drawing.', 422)
@@ -58,10 +59,11 @@ export async function generateDxfNc(value: unknown) {
     filename: input.filename.replace(/\.dxf$/i, '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true,
+    programSettings: { ...programs },
     warnings: result.warnings,
     settings: {
       thicknessMm: input.thicknessMm, drawingUnits: (input.units === 'auto' ? drawing.units : input.units) === 'inches' ? 'inches' : 'mm',
-      cutterDiameterMm: camPreset.diameter, spindleRpm: camPreset.spindle, clearanceMm: camPreset.clearance,
+      cutterDiameterMm: camPreset.diameter, spindleRpm: spindleRpm(programs), clearanceMm: camPreset.clearance,
       cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2, drillPeckRetractMm: 0.5,
       rampDegrees: camPreset.rampDegrees, rampFeedMmPerMinute: camPreset.rampFeed, cutFeedMmPerMinute: camPreset.cutFeed,
       reachCheck: false, screwMarking: false,

@@ -2,11 +2,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
+import { defaultProgramSettings } from './gcode/programSettings'
 
 const mock = vi.hoisted(() => ({
   userId: 'alice',
   authChanged: undefined as undefined | ((event: string, session: unknown) => void),
   load: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
+  programs: vi.fn(), savePrograms: vi.fn(),
 }))
 vi.mock('./storage/supabaseClient', () => ({
   supabaseUrl: 'https://test.supabase.co',
@@ -31,6 +33,7 @@ vi.mock('./storage/supabaseProjectStore', () => ({
   saveRemoteProject: (...args: unknown[]) => mock.save(...args),
   deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(),
 }))
+vi.mock('./storage/programSettingsStore', () => ({ loadProgramSettings: (...args: unknown[]) => mock.programs(...args), saveProgramSettings: (...args: unknown[]) => mock.savePrograms(...args) }))
 
 function library(userId: string): RemoteProjectState {
   return {
@@ -51,8 +54,28 @@ async function openSheet() {
 }
 
 describe('account switching', () => {
-  beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear() })
+  beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('keeps programs private across account switches and requires setup for new accounts', async () => {
+    mock.load.mockImplementation(async owner => library(owner))
+    mock.programs.mockImplementation(async owner => owner === 'alice' ? { ...defaultProgramSettings, startGcode: '(Alice only)\nG21 G90' } : undefined)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Profile' }))
+    await waitFor(() => expect(screen.getByLabelText('Start program')).toHaveValue('(Alice only)\nG21 G90'))
+    await switchAccount('bob')
+    fireEvent.click(await screen.findByRole('button', { name: 'Profile' }))
+    await waitFor(() => expect(screen.getByLabelText('Start program')).toHaveValue(''))
+    expect(screen.queryByText('Alice only')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+    expect(await screen.findByText('CNC program setup required')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'User Profile' }))
+    fireEvent.change(screen.getByLabelText('Start program'), { target: { value: 'G21 G90\n(Bob only)' } })
+    fireEvent.change(screen.getByLabelText('Spindle start'), { target: { value: 'S16000 M03' } })
+    fireEvent.change(screen.getByLabelText('End program'), { target: { value: 'M05\nM30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+    await screen.findByText('Settings saved')
+    expect(mock.savePrograms).toHaveBeenCalledWith('bob', { startGcode: 'G21 G90\n(Bob only)', spindleStartGcode: 'S16000 M03', endGcode: 'M05\nM30' })
+  })
 
   it('keeps sheet controls off the dedicated items page', async () => {
     mock.load.mockResolvedValue(library('alice'))

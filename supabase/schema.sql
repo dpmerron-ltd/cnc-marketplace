@@ -214,4 +214,29 @@ create policy "component item ownership"
   using (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()))
   with check (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()));
 
+create table if not exists public.user_program_settings (
+  owner_id uuid primary key references auth.users(id) on delete cascade,
+  start_gcode text not null check (length(start_gcode) between 1 and 8000),
+  spindle_start_gcode text not null check (length(spindle_start_gcode) between 1 and 8000),
+  end_gcode text not null check (length(end_gcode) between 1 and 8000),
+  updated_at timestamptz not null default now()
+);
+alter table public.user_program_settings enable row level security;
+grant select, insert, update on public.user_program_settings to authenticated;
+grant all on public.user_program_settings to service_role;
+drop policy if exists "own program settings" on public.user_program_settings;
+create policy "own program settings" on public.user_program_settings for all to authenticated
+  using (owner_id = auth.uid() and (auth.jwt()->>'aal') = 'aal2')
+  with check (owner_id = auth.uid() and (auth.jwt()->>'aal') = 'aal2');
+drop policy if exists "program account isolation" on public.user_program_settings;
+create policy "program account isolation" on public.user_program_settings as restrictive for all
+  using (owner_id = auth.uid() and (auth.jwt()->>'aal') = 'aal2')
+  with check (owner_id = auth.uid() and (auth.jwt()->>'aal') = 'aal2');
+
+-- Preserve Dan's established machine programs without assigning them to other users.
+insert into public.user_program_settings (owner_id, start_gcode, spindle_start_gcode, end_gcode)
+select id, E'G21\nG17\nG90\nG94', 'S18000 M03', E'M05\nM30'
+from auth.users where lower(email) = 'dan@dpmerron.co.uk'
+on conflict (owner_id) do nothing;
+
 commit;

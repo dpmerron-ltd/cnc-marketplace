@@ -1,5 +1,6 @@
 import type { PartLabel } from '../labels/partLabels'
 import type { Bounds } from '../models/geometry'
+import type { ProgramSettings } from '../gcode/programSettings'
 
 export type JobStatus = 'awaiting_review' | 'ready' | 'cutting' | 'completed' | 'cancelled'
 export interface JobRequest {
@@ -20,6 +21,7 @@ export interface JobCut extends PartLabel {
 }
 export interface JobManifest {
   version: 1
+  programSettings?: ProgramSettings
   request: JobRequest
   items: Array<{ id: string; sku: string; name: string; quantity: number; componentsPerItem: number }>
   cuts: JobCut[]

@@ -6,6 +6,7 @@ import { planScrewPositions, screwMarkDepthMm, screwMarkFeedMmPerMinute } from '
 import { parseGCode } from './parser'
 import { preparationBounds } from './preparationBounds'
 import { effectiveSafeZ, overrideClearance } from './safeZ'
+import { startProgramLines, validatePrograms, type ProgramSettings } from './programSettings'
 import { transformLocalPoint, transformPartProgram } from './transform'
 import type { ParsedLine } from './types'
 import type { Point } from '../models/geometry'
@@ -195,8 +196,13 @@ function transformedInstanceLines(
   return { lines: output, errors, warnings, nextInstanceNumber: instanceNumber }
 }
 
-export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
+export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: ProgramSettings): ExportResult {
   const safeZ = effectiveSafeZ(sheet)
+  if (programs) {
+    const errors = validatePrograms(programs, safeZ)
+    if (errors.length) return { gcode: '', errors, warnings: [] }
+    sheet = { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } }
+  }
   if (!Number.isFinite(safeZ) || safeZ <= 0) return { gcode: '', errors: ['Safe Z must be a finite positive height above the material.'], warnings: [] }
   sheet = numberSheetParts({ ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } })
   const errors: string[] = []
@@ -209,7 +215,7 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
   if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
   output.push(`(Sheet: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
   output.push(`(Physical sheets: ${sheetCount})`)
-  output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
+  output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
 
   let instanceNumber = 0
   for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
@@ -242,14 +248,20 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet): ExportResult {
 
   output.push('')
   output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
+  if (programs) output.push('M05')
   output.push(...sheet.gcodeSettings.endGcode.split('\n').filter(Boolean))
 
   return { gcode: `${output.join('\n')}\n`, errors, warnings: Array.from(new Set(warnings)) }
 }
 
-export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExportResult[] {
+export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?: ProgramSettings): SheetExportResult[] {
   const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
   const safeZ = effectiveSafeZ(sheet)
+  if (programs) {
+    const errors = validatePrograms(programs, safeZ)
+    if (errors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors, warnings: [] }))
+    sheet = { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } }
+  }
   if (!Number.isFinite(safeZ) || safeZ <= 0) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: ['Safe Z must be a finite positive height above the material.'], warnings: [] }))
   sheet = numberSheetParts({ ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } })
 
@@ -263,7 +275,7 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExp
     if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
     output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
     output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
-    output.push(...sheet.gcodeSettings.startGcode.split('\n').filter(Boolean))
+    output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
     const reachCheck = reachCheckLines(parts, sheet, sheetIndex)
     output.push(...reachCheck.lines)
     const screwMarking = screwMarkingLines(parts, sheet, sheetIndex)
@@ -272,6 +284,7 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet): SheetExp
     output.push(...transformed.lines)
     output.push('')
     output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
+    if (programs) output.push('M05')
     output.push(...sheet.gcodeSettings.endGcode.split('\n').filter(Boolean))
 
     return {

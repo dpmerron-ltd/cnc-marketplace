@@ -1,5 +1,6 @@
 import type { Point } from '../models/geometry'
 import type { GCodeSimulation } from '../gcode/simulator'
+import type { ProgramSettings } from '../gcode/programSettings'
 
 export type OperationKind = 'outside' | 'inside' | 'drill' | 'pocket' | 'ignore' | 'unassigned'
 export interface CamFeature {
@@ -20,6 +21,7 @@ export interface CamSettings {
   thickness: 12 | 18
   units: 'auto' | 'mm' | 'inches'
   operations: Record<string, OperationOverride>
+  programs?: ProgramSettings
 }
 export interface CamOperation {
   featureId: string

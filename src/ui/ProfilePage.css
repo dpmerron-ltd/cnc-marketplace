@@ -1,0 +1,16 @@
+.profile-page { background: #fff; color: #22313a; min-height: 70vh; }
+.profile-heading { padding: 20px 24px; border-bottom: 1px solid #dce3e7; display: flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
+.profile-heading h2 { font-size: 20px; margin: 0; }
+.profile-heading span { font-size: 13px; color: #62717b; overflow-wrap: anywhere; }
+.profile-page form { max-width: 1200px; margin: auto; padding: 24px; }
+.profile-section-heading { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 20px; }
+.profile-section-heading h3 { font-size: 16px; margin: 0; }
+.profile-section-heading span, .profile-actions span { color: #62717b; font-size: 12px; }
+.profile-programs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.profile-programs label { font-size: 13px; font-weight: 600; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.profile-programs textarea { width: 100%; box-sizing: border-box; min-height: 320px; resize: vertical; border: 1px solid #becbd1; border-radius: 4px; background: #f8fafb; padding: 12px; color: #203039; font: 13px/1.6 monospace; }
+.profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 20px; }
+.profile-error, .profile-errors { color: #962f2f; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-errors { max-height: 240px; overflow: auto; }
+.profile-error button { margin-left: 12px; }
+@media (max-width: 700px) { .profile-page form, .profile-heading { padding: 16px; } .profile-programs { grid-template-columns: 1fr; } .profile-programs textarea { min-height: 180px; } }

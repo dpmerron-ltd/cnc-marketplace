@@ -2,6 +2,7 @@ import type { Point } from '../models/geometry'
 import { simulateGCode } from '../gcode/simulator'
 import { calculateMachiningBounds } from '../gcode/bounds'
 import { parseGCode } from '../gcode/parser'
+import { defaultProgramSettings, programLines, startProgramLines, validatePrograms } from '../gcode/programSettings'
 import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
 import { camPreset, defaultTabCount } from './types'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
@@ -46,6 +47,8 @@ function rotatePath(path: Point[], start: number): Point[] {
 
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
+  const programs = settings.programs ?? defaultProgramSettings
+  errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness)
   if (![12, 18].includes(settings.thickness)) errors.push('Select 12 mm or 18 mm material.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
@@ -251,9 +254,9 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = ['(DXF CAM - DDCS 4.1 - OPERATOR REVIEW REQUIRED)', `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, '(Ramp 3 degrees F600 / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)', `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, 'G21', 'G17', 'G90', 'G94', 'M05', 'G00 Z20', 'S18000 M03']
+  const header = ['(DXF CAM - DDCS 4.1 - OPERATOR REVIEW REQUIRED)', `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, '(Ramp 3 degrees F600 / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)', `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
-  const candidate = [...header, ...lines, 'G00 Z20', 'M05', 'M30', ''].join('\n')
+  const candidate = [...header, ...lines, 'G00 Z20', 'M05', ...programLines(programs.endGcode), ''].join('\n')
   const simulation = simulateGCode(candidate)
   errors.push(...simulation.errors)
   warnings.push(...simulation.warnings)

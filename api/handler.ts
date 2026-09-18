@@ -5,6 +5,7 @@ import type { MarketplaceItem } from '../src/models/Item'
 import type { Part } from '../src/models/Part'
 import { jobPdfs } from './pdf'
 import { dxfBodyLimit, generateDxfNc } from './dxf'
+import type { ProgramSettings } from '../src/gcode/programSettings'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
@@ -12,6 +13,7 @@ export interface StoredJob extends CuttingJob { request_hash: string }
 export interface JobRepository {
   authenticate(token: string): Promise<Identity | undefined>
   allowRequest(owner: string): Promise<boolean>
+  programSettings(owner: string): Promise<ProgramSettings | undefined>
   catalog(owner: string, limit: number, offset: number): Promise<unknown[]>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
   list(owner: string, limit: number, offset: number, status?: JobStatus): Promise<JobSummary[]>
@@ -59,7 +61,15 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
       if (!await repository.allowRequest(owner)) return json({ error: 'Account rate limit exceeded. Retry in 60 seconds.', requestId }, 429, { 'Retry-After': '60' })
       const url = new URL(request.url)
       const path = url.pathname.replace(/^.*?\/cnc-api(?=\/|$)/, '')
-      if (path === '/v1/dxf-to-nc' && request.method === 'POST') return json(await generateDxfNc(await body(request, dxfBodyLimit)))
+      const programsForOwner = async () => {
+        const programs = await repository.programSettings(owner)
+        if (!programs) throw new JobError('Configure CNC program settings in your User Profile before generating G-code.', 422)
+        return programs
+      }
+      if (path === '/v1/dxf-to-nc' && request.method === 'POST') {
+        const input = await body(request, dxfBodyLimit)
+        return json(await generateDxfNc(input, await programsForOwner()))
+      }
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })
@@ -79,7 +89,7 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
           return json(publicJob(previous), 200, { 'Idempotent-Replayed': 'true' })
         }
         const catalog = await repository.loadComponents(owner, input)
-        const job = await generateJob(input, catalog.items, catalog.parts)
+        const job = await generateJob(input, catalog.items, catalog.parts, await programsForOwner())
         const id = crypto.randomUUID()
         const pdfs = await jobPdfs(job, id, fontBytes)
         const raw = [

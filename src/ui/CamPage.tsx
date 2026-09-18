@@ -8,11 +8,12 @@ import { downloadText } from '../storage/projectStorage'
 import { CamPreview } from './CamPreview'
 import { operationColors, operationNames } from './camAppearance'
 import './CamPage.css'
+import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
 
 const kinds = Object.keys(operationNames) as OperationKind[]
 export interface CamSave { itemId: string; filename: string; source: string; gcode: string }
 
-export function CamPage({ items, onSave }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void }) {
+export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void; programs: ProgramSettings }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const loadId = useRef(0)
   const [source, setSource] = useState('')
@@ -36,9 +37,9 @@ export function CamPage({ items, onSave }: { items: MarketplaceItem[]; onSave: (
       setResult(event.data.result); setError(event.data.error ?? ''); setBusy(false)
     }
     worker.onerror = () => { if (active) { setError('Generation failed. Check the DXF and try again.'); setBusy(false); setResult(undefined) } }
-    worker.postMessage({ source, settings })
+    worker.postMessage({ source, settings: { ...settings, programs } })
     return () => { active = false; worker.terminate() }
-  }, [source, settings])
+  }, [source, settings, programs])
   useEffect(() => () => { loadId.current++ }, [])
   function update(patch: Partial<CamSettings>) {
     setReviewed(false); setSaved(false); setBusy(Boolean(source)); setSettings(s => ({ ...s, ...patch }))
@@ -71,7 +72,7 @@ export function CamPage({ items, onSave }: { items: MarketplaceItem[]; onSave: (
     <div className="cam-settings">
       <label>Material thickness<select value={settings.thickness} onChange={e => update({ thickness: Number(e.target.value) as 12 | 18 })}><option value="18">18 mm</option><option value="12">12 mm</option></select></label>
       <label>DXF units<select value={settings.units} onChange={e => update({ units: e.target.value as CamSettings['units'] })}><option value="auto">From DXF{result ? ` (${result.drawing.units})` : ''}</option><option value="mm">Millimetres</option><option value="inches">Inches</option></select></label>
-      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>18,000 rpm</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {settings.thickness === 18 ? '9.2' : '12.2'} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>3 deg / 600 mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
+      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{spindleRpm(programs).toLocaleString()} rpm</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {settings.thickness === 18 ? '9.2' : '12.2'} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>3 deg / 600 mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
     </div>
     <div className="cam-workspace">
       <aside className="cam-operations" aria-label="Machining operations">
