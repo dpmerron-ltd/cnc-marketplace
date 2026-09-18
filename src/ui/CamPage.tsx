@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Download, FileUp, Save, SkipForward } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
-import { camPreset, defaultTabCount } from '../cam/types'
+import { camPreset, defaultTabCount, requiresHoldingTabs } from '../cam/types'
 import { materialPreset } from '../cam/generate'
 import { downloadText } from '../storage/projectStorage'
 import { CamPreview } from './CamPreview'
@@ -147,7 +147,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
                 <button type="button" className="cam-operation-name" onClick={() => setSelected(f.id)}><i style={{ backgroundColor: operationColors[f.kind] }} />{f.name}</button>
                 <select aria-label={`Operation for ${f.name}`} value={f.kind} onChange={e => operation([f.id], { kind: e.target.value as OperationKind })}>{kinds.map(kind => <option key={kind} value={kind}>{operationNames[kind]}</option>)}</select>
                 <div className="cam-operation-fields">
-                  {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min="0" max="4" step="1" value={override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
+                  {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min={requiresHoldingTabs(f) ? 1 : 0} max="4" step="1" value={override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
                   {f.kind === 'pocket' && <label>Depth (mm)<input aria-label={`Pocket depth for ${f.name}`} type="number" min="0.1" max={settings.thickness - 0.1} step="0.1" value={override.depthMm ?? f.depthMm ?? ''} onChange={e => operation([f.id], { depthMm: Number(e.target.value) })} /></label>}
                   {!f.circle && (f.kind === 'pocket' || f.kind === 'inside') && <label><input type="checkbox" aria-label={`Corner overcuts for ${f.name}`} checked={override.cornerOvercuts ?? true} onChange={e => operation([f.id], { cornerOvercuts: e.target.checked })} />Corner overcuts</label>}
                   {f.kind === 'drill' ? <span>Hole diameter {camPreset.diameter} mm</span> : f.circle && <span>DXF diameter {(f.circle.radius * 2).toFixed(2)} mm</span>}
