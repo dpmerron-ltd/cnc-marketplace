@@ -132,15 +132,19 @@ describe('CNC generation', () => {
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(200, 0)])), settings).errors.join()).toContain('overlap')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(305, 0)])), settings).errors.join()).toContain('cutter paths overlap')
   })
-  it.each([12, 18] as const)('uses 2 mm pecks with full Z20 retraction and no component reach check for %s mm stock', thickness => {
-    const job = generateCam(readDxf(dxf([circle(30, 30, 3)])), { ...settings, thickness })
+  it.each([12, 18] as const)('uses Z0.5 between pecks and Z20 between holes for %s mm stock', thickness => {
+    const job = generateCam(readDxf(dxf([circle(30, 30, 3), circle(60, 30, 3)])), { ...settings, thickness })
     expect(job.errors).toEqual([])
     expect(job.gcode).not.toMatch(/reach check/i)
     expect(job.gcode.split('S18000 M03')[0]).not.toMatch(/G0[01].*[XY]/)
     const depths = thickness === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
     const plunges = job.simulation.moves.filter(move => move.type !== 'rapid' && move.end.z < 0)
-    expect(plunges.map(move => -move.end.z)).toEqual(depths)
-    for (const depth of depths) expect(job.gcode).toContain(`G01 Z-${depth} F600\nG00 Z20`)
+    expect(plunges.map(move => -move.end.z)).toEqual([...depths, ...depths])
+    for (const [i, depth] of depths.entries()) expect(job.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${i === depths.length - 1 ? 20 : 0.5}`)
+    const retracts = job.simulation.moves.filter(move => move.type === 'rapid' && move.start.z < 0)
+    expect(retracts.map(move => move.end.z)).toEqual([...depths, ...depths].map(depth => depth === depths.at(-1) ? 20 : 0.5))
+    const lateral = job.simulation.moves.filter(move => move.type === 'rapid' && distance(move.start, move.end) > 0.001)
+    expect(lateral.every(move => move.start.z === 20 && move.end.z === 20)).toBe(true)
     expect(job.gcode).not.toMatch(/G0?4\b|G8[13]\b/)
     const rapidsDown = job.simulation.moves.filter(move => move.type === 'rapid' && move.end.z < move.start.z)
     expect(rapidsDown.every(move => move.end.z >= 0.5)).toBe(true)

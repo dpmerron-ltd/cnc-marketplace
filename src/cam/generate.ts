@@ -101,9 +101,9 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         if (!f.circle && f.points.length !== 1) throw new Error('Drilling requires a circle or DXF point.')
         const center = f.circle?.center ?? f.points[0]
         approach(center)
-        for (let peck = 1; peck <= Math.ceil(material.drill / 2); peck++) {
-          if (peck > 1) emit('G00 Z0.5')
-          emit(`G01 Z-${n(Math.min(peck * 2, material.drill))} F600`, 'G00 Z20')
+        const pecks = Math.ceil(material.drill / 2)
+        for (let peck = 1; peck <= pecks; peck++) {
+          emit(`G01 Z-${n(Math.min(peck * 2, material.drill))} F600`, peck === pecks ? 'G00 Z20' : 'G00 Z0.5')
         }
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [center], tabs: [], depthMm: material.drill, firstLine, lastLine: lines.length })
         continue

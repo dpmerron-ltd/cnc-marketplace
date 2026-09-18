@@ -21,12 +21,13 @@ describe('DXF API generation', () => {
     expect(result.reviewRequired).toBe(true)
     expect(result.sha256).toBe(await sha256(result.gcode))
     expect(result.bytes).toBe(new TextEncoder().encode(result.gcode).length)
-    expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, clearanceMm: 20, spindleRpm: 18000, drillPeckMm: 2, reachCheck: false, screwMarking: false })
+    expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, clearanceMm: 20, spindleRpm: 18000, drillPeckMm: 2, drillPeckRetractMm: 0.5, reachCheck: false, screwMarking: false })
     expect(result.operations.map(o => o.kind)).toEqual(['drill', 'outside'])
     expect(result.operations[1].tabCount).toBeLessThanOrEqual(4)
     expect(result.summary.deepestCutMm).toBe(thicknessMm === 18 ? 18.4 : 12.2)
     expect(result.gcode).not.toMatch(/reach check|screw mark/i)
-    for (const depth of thicknessMm === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]) expect(result.gcode).toContain(`G01 Z-${depth} F600\nG00 Z20`)
+    const depths = thicknessMm === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
+    for (const [i, depth] of depths.entries()) expect(result.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${i === depths.length - 1 ? 20 : 0.5}`)
   })
   it('applies exact layer assignments then feature overrides, including prototype-like layer names', async () => {
     const source = dxf([circle('constructor'), circle('IGNORE', 60)])

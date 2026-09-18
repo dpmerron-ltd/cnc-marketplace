@@ -3,6 +3,7 @@ import type { Sheet } from '../models/Sheet'
 import { createPartFromGCode } from './importPart'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './exporter'
 import { simulateGCode } from './simulator'
+import { generateCam } from '../cam/generate'
 
 function fixture() {
   const part = createPartFromGCode('clearances.nc', [
@@ -25,6 +26,36 @@ function fixture() {
 }
 
 describe('safe Z override', () => {
+  it.each([12, 18] as const)('preserves generated short pecks through rotated sheet exports for %s mm stock', thickness => {
+    const generated = generateCam({ units: 'mm', errors: [], warnings: [], features: [{ x: 30, y: 30 }, { x: 80, y: 70 }].map((point, i) => ({ id: `hole${i}`, name: `Hole ${i}`, layer: 'DRILL', points: [point], closed: false, kind: 'drill' })) }, { thickness, units: 'mm', operations: {} })
+    expect(generated.errors).toEqual([])
+    const part = createPartFromGCode('pecks.nc', generated.gcode)
+    const { sheet } = fixture()
+    sheet.safeZOverrideMm = 20
+    sheet.instances[0] = { ...sheet.instances[0], partId: part.id, rotation: 90 }
+    for (const exported of [exportCombinedGCode([part], sheet), ...exportPhysicalSheetGCodes([part], sheet)]) {
+      expect(exported.errors).toEqual([])
+      const simulation = simulateGCode(exported.gcode)
+      const depths = thickness === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
+      const cuts = simulation.moves.filter(move => move.type !== 'rapid' && move.end.z < 0)
+      expect(cuts.map(move => -move.end.z)).toEqual([...depths, ...depths])
+      const retracts = simulation.moves.filter(move => move.type === 'rapid' && move.start.z < 0)
+      expect(retracts.map(move => move.end.z)).toEqual([...depths, ...depths].map(depth => depth === depths.at(-1) ? 20 : 0.5))
+      const travel = simulation.moves.filter(move => move.type === 'rapid' && Math.hypot(move.end.x - move.start.x, move.end.y - move.start.y) > 0.001)
+      expect(travel.every(move => move.start.z === 20 && move.end.z === 20)).toBe(true)
+    }
+  })
+
+  it.each(['G00 X50 Y20', 'M00\nG01 Z-4 F600', 'G01 X50 Y20 Z-4 F600'])('does not preserve a short retract before non-peck motion: %s', next => {
+    const part = createPartFromGCode('not-peck.nc', `G21\nG90\nG00 Z20\n(No. 1 Drill machining: Hole)\nG00 X0 Y0\nG01 Z-2 F600\nG00 Z0.5\n${next}\nG01 Z-6 F600\nG00 Z20\nG00 X50 Y50\nM30`)
+    const { sheet } = fixture()
+    sheet.instances[0].partId = part.id
+    sheet.safeZOverrideMm = 20
+    const exported = exportCombinedGCode([part], sheet)
+    expect(exported.errors).toEqual([])
+    expect(exported.gcode).toContain('G01 Z-2 F600\nG00 Z20')
+  })
+
   it.each([2, 20])('uses %s mm for preparation, source retracts, lateral rapids, and finishing without changing cuts', (safeZ) => {
     const { part, sheet } = fixture()
     const original = exportCombinedGCode([part], sheet)

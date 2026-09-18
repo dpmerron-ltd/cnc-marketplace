@@ -62,7 +62,7 @@ export async function generateDxfNc(value: unknown) {
     settings: {
       thicknessMm: input.thicknessMm, drawingUnits: (input.units === 'auto' ? drawing.units : input.units) === 'inches' ? 'inches' : 'mm',
       cutterDiameterMm: camPreset.diameter, spindleRpm: camPreset.spindle, clearanceMm: camPreset.clearance,
-      cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2,
+      cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2, drillPeckRetractMm: 0.5,
       rampDegrees: camPreset.rampDegrees, rampFeedMmPerMinute: camPreset.rampFeed, cutFeedMmPerMinute: camPreset.cutFeed,
       reachCheck: false, screwMarking: false,
     },
