@@ -16,7 +16,7 @@ const rectangle = (x = 0, y = 0, width = 300, height = 200, layer = 'CUT_OUTER')
 const circle = (x: number, y: number, radius: number, layer = 'DRILL') => [0, 'CIRCLE', 8, layer, 10, x, 20, y, 40, radius]
 const settings: CamSettings = { thickness: 18, units: 'auto', operations: {} }
 const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELEASE'), circle(20, 20, 3.175), circle(100, 100, 17.5, 'POCKET_D35_DEPTH12')])
-const result = (thickness: 12 | 18 = 18) => generateCam(readDxf(source()), { ...settings, thickness, operations: thickness === 12 ? { f3: { kind: 'ignore' } } : {} })
+const result = (thickness: CamSettings['thickness'] = 18) => generateCam(readDxf(source()), { ...settings, thickness, operations: thickness === 12 ? { f3: { kind: 'ignore' } } : {} })
 
 describe('DXF geometry', () => {
   it('recognizes layer operations, millimetres and circular pocket depth', () => {
@@ -60,7 +60,7 @@ describe('DXF geometry', () => {
 })
 
 describe('CNC generation', () => {
-  it.each([12, 18] as const)('uses exact %s mm stock depths, source feeds, spindle and clearances', thickness => {
+  it.each([12, 15, 18] as const)('uses exact %s mm stock depths, source feeds, spindle and clearances', thickness => {
     const job = result(thickness), preset = materialPreset(thickness)
     expect(job.errors).toEqual([])
     expect(job.simulation.warnings).toEqual([])
@@ -72,7 +72,7 @@ describe('CNC generation', () => {
     const profile = job.operations.find(o => o.kind === 'outside')!
     const profileCode = job.gcode.split('\n').slice(profile.firstLine - 1, profile.lastLine).join('\n')
     expect((profileCode.match(/\(Pass depth/g) ?? []).length).toBe(preset.passes.length)
-    expect(job.operations.map(o => o.kind)).toEqual(thickness === 18 ? ['drill', 'pocket', 'inside', 'outside'] : ['drill', 'inside', 'outside'])
+    expect(job.operations.map(o => o.kind)).toEqual(thickness === 12 ? ['drill', 'inside', 'outside'] : ['drill', 'pocket', 'inside', 'outside'])
     for (const move of job.simulation.moves.filter(m => m.type === 'rapid' && distance(m.start, m.end) > 0.001)) {
       expect(move.start.z).toBe(20); expect(move.end.z).toBe(20)
     }
@@ -87,7 +87,7 @@ describe('CNC generation', () => {
       expect(Math.min(...op.path.map(p => p.x))).toBeCloseTo(expected, 3)
     }
   })
-  it.each([12, 18] as const)('keeps ramps at 3 degrees and never removes holding tabs for %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('keeps ramps at 3 degrees and never removes holding tabs for %s mm stock', thickness => {
     const job = result(thickness)
     for (const op of job.operations.filter(o => ['outside', 'inside'].includes(o.kind))) {
       expect(op.tabs.length).toBeGreaterThan(0); expect(op.tabs.length).toBeLessThanOrEqual(4)
@@ -108,7 +108,7 @@ describe('CNC generation', () => {
       }
     }
   })
-  it.each([12, 18] as const)('drills at circle centres with the cutter regardless of DXF diameter in %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('drills at circle centres with the cutter regardless of DXF diameter in %s mm stock', thickness => {
     for (const diameter of [4, 6, 6.35, 12]) {
       const drawing = readDxf(dxf([circle(30, 30, diameter / 2, 'BORE_D6_DEPTH10')]))
       const job = generateCam(drawing, { ...settings, thickness })
@@ -133,12 +133,12 @@ describe('CNC generation', () => {
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(200, 0)])), settings).errors.join()).toContain('overlap')
     expect(generateCam(readDxf(dxf([rectangle(), rectangle(305, 0)])), settings).errors.join()).toContain('cutter paths overlap')
   })
-  it.each([12, 18] as const)('uses Z0.5 between pecks and Z20 between holes for %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('uses Z0.5 between pecks and Z20 between holes for %s mm stock', thickness => {
     const job = generateCam(readDxf(dxf([circle(30, 30, 3), circle(60, 30, 3)])), { ...settings, thickness })
     expect(job.errors).toEqual([])
     expect(job.gcode).not.toMatch(/reach check/i)
     expect(job.gcode.split('S18000 M03')[0]).not.toMatch(/G0[01].*[XY]/)
-    const depths = thickness === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
+    const depths = thickness === 12 ? [2, 4, 4.5] : [2, 4, 6, 8, 9.2]
     const plunges = job.simulation.moves.filter(move => move.type !== 'rapid' && move.end.z < 0)
     expect(plunges.map(move => -move.end.z)).toEqual([...depths, ...depths])
     for (const [i, depth] of depths.entries()) expect(job.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${i === depths.length - 1 ? 20 : 0.5}`)
@@ -164,7 +164,7 @@ describe('CNC generation', () => {
     expect(job.simulation.deepestCutMm).toBe(18.4)
   })
   it('blocks invalid material values even outside the UI', () => {
-    expect(generateCam(readDxf(source()), { ...settings, thickness: 15 as 18 }).gcode).toBe('')
+    expect(generateCam(readDxf(source()), { ...settings, thickness: 16 as 18 }).gcode).toBe('')
   })
   it('accepts drill-point geometry without requiring a nominal diameter', () => {
     const feature: CamFeature = { id: 'point', name: 'Point', layer: 'DRILL', points: [{ x: 10, y: 20 }], closed: false, kind: 'drill' }
@@ -181,7 +181,7 @@ describe('CNC generation', () => {
     expect(job.gcode).not.toContain('G02')
     expect(job.warnings.join()).not.toContain('no holding tabs')
   })
-  it.each([12, 18] as const)('keeps doors and large internal openings tabbed in %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('keeps doors and large internal openings tabbed in %s mm stock', thickness => {
     const parsed = readDxf(dxf([rectangle(), rectangle(20, 20, 80, 100, 'CUT_DOOR'), rectangle(150, 20, 100, 70, 'CUT_INNER'), circle(130, 150, 17.5, 'POCKET_D35_DEPTH12')]))
     const job = generateCam(parsed, { ...settings, thickness })
     expect(job.errors).toEqual([])
@@ -190,7 +190,7 @@ describe('CNC generation', () => {
     expect(job.operations.find(op => op.featureId === 'f1')!.tabs.length).toBeGreaterThan(0)
     expect(job.operations.find(op => op.featureId === 'f2')!.tabs).toHaveLength(4)
   })
-  it.each([12, 18] as const)('tabs all three unlabelled door outlines without hinge holes in %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('tabs all three unlabelled door outlines without hinge holes in %s mm stock', thickness => {
     const parsed = readDxf(dxf([rectangle(0, 0, 600, 300, '0'), circle(20, 20, 3), circle(40, 20, 3), circle(60, 20, 3), rectangle(30, 60, 130, 180, '0'), rectangle(220, 60, 130, 180, '0'), rectangle(410, 60, 130, 180, '0')]))
     const job = generateCam(parsed, { ...settings, thickness })
     expect(job.errors).toEqual([])
@@ -237,7 +237,7 @@ describe('CNC generation', () => {
     expect(requiresHoldingTabs({ ...feature, kind: 'pocket' })).toBe(false)
     expect(requiresHoldingTabs({ ...feature, kind: 'drill' })).toBe(false)
   })
-  it.each([12, 18] as const)('enforces tabs on circles and outer profiles above 12 mm in %s mm stock', thickness => {
+  it.each([12, 15, 18] as const)('enforces tabs on circles and outer profiles above 12 mm in %s mm stock', thickness => {
     for (const entity of [circle(50, 50, 20, 'CUT_INNER'), rectangle()]) {
       const parsed = readDxf(dxf([entity]))
       const valid = generateCam(parsed, { ...settings, thickness })
@@ -256,16 +256,35 @@ describe('CNC generation', () => {
     expect(job.operations[0].tabs.length).toBeGreaterThan(0)
     expect(generateCam(inch, { ...settings, operations: { f0: { tabs: 0 } } }).errors.join()).toContain('require holding tabs')
   })
-  it('identifies 35 mm circles inside doors as 12 mm blind hinge pockets and blocks 12 mm stock', () => {
+  it.each([15, 18] as const)('identifies 12 mm blind hinge pockets in %s mm stock and blocks 12 mm stock', thickness => {
     const parsed = readDxf(dxf([rectangle(0, 0, 300, 200, '0'), rectangle(20, 20, 100, 140, '0'), circle(55, 60, 17.5, '0')]))
     expect(parsed.features[1]).toMatchObject({ kind: 'inside', door: true })
     expect(parsed.features[2]).toMatchObject({ kind: 'pocket', hinge: true, depthMm: 12 })
-    const thick = generateCam(parsed, settings)
+    const thick = generateCam(parsed, { ...settings, thickness })
     expect(thick.errors).toEqual([])
     expect(thick.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 12, tabs: [] })
     expect(thick.operations.find(o => o.featureId === 'f1')!.tabs.length).toBeGreaterThan(0)
     const thin = generateCam(parsed, { ...settings, thickness: 12 })
-    expect(thin.gcode).toBe(''); expect(thin.errors.join()).toContain('only supported in 18 mm stock')
+    expect(thin.gcode).toBe(''); expect(thin.errors.join()).toContain('only supported in 15 mm or 18 mm stock')
+  })
+  it('uses exactly 7.7/15.4 mm contour passes, 9.2 mm drills and 12 mm hinges for 15 mm stock', () => {
+    expect(materialPreset(15)).toEqual({ depth: 15.4, passes: [7.7, 15.4], drill: 9.2 })
+    const job = result(15)
+    expect(job.errors).toEqual([])
+    for (const op of job.operations) {
+      const code = job.gcode.split('\n').slice(op.firstLine - 1, op.lastLine).join('\n')
+      const moves = job.simulation.moves.filter(move => move.lineNumber >= op.firstLine && move.lineNumber <= op.lastLine)
+      if (op.kind === 'inside' || op.kind === 'outside') {
+        expect([...code.matchAll(/\(Pass depth ([\d.]+) mm\)/g)].map(match => Number(match[1]))).toEqual([7.7, 15.4])
+        expect(Math.min(...moves.map(move => move.end.z))).toBe(-15.4)
+      } else if (op.kind === 'drill') expect(Math.min(...moves.map(move => move.end.z))).toBe(-9.2)
+      else if (op.kind === 'pocket') {
+        expect(op.depthMm).toBe(12)
+        expect(code).toContain('G01 Z-7.7 F600')
+        expect(Math.min(...moves.map(move => move.end.z))).toBe(-12)
+        expect(op.tabs).toEqual([])
+      }
+    }
   })
   it('uses selected drawing units and full containment for hinge detection', () => {
     const source = dxf([rectangle(0, 0, 10, 8, 'CUT_DOOR'), circle(2, 2, 17.5 / 25.4, '0')], 0)

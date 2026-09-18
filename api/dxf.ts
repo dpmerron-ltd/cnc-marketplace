@@ -15,7 +15,7 @@ const override = z.strictObject({
 const overrides = z.record(z.string().min(1).max(160), override).refine(value => Object.keys(value).length <= 100, 'At most 100 operation overrides are allowed.').default({})
 const schema = z.strictObject({
   dxf: z.string().min(1).max(2000000),
-  thicknessMm: z.union([z.literal(12), z.literal(18)]),
+  thicknessMm: z.union([z.literal(12), z.literal(15), z.literal(18)]),
   filename: z.string().max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*\.dxf$/i, 'Use a DXF filename without a directory.').default('component.dxf'),
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,

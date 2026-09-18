@@ -12,7 +12,7 @@ const slope = Math.tan(camPreset.rampDegrees * Math.PI / 180)
 const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
-export const materialPreset = (thickness: 12 | 18) => thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: 9.2 } : { depth: 12.2, passes: [12.2], drill: 4.5 }
+export const materialPreset = (thickness: CamSettings['thickness']) => thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : { depth: 12.2, passes: [12.2], drill: 4.5 }
 
 function tabIntervals(path: Point[], count: number, circular: boolean): Array<[number, number]> {
   const metric = pathMetric(path), width = camPreset.tabWidth + camPreset.diameter
@@ -50,7 +50,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness)
-  if (![12, 18].includes(settings.thickness)) errors.push('Select 12 mm or 18 mm material.')
+  if (![12, 15, 18].includes(settings.thickness)) errors.push('Select 12 mm, 15 mm or 18 mm material.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
   const features = drawing.features.map(f => ({ ...f, points: f.points.map(p => ({ x: p.x * factor, y: p.y * factor })), circle: f.circle ? { center: { x: f.circle.center.x * factor, y: f.circle.center.y * factor }, radius: f.circle.radius * factor } : undefined, ...settings.operations[f.id] }))
   const active = features.filter(f => f.kind !== 'ignore')
@@ -94,7 +94,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   })
   for (const f of sorted) {
     try {
-      if (f.hinge && settings.thickness === 12) throw new Error('35 mm hinge pockets are only supported in 18 mm stock. Select 18 mm stock or explicitly exclude the hinge geometry.')
+      if (f.hinge && settings.thickness === 12) throw new Error('35 mm hinge pockets are only supported in 15 mm or 18 mm stock. Select 15 mm or 18 mm stock or explicitly exclude the hinge geometry.')
       if (f.kind === 'unassigned') throw new Error('Assign an operation or explicitly exclude this geometry.')
       if (f.kind !== 'drill' && !f.closed) throw new Error('An open contour cannot be machined as a closed profile.')
       if (f.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x > 10000 || p.y > 10000)) throw new Error('Machining coordinates exceed 10,000 mm.')
@@ -114,7 +114,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       if (f.kind === 'pocket') {
         const depth = f.depthMm
         if (depth === undefined || !Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind pocket depth greater than 0 and less than ${settings.thickness} mm. Use an inside cut for a through-hole.`)
-        const passes = settings.thickness === 18 && depth > 9.2 ? [9.2, depth] : [depth]
+        const passes = depth > material.passes[0] ? [material.passes[0], depth] : [depth]
         if (!f.circle) {
           const paths = relieve(f, pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4))
           let previous = 0

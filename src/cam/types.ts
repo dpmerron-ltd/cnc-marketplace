@@ -18,7 +18,7 @@ export interface CamFeature {
 export interface CamDrawing { features: CamFeature[]; warnings: string[]; errors: string[]; units: 'mm' | 'inches' | 'unknown' }
 export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number; cornerOvercuts?: boolean }
 export interface CamSettings {
-  thickness: 12 | 18
+  thickness: 12 | 15 | 18
   units: 'auto' | 'mm' | 'inches'
   operations: Record<string, OperationOverride>
   programs?: ProgramSettings

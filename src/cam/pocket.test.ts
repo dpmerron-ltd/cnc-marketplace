@@ -43,13 +43,14 @@ describe('Non-circular pocket clearing', () => {
     expect(job.gcode).not.toMatch(/reach check/i)
   })
 
-  it.each([12, 18] as const)('retains %s mm presets, ramp limits and Z20 linking moves', thickness => {
-    const depth = thickness === 18 ? 12 : 6
+  it.each([12, 15, 18] as const)('retains %s mm presets, ramp limits and Z20 linking moves', thickness => {
+    const depth = thickness === 12 ? 6 : 12
+    const firstPass = thickness === 18 ? 9.2 : thickness === 15 ? 7.7 : 6
     const job = generateCam(drawing(concave, depth), { ...settings, thickness })
     expect(job.errors).toEqual([])
     expect(job.simulation.deepestCutMm).toBe(depth)
     expect(job.gcode).toContain('S18000 M03')
-    expect(job.gcode).toContain(`(Pass depth ${thickness === 18 ? 9.2 : 6} mm)`)
+    expect(job.gcode).toContain(`(Pass depth ${firstPass} mm)`)
     for (const move of job.simulation.moves) {
       const travel = distance(move.start, move.end)
       if (move.type === 'rapid' && travel > 0.001) {
@@ -59,7 +60,7 @@ describe('Non-circular pocket clearing', () => {
         expect((move.start.z - move.end.z) / travel).toBeLessThanOrEqual(Math.tan(3 * Math.PI / 180) + 0.001)
         expect(move.feedMmPerMinute).toBe(600)
       }
-      if (move.type !== 'rapid' && travel < 0.001 && move.end.z < 0) expect(move.end.z).toBe(-9.2)
+      if (move.type !== 'rapid' && travel < 0.001 && move.end.z < 0) expect(move.end.z).toBe(-firstPass)
     }
   })
 

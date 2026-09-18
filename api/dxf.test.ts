@@ -13,7 +13,7 @@ const profile = [0, 'LWPOLYLINE', 8, 'CUT_OUTER', 90, 4, 70, 1, 10, 0, 20, 0, 10
 const drawing = dxf([profile, circle()])
 
 describe('DXF API generation', () => {
-  it.each([12, 18] as const)('exactly matches browser NC with %s mm stock', async thicknessMm => {
+  it.each([12, 15, 18] as const)('exactly matches browser NC with %s mm stock', async thicknessMm => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm, filename: 'front panel.dxf' })
     const browser = generateCam(readDxf(drawing), { thickness: thicknessMm, units: 'auto', operations: {} })
     expect(result.gcode).toBe(browser.gcode)
@@ -24,9 +24,10 @@ describe('DXF API generation', () => {
     expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, clearanceMm: 20, spindleRpm: 18000, drillPeckMm: 2, drillPeckRetractMm: 0.5, reachCheck: false, screwMarking: false })
     expect(result.operations.map(o => o.kind)).toEqual(['drill', 'outside'])
     expect(result.operations[1].tabCount).toBeLessThanOrEqual(4)
-    expect(result.summary.deepestCutMm).toBe(thicknessMm === 18 ? 18.4 : 12.2)
+    expect(result.summary.deepestCutMm).toBe(thicknessMm === 18 ? 18.4 : thicknessMm === 15 ? 15.4 : 12.2)
+    expect(result.settings.passDepthsMm).toEqual(thicknessMm === 18 ? [9.2, 18.4] : thicknessMm === 15 ? [7.7, 15.4] : [12.2])
     expect(result.gcode).not.toMatch(/reach check|screw mark/i)
-    const depths = thicknessMm === 18 ? [2, 4, 6, 8, 9.2] : [2, 4, 4.5]
+    const depths = thicknessMm === 12 ? [2, 4, 4.5] : [2, 4, 6, 8, 9.2]
     for (const [i, depth] of depths.entries()) expect(result.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${i === depths.length - 1 ? 20 : 0.5}`)
   })
   it('applies exact layer assignments then feature overrides, including prototype-like layer names', async () => {
@@ -42,7 +43,7 @@ describe('DXF API generation', () => {
     expect(result.operations[0]).toMatchObject({ kind: 'pocket', depthMm: 8 })
     expect(result.operations[1]).toMatchObject({ kind: 'outside', depthMm: 18.4, tabCount: 2 })
   })
-  it.each([12, 18] as const)('requires holding tabs on non-circular inside cuts in the API for %s mm stock', async thicknessMm => {
+  it.each([12, 15, 18] as const)('requires holding tabs on non-circular inside cuts in the API for %s mm stock', async thicknessMm => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm, operations: { f0: { kind: 'inside' }, f1: { kind: 'ignore' } } })
     expect(result.operations[0]).toMatchObject({ kind: 'inside', tabCount: 4 })
     expect(result.warnings.join()).not.toContain('no holding tabs')
@@ -56,7 +57,7 @@ describe('DXF API generation', () => {
     const pocket = await generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { kind: 'pocket', depthMm: 6 } } })
     expect(pocket.operations[0]).toMatchObject({ kind: 'pocket', tabCount: 0 })
   })
-  it.each([12, 18] as const)('supports non-circular pockets with browser parity in %s mm stock', async thicknessMm => {
+  it.each([12, 15, 18] as const)('supports non-circular pockets with browser parity in %s mm stock', async thicknessMm => {
     const source = dxf([profile])
     const result = await generateDxfNc({ dxf: source, thicknessMm, operations: { f0: { kind: 'pocket', depthMm: 6 } } })
     const browser = generateCam(readDxf(source), { thickness: thicknessMm, units: 'auto', operations: { f0: { kind: 'pocket', depthMm: 6 } } })
@@ -73,7 +74,7 @@ describe('DXF API generation', () => {
     await expect(generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f0: { cornerOvercuts: true } } })).rejects.toMatchObject({ status: 400 })
   })
   it.each([
-    { thicknessMm: 15 }, { ownerId: 'someone' }, { feed: 2000 }, { filename: '../part.dxf' }, { filename: 'part.nc' },
+    { thicknessMm: 16 }, { ownerId: 'someone' }, { feed: 2000 }, { filename: '../part.dxf' }, { filename: 'part.nc' },
     { layerOperations: { TYPO: { kind: 'drill' } } }, { operations: { f999: { kind: 'drill' } } },
     { operations: { f0: { tabs: 5 } } }, { operations: { f1: { depthMm: 3 } } }, { operations: { f1: { tabs: 2 } } },
     { operations: { f1: { useToolDiameter: true } } },

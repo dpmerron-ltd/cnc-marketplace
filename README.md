@@ -2,7 +2,7 @@
 
 Local-first MVP for arranging pre-generated Estlcam CNC G-code files on a sheet and exporting one combined G-code program.
 
-The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. The sheet workflow preserves their existing CAM toolpaths, normalizes the part footprint, transforms XY coordinates for placement and 0/90/180/270 degree rotation, and exports combined programs with safe Z transitions. The separate **Generate** page creates new component G-code from DXF using 12 mm or 18 mm material presets, reviewed operation assignments, cutter compensation, ramps, and holding tabs. See [DXF generator settings and limitations](docs/CAM.md).
+The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. The sheet workflow preserves their existing CAM toolpaths, normalizes the part footprint, transforms XY coordinates for placement and 0/90/180/270 degree rotation, and exports combined programs with safe Z transitions. The separate **Generate** page creates new component G-code from DXF using 12 mm, 15 mm or 18 mm material presets, reviewed operation assignments, cutter compensation, ramps, and holding tabs. See [DXF generator settings and limitations](docs/CAM.md).
 
 Each account configures its own start, spindle-start and end programs under **Profile > CNC Program Settings**. Settings are stored in an owner-isolated, MFA-protected table and apply to new browser/API generation. Dan's existing programs are retained only for his account; other users must save their own settings before exporting. Queued job files remain immutable snapshots. See [program settings and validation](docs/API.md#account-program-settings).
 
