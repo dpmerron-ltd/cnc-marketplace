@@ -58,6 +58,28 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       const row = checked(await db.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('owner_id', owner).eq('id', id).select('id').maybeSingle())
       return Boolean(row)
     },
+    async ownsItem(owner, id) {
+      return Boolean(checked(await db.from('marketplace_items').select('id').eq('owner_id', owner).eq('id', id).maybeSingle()))
+    },
+    async createComponent(owner, part) {
+      if (part.ownerId !== owner || !part.itemId) throw new JobError('Item not found.', 404)
+      const parent = checked(await db.from('marketplace_items').select('id').eq('owner_id', owner).eq('id', part.itemId).maybeSingle())
+      if (!parent) throw new JobError('Item not found.', 404)
+      const row = {
+        id: part.id, owner_id: owner, item_id: part.itemId, name: part.name, sku: part.sku,
+        original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
+        width: part.width, height: part.height, bounding_box: part.boundingBox, original_bounds: part.originalBounds,
+        metadata: part.metadata, date_imported: part.dateImported,
+      }
+      const result = await db.from('cnc_components').insert(row)
+      if (result.error?.code === '23505') {
+        const previous = checked(await db.from('cnc_components').select('item_id,name,sku,original_filename,gcode,dxf').eq('owner_id', owner).eq('id', part.id).maybeSingle())
+        if (previous && previous.item_id === row.item_id && previous.name === row.name && previous.sku === row.sku && previous.original_filename === row.original_filename && previous.gcode === row.gcode && previous.dxf === row.dxf) return { created: false }
+        throw new JobError('Component ID already exists with different content or ownership. Existing components were not changed.', 409)
+      }
+      checked(result)
+      return { created: true }
+    },
     async loadComponents(owner, request: JobRequest) {
       const ids = request.items.flatMap(item => item.itemId ? [item.itemId] : [])
       const skus = request.items.flatMap(item => item.sku ? [item.sku] : [])

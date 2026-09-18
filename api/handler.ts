@@ -8,6 +8,7 @@ import { dxfBodyLimit, generateDxfNc } from './dxf'
 import type { ProgramSettings } from '../src/gcode/programSettings'
 import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
 import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
+import { componentBodyLimit, parseComponent } from './components'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
@@ -20,6 +21,8 @@ export interface JobRepository {
   createItem(owner: string, input: CreateItemInput, actor: string): Promise<{ id: string; name: string; sku: string; description: string }>
   itemImage(owner: string, id: string): Promise<ItemImage | undefined>
   updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
+  ownsItem(owner: string, id: string): Promise<boolean>
+  createComponent(owner: string, part: Part): Promise<{ created: boolean }>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
   list(owner: string, limit: number, offset: number, status?: JobStatus): Promise<JobSummary[]>
   get(owner: string, id: string): Promise<StoredJob | undefined>
@@ -83,6 +86,14 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
         if (!parsed.success) throw new JobError('Invalid item. Supply name, sku, optional description and JPEG/PNG image.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
         const item = await repository.createItem(owner, parsed.data, identity.actor)
         return json({ ...item, imageContentType: parsed.data.image?.contentType ?? null }, 201)
+      }
+      const componentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components$/i)
+      if (componentMatch && z.uuid().safeParse(componentMatch[1]).success && request.method === 'POST') {
+        const id = componentMatch[1]
+        if (!await repository.ownsItem(owner, id)) throw new JobError('Item not found.', 404)
+        const { part, warnings } = parseComponent(await body(request, componentBodyLimit), owner, id)
+        const { created } = await repository.createComponent(owner, part)
+        return json({ id: part.id, itemId: id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, created ? 201 : 200, created ? {} : { 'Idempotent-Replayed': 'true' })
       }
       const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
       if (imageMatch && z.uuid().safeParse(imageMatch[1]).success) {

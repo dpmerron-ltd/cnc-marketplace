@@ -20,6 +20,8 @@ function fixture() {
     createItem: vi.fn(async (_owner, input) => ({ ...input, id: input.id ?? crypto.randomUUID() })),
     itemImage: vi.fn(async () => undefined),
     updateItemImage: vi.fn(async () => false),
+    ownsItem: vi.fn(async owner => owner === 'alice'),
+    createComponent: vi.fn(async () => ({ created: true })),
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
     get: async (owner, id) => jobs.get(id)?.owner === owner ? jobs.get(id) : undefined,
@@ -45,6 +47,26 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('uploads validated components to owned items, supports stable retries and rejects foreign parents', async () => {
+    const f = fixture()
+    const path = `/items/${testItem.id}/components`
+    const input = { id: '20000000-0000-4000-8000-000000000001', name: 'Left side', sku: 'LEFT', filename: 'left.nc', gcode: testParts[0].gcode, dxf: 'source drawing' }
+    const result = await f.call(path, 'POST', input)
+    expect(result.status).toBe(201)
+    const saved = await result.json()
+    expect(saved).toMatchObject({ id: input.id, itemId: testItem.id, sku: 'LEFT', reviewRequired: true, widthMm: 50, heightMm: 50 })
+    expect(f.repo.createComponent).toHaveBeenCalledWith('alice', expect.objectContaining({ ownerId: 'alice', itemId: testItem.id, gcode: input.gcode, dxf: input.dxf }))
+    f.repo.createComponent = vi.fn(async () => ({ created: false }))
+    const replay = await f.call(path, 'POST', input)
+    expect(replay.status).toBe(200)
+    expect(replay.headers.get('Idempotent-Replayed')).toBe('true')
+    expect((await replay.json()).sha256).toBe(saved.sha256)
+    expect((await f.call(path, 'POST', input, 'bob')).status).toBe(404)
+    expect((await f.call(path, 'POST', { ...input, ownerId: 'bob' })).status).toBe(400)
+    expect((await f.call(path, 'POST', { ...input, gcode: 'G21\nG90\nM30' })).status).toBe(422)
+    expect((await f.call(path, 'POST', { ...input, gcode: 'x\n'.repeat(10001) })).status).toBe(413)
+    expect(f.repo.createComponent).toHaveBeenCalledTimes(1)
+  })
   it('creates private items with optional images and routes image reads, replacements and removal to the owner', async () => {
     const f = fixture()
     const input = { id: testItem.id, name: 'Cabinet', sku: 'CAB-1', image: testImage }
