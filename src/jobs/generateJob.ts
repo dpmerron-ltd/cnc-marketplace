@@ -101,7 +101,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
       'Generated for operator review. Queue status changes do not start or control the CNC.',
       'Verify stock, cutter, work origin, hold-downs, grain direction and clearances before approving. Automatic nesting may rotate parts.',
       `Millimetres; absolute coordinates; Z0 at material surface; safe Z ${settings.safeZMm} mm.`,
-      `Account program settings applied; spindle start S${spindleRpm(programs)} M03. Source machining feeds and cutting depths are preserved. Verify tool, startup/end programs and DDCS start-up delay.`,
+      `Account program settings applied; spindle start S${spindleRpm(programs)} M03. Source machining feeds and cutting depths are preserved. Verify tool, startup/end programs and controller start-up delay.`,
       'Spindle-off maximum X/Y reach check precedes each sheet. Confirm the physical machine can reach these coordinates.',
       settings.screwMarks ? 'Screw marking enabled: 6 mm cutter, recessed screws, 2 mm marking depth, followed by M05 / M00 pause to fit screws.' : 'Screw marking is disabled. Secure the material before starting.',
       'Load each physical sheet separately, align its origin and use its matching sheet-N.nc file. Apply labels only with the machine and spindle stopped.',

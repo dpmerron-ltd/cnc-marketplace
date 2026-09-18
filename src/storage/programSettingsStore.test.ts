@@ -32,6 +32,13 @@ describe('private profile storage', () => {
     await expect(saveProgramSettings('alice', defaultProgramSettings)).rejects.toThrow('account changed')
     expect(mock.calls).toEqual([])
   })
+  it('round-trips a controller macro verbatim within the authenticated account', async () => {
+    const programs = { ...defaultProgramSettings, startGcode: 'M98 P"0:/macros/Probe"\nM400\nM291 P"Remove probe" R"Warning" S3' }
+    expect(await saveProgramSettings('alice', programs)).toEqual(programs)
+    mock.row = mock.calls[0].write
+    expect(mock.row).toMatchObject({ owner_id: 'alice', start_gcode: programs.startGcode })
+    expect(await loadProgramSettings('alice')).toEqual(programs)
+  })
   it('fails closed on read/write errors, mismatched ownership and invalid programs', async () => {
     mock.error = { message: 'Offline' }
     await expect(loadProgramSettings('alice')).rejects.toThrow('Offline')

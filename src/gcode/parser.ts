@@ -1,4 +1,5 @@
 import type { DistanceMode, GCodeWord, MotionCommand, ParsedLine, ParsedProgram, Units } from './types'
+import { controllerStartBegin, controllerStartEnd, controllerStartWarnings, hasControllerStart, validateControllerStart } from './controllerStart'
 
 const wordPattern = /([A-Za-z])([+-]?(?:\d+\.?\d*|\.\d+))/g
 
@@ -49,6 +50,26 @@ export function parseLine(raw: string, lineNumber: number): ParsedLine {
 export function parseGCode(source: string): ParsedProgram {
   const lines = source.replace(/\r\n/g, '\n').split('\n').map(parseLine)
   const warnings: string[] = []
+  let controllerHeaderEnd = -1
+  const markers = lines.filter(line => [controllerStartBegin, controllerStartEnd].includes(line.raw.trim()))
+  if (markers.length) {
+    const [begin, end] = markers
+    const code = end ? lines.slice(begin.lineNumber + 1, end.lineNumber).map(line => line.raw).join('\n') : ''
+    const prefixSafe = lines.slice(0, begin.lineNumber).every(line => !line.words.length || line.words.every(word => word.letter === 'G' && [21, 17, 90, 94].includes(word.value) || word.letter === 'M' && word.value === 5))
+    const reset = end ? lines.slice(end.lineNumber + 1, end.lineNumber + 7).map(line => line.raw.trim()) : []
+    const resetSafe = reset.slice(0, 5).join('\n') === 'G21\nG17\nG90\nG94\nM05' && /^G00 Z\d+(?:\.\d+)?$/.test(reset[5] ?? '') && Number(reset[5]?.slice(5)) > 0
+    if (markers.length === 2 && begin.raw.trim() === controllerStartBegin && end.raw.trim() === controllerStartEnd && prefixSafe && resetSafe && hasControllerStart(code) && !validateControllerStart(code).length) {
+      controllerHeaderEnd = end.lineNumber
+      // Macros and probing execute externally. Preserve source lines but exclude them from machining geometry.
+      for (const line of lines.slice(begin.lineNumber, end.lineNumber + 1)) {
+        line.words = []; line.command = undefined; line.warnings = []
+      }
+      warnings.push(...controllerStartWarnings(code))
+    } else {
+      begin.unsupportedForTransform = 'Invalid controller startup block'
+      warnings.push('Invalid controller startup block; export is blocked.')
+    }
+  }
   let units: Units | 'unknown' = 'unknown'
   let distanceMode: DistanceMode | 'unknown' = 'unknown'
   let modalMotion: MotionCommand | undefined
@@ -82,8 +103,8 @@ export function parseGCode(source: string): ParsedProgram {
   }
 
   const firstMotionIndex = lines.findIndex((line) => line.effectiveMotion === 'G01' || line.effectiveMotion === 'G02' || line.effectiveMotion === 'G03')
-  let bodyStart = firstMotionIndex >= 0 ? firstMotionIndex : 0
-  for (let index = bodyStart - 1; index >= 0; index -= 1) {
+  let bodyStart = firstMotionIndex >= 0 ? firstMotionIndex : controllerHeaderEnd + 1
+  for (let index = bodyStart - 1; index > controllerHeaderEnd; index -= 1) {
     if (lines[index].raw.trim().match(/^\(No\.\s*\d+\s+.+\)$/i)) {
       bodyStart = index
       break

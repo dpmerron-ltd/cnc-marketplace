@@ -131,7 +131,7 @@ export function simulateGCode(source: string): GCodeSimulation {
   const parsed = parseGCode(source)
   const moves: SimulatedMove[] = []
   const warnings = [...parsed.warnings]
-  const errors: string[] = []
+  const errors: string[] = parsed.lines.filter(line => line.unsupportedForTransform === 'Invalid controller startup block').map(line => `line ${line.lineNumber + 1}: invalid controller startup block.`)
   let state: MachineState = createInitialState()
   let feedMmPerMinute = defaultRapidFeedMmPerMinute
   let bounds = emptyBounds()

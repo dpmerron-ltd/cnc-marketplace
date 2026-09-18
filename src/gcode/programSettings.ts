@@ -1,5 +1,6 @@
 import { parseLine } from './parser'
 import { getWord } from './state'
+import { controllerStartBegin, controllerStartEnd, hasControllerStart, validateControllerStart } from './controllerStart'
 
 export interface ProgramSettings {
   startGcode: string
@@ -29,6 +30,10 @@ export function validatePrograms(value: ProgramSettings, safeZ = 20): string[] {
     const code = value[key]
     if (typeof code !== 'string' || !code.trim() || code.length > 8000 || code.split('\n').length > 100) {
       errors.push(`${label}: enter 1-100 lines, at most 8,000 characters.`); continue
+    }
+    if (code.includes(controllerStartBegin) || code.includes(controllerStartEnd)) errors.push(`${label}: reserved controller block marker.`)
+    if (key === 'startGcode' && hasControllerStart(code)) {
+      errors.push(...validateControllerStart(code)); continue
     }
     let spindle = false, speed = 0, stopped = false, terminated = false
     for (const [index, raw] of code.split('\n').entries()) {
@@ -77,5 +82,8 @@ export function spindleRpm(programs: ProgramSettings): number {
 }
 
 export function startProgramLines(programs: ProgramSettings, safeZ: number): string[] {
+  if (hasControllerStart(programs.startGcode)) {
+    return ['G21', 'G17', 'G90', 'G94', 'M05', controllerStartBegin, ...programLines(programs.startGcode), controllerStartEnd, 'G21', 'G17', 'G90', 'G94', 'M05', `G00 Z${safeZ}`]
+  }
   return ['G21', 'G17', 'G90', 'G94', 'M05', `G00 Z${safeZ}`, ...programLines(programs.startGcode), 'G21', 'G17', 'G90', 'G94', `G00 Z${safeZ}`]
 }

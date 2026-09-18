@@ -41,7 +41,7 @@ export function instanceBounds(part: Part, instance: PartInstance): Bounds {
 }
 
 export function transformPartProgram(part: Part, instance: PartInstance): TransformedProgram {
-  const errors: string[] = []
+  const errors: string[] = part.parsed.lines.filter(line => line.unsupportedForTransform === 'Invalid controller startup block').map(() => `${part.name}: invalid controller startup block.`)
   const warnings = [...part.parsed.warnings]
   const lines: string[] = []
   const transformedLines: ParsedLine[] = []

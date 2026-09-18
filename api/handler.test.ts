@@ -89,6 +89,23 @@ describe('jobs HTTP API', () => {
     expect(error.details.length).toBeGreaterThan(0)
     expect(error.gcode).toBeUndefined()
   })
+  it('applies Duet startup only from the authenticated profile in API DXF generation', async () => {
+    const f = fixture()
+    const programs = { ...defaultProgramSettings, startGcode: 'M98 P"0:/macros/Probe"\nM400\nG00 Z5', spindleStartGcode: 'S12000 M03' }
+    f.repo.programSettings = vi.fn(async owner => owner === 'alice' ? programs : { ...defaultProgramSettings })
+    const dxf = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', '0', 'CIRCLE', '8', 'DRILL', '10', '20', '20', '20', '40', '3', '0', 'ENDSEC', '0', 'EOF', ''].join('\n')
+    const response = await f.call('/dxf-to-nc', 'POST', { dxf, thicknessMm: 18 })
+    expect(response.status).toBe(200)
+    const result = await response.json()
+    expect(result.programSettings).toEqual(programs)
+    expect(result.gcode).toContain(programs.startGcode)
+    expect(result.gcode.indexOf('M98')).toBeLessThan(result.gcode.indexOf('G00 Z20'))
+    expect(result.gcode).toContain('G01 Z-9.2 F600\nG00 Z20')
+    const other = await f.call('/dxf-to-nc', 'POST', { dxf, thicknessMm: 18 }, 'bob')
+    expect((await other.json()).gcode).not.toContain('M98')
+    expect(f.jobs.size).toBe(0)
+    expect(f.repo.loadComponents).not.toHaveBeenCalled()
+  })
   it('requires authentication and applies rate limits', async () => {
     const f = fixture()
     expect((await f.call('/items', 'GET', undefined, 'invalid')).status).toBe(401)
