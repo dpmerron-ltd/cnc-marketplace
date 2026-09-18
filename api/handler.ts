@@ -6,6 +6,8 @@ import type { Part } from '../src/models/Part'
 import { jobPdfs } from './pdf'
 import { dxfBodyLimit, generateDxfNc } from './dxf'
 import type { ProgramSettings } from '../src/gcode/programSettings'
+import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
+import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
@@ -15,6 +17,9 @@ export interface JobRepository {
   allowRequest(owner: string): Promise<boolean>
   programSettings(owner: string): Promise<ProgramSettings | undefined>
   catalog(owner: string, limit: number, offset: number): Promise<unknown[]>
+  createItem(owner: string, input: CreateItemInput, actor: string): Promise<{ id: string; name: string; sku: string; description: string }>
+  itemImage(owner: string, id: string): Promise<ItemImage | undefined>
+  updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
   list(owner: string, limit: number, offset: number, status?: JobStatus): Promise<JobSummary[]>
   get(owner: string, id: string): Promise<StoredJob | undefined>
@@ -73,6 +78,27 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })
+      if (path === '/v1/items' && request.method === 'POST') {
+        const parsed = createItemSchema.safeParse(await body(request, itemImageBodyLimit))
+        if (!parsed.success) throw new JobError('Invalid item. Supply name, sku, optional description and JPEG/PNG image.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
+        const item = await repository.createItem(owner, parsed.data, identity.actor)
+        return json({ ...item, imageContentType: parsed.data.image?.contentType ?? null }, 201)
+      }
+      const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
+      if (imageMatch && z.uuid().safeParse(imageMatch[1]).success) {
+        const id = imageMatch[1]
+        if (request.method === 'GET') {
+          const image = await repository.itemImage(owner, id)
+          if (!image) throw new JobError('Item image not found.', 404)
+          return new Response(imageBytes(image), { headers: { ...headers, 'Content-Type': image.contentType, 'Content-Disposition': `inline; filename="item-${id}.${image.contentType === 'image/png' ? 'png' : 'jpg'}"` } })
+        }
+        if (request.method === 'PATCH') {
+          const parsed = updateImageSchema.safeParse(await body(request, itemImageBodyLimit))
+          if (!parsed.success) throw new JobError('Supply image as {contentType, dataBase64}, or null to remove it. JPEG/PNG only, up to 512 KiB.', 400)
+          if (!await repository.updateItemImage(owner, id, parsed.data.image)) throw new JobError('Item not found.', 404)
+          return json({ id, hasImage: parsed.data.image !== null })
+        }
+      }
       if (path === '/v1/jobs' && request.method === 'GET') {
         const status = url.searchParams.get('status') as JobStatus | null
         if (status && !statuses.includes(status)) throw new JobError('Unknown job status.', 400)

@@ -1,23 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteProject, saveRemoteComponent, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteProject, saveRemoteComponent, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { testParts } from '../test/jobFixtures'
+import { testImage } from '../test/imageFixture'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, queries: [] as { table: string; filters: [string, string][]; write?: unknown }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, rows: [] as unknown[], queries: [] as { table: string; filters: [string, string][]; write?: unknown; options?: unknown }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
     auth: { getUser: async () => ({ data: { user: { id: mock.userId } } }) },
     from: (table: string) => {
-      const query = { table, filters: [] as [string, string][], write: undefined as unknown }
+      const query = { table, filters: [] as [string, string][], write: undefined as unknown, options: undefined as unknown }
       mock.queries.push(query)
       const builder = {
         select: () => builder,
         eq: (key: string, value: string) => { query.filters.push([key, value]); return builder },
         order: () => builder,
         maybeSingle: () => builder,
-        upsert: (value: unknown) => { query.write = value; return builder },
-        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : [], error: mock.error }).then(resolve),
+        single: () => builder,
+        update: (value: unknown) => { query.write = value; return builder },
+        upsert: (value: unknown, options?: unknown) => { query.write = value; query.options = options; return builder },
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : [], error: mock.error }).then(resolve),
       }
       return builder
     },
@@ -27,7 +30,36 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null })
+  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null; mock.rows = [] })
+
+  it('saves images separately so stale autosaves never overwrite an API image', async () => {
+    const item = { id: 'item', ownerId: 'alice', name: 'Cabinet', sku: 'CAB', description: '', createdAt: '', updatedAt: '', image: testImage }
+    await saveRemoteItemImage(item, testImage, 'alice')
+    expect(mock.queries[0].options).toEqual({ onConflict: 'id', ignoreDuplicates: true })
+    expect(mock.queries[1].write).toEqual({ image: testImage, updated_at: expect.any(String) })
+    expect(mock.queries[1].filters).toEqual([['id', 'item'], ['owner_id', 'alice']])
+    mock.queries = []
+    await saveRemoteProject([item], [], sheet, item.id, 'alice')
+    expect(mock.queries[0].write).toEqual([expect.not.objectContaining({ image: expect.anything() })])
+    await saveRemoteItemImage(item, null, 'alice')
+    expect(mock.queries.at(-1)?.write).toEqual({ image: null, updated_at: expect.any(String) })
+  })
+
+  it('loads only validated owner images and rejects foreign image writes and failed saves', async () => {
+    const row = { id: 'item', owner_id: 'alice', name: 'Cabinet', sku: 'CAB', image: testImage }
+    mock.rows = [row, { ...row, id: 'foreign', owner_id: 'bob' }, { ...row, id: 'invalid', image: { contentType: 'image/svg+xml', dataBase64: 'abcd' } }]
+    const result = await loadRemoteProject('alice')
+    expect(result?.items.map(item => item.id)).toEqual(['item', 'invalid'])
+    expect(result?.items[0].image).toEqual(testImage)
+    expect(result?.items[1].image).toBeUndefined()
+    mock.queries = []
+    const item = result!.items[0]
+    await expect(saveRemoteItemImage(item, testImage, 'bob')).rejects.toThrow('signed-in account')
+    await expect(saveRemoteItemImage({ ...item, ownerId: 'bob' }, testImage, 'alice')).rejects.toThrow('signed-in account')
+    expect(mock.queries).toEqual([])
+    mock.error = { message: 'Network failure' }
+    await expect(saveRemoteItemImage(item, testImage, 'alice')).rejects.toThrow('Network failure')
+  })
 
   it('saves a confirmed component independently, with a stable ID for retries', async () => {
     const part = { ...testParts[0], ownerId: 'alice' }

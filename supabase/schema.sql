@@ -23,6 +23,22 @@ alter table public.marketplace_items
 alter table public.marketplace_items
   add column if not exists packing jsonb not null default '{}';
 
+alter table public.marketplace_items
+  add column if not exists image jsonb;
+
+alter table public.marketplace_items drop constraint if exists marketplace_item_image_valid;
+alter table public.marketplace_items add constraint marketplace_item_image_valid check (
+  image is null or (
+    jsonb_typeof(image) = 'object' and image ? 'contentType' and image ? 'dataBase64'
+    and (image - 'contentType' - 'dataBase64') = '{}'::jsonb
+    and jsonb_typeof(image->'contentType') = 'string'
+    and image->>'contentType' in ('image/jpeg', 'image/png')
+    and jsonb_typeof(image->'dataBase64') = 'string'
+    and length(image->>'dataBase64') between 4 and 699052
+    and image->>'dataBase64' ~ '^[A-Za-z0-9+/]+={0,2}$'
+  )
+);
+
 update public.marketplace_items
 set sku = upper(regexp_replace(coalesce(nullif(name, ''), 'ITEM'), '[^a-zA-Z0-9]+', '-', 'g')) || '-' || upper(left(replace(id::text, '-', ''), 6))
 where sku = '';

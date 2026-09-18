@@ -6,6 +6,8 @@ import { createApi, type Artifact, type JobRepository, type StoredJob } from './
 import { JobError } from '../src/jobs/generateJob'
 import { testItem, testParts, testRequest } from '../src/test/jobFixtures'
 import { defaultProgramSettings } from '../src/gcode/programSettings'
+import { testImage } from '../src/test/imageFixture'
+import { imageBytes } from '../src/models/ItemImage'
 
 const font = new Uint8Array(await readFile(new URL('./assets/NotoSans-Regular.ttf', import.meta.url)))
 function fixture() {
@@ -15,6 +17,9 @@ function fixture() {
     allowRequest: async () => true,
     programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
     catalog: async owner => owner === 'alice' ? [testItem] : [],
+    createItem: vi.fn(async (_owner, input) => ({ ...input, id: input.id ?? crypto.randomUUID() })),
+    itemImage: vi.fn(async () => undefined),
+    updateItemImage: vi.fn(async () => false),
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
     get: async (owner, id) => jobs.get(id)?.owner === owner ? jobs.get(id) : undefined,
@@ -40,6 +45,38 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('creates private items with optional images and routes image reads, replacements and removal to the owner', async () => {
+    const f = fixture()
+    const input = { id: testItem.id, name: 'Cabinet', sku: 'CAB-1', image: testImage }
+    const response = await f.call('/items', 'POST', input)
+    expect(response.status).toBe(201)
+    expect(f.repo.createItem).toHaveBeenCalledWith('alice', { ...input, description: '' }, 'api_key:alice')
+    f.repo.itemImage = vi.fn(async owner => owner === 'alice' ? testImage : undefined)
+    f.repo.updateItemImage = vi.fn(async owner => owner === 'alice')
+    const path = `/items/${testItem.id}/image`
+    const image = await f.call(path)
+    expect(image.headers.get('Content-Type')).toBe('image/png')
+    expect(image.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(new Uint8Array(await image.arrayBuffer())).toEqual(imageBytes(testImage))
+    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(404)
+    expect((await f.call(path, 'PATCH', { image: testImage }, 'bob')).status).toBe(404)
+    expect((await f.call(path, 'PATCH', { image: testImage })).status).toBe(200)
+    expect(f.repo.updateItemImage).toHaveBeenLastCalledWith('alice', testItem.id, testImage)
+    expect((await f.call(path, 'PATCH', { image: null })).status).toBe(200)
+    expect(f.repo.updateItemImage).toHaveBeenLastCalledWith('alice', testItem.id, null)
+    expect((await f.call('/items', 'POST', { name: 'No photo', sku: 'NO-PHOTO' })).status).toBe(201)
+  })
+  it('rejects invalid image requests, oversized bodies, owner spoofing and unauthenticated uploads before writing', async () => {
+    const f = fixture(), path = `/items/${testItem.id}/image`
+    expect((await f.call('/items', 'POST', { name: 'Cabinet', sku: 'CAB', image: testImage }, 'invalid')).status).toBe(401)
+    for (const value of [{ name: '', sku: 'CAB' }, { name: 'Cabinet', sku: 'CAB', ownerId: 'bob' }, { name: 'Cabinet', sku: 'CAB', image: { ...testImage, contentType: 'image/svg+xml' } }]) {
+      expect((await f.call('/items', 'POST', value)).status).toBe(400)
+    }
+    for (const value of [{}, { image: { ...testImage, dataBase64: '<script>' } }, { image: null, ownerId: 'bob' }]) expect((await f.call(path, 'PATCH', value)).status).toBe(400)
+    expect((await f.call(path, 'PATCH', { image: { ...testImage, dataBase64: 'x'.repeat(740000) } })).status).toBe(413)
+    expect(f.repo.createItem).not.toHaveBeenCalled()
+    expect(f.repo.updateItemImage).not.toHaveBeenCalled()
+  })
   it('uses owner-specific programs, requires setup, and preserves old idempotent jobs after settings change', async () => {
     const f = fixture()
     f.repo.programSettings = vi.fn(async owner => owner === 'alice' ? { ...defaultProgramSettings, startGcode: '(Alice profile)\nG21 G90' } : undefined)

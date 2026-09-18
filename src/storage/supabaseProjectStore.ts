@@ -1,5 +1,6 @@
 import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
+import { itemImageSchema, type ItemImage } from '../models/ItemImage'
 import type { Part } from '../models/Part'
 import type { SheetHistoryEntry } from '../models/Project'
 import type { GCodePreset, Sheet } from '../models/Sheet'
@@ -80,6 +81,23 @@ export async function saveRemoteComponent(part: Part, expectedUserId: string): P
   return result.error ? { ok: false, error: result.error.message } : { ok: true }
 }
 
+export async function saveRemoteItemImage(item: MarketplaceItem, image: ItemImage | null, expectedUserId: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured.')
+  if (image) itemImageSchema.parse(image)
+  const userId = await getUserId()
+  if (!userId || userId !== expectedUserId || item.ownerId !== userId) throw new Error('The item must belong to your signed-in account.')
+  // New items may not have reached the debounced autosave yet. Never overwrite an existing row here.
+  const created = await supabase.from('marketplace_items').upsert({
+    id: item.id, owner_id: userId, uploaded_by: item.uploadedBy ?? '', sku: item.sku,
+    name: item.name, description: item.description, created_at: item.createdAt, updated_at: item.updatedAt,
+    packing: item.packing ?? {},
+  }, { onConflict: 'id', ignoreDuplicates: true })
+  if (created.error) throw new Error(created.error.message)
+  if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
+  const result = await supabase.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('id', item.id).eq('owner_id', userId).select('id').single()
+  if (result.error) throw new Error(result.error.message)
+}
+
 async function getUserId(): Promise<string | undefined> {
   if (!supabase) return undefined
   const result = await supabase.auth.getUser()
@@ -130,6 +148,7 @@ export async function loadRemoteProject(expectedUserId: string): Promise<RemoteP
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     packing: row.packing ?? undefined,
+    image: itemImageSchema.safeParse(row.image).success ? row.image : undefined,
   }))
 
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))

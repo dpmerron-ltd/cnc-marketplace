@@ -47,6 +47,16 @@
 .items-page .items-icon { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; background: transparent; box-shadow: none; }
 .items-search .items-icon { border: 0; }
 .items-added { color: #167354; font-size: 13px; }
+.item-photo { background: #f3f5f7; background-image: none; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #657580; }
+.item-photo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.item-image-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 22px 0; border-bottom: 1px solid #dce2e6; }
+.item-image-editor > .item-photo { width: 180px; height: 120px; flex: 0 0 180px; border: 1px solid #dce2e6; border-radius: 6px; }
+.item-image-controls { min-width: 0; }
+.item-image-controls h3 { font-size: 15px; margin: 0 0 12px; }
+.item-image-controls p { font-size: 12px; overflow-wrap: anywhere; }
+.item-image-limit { color: #61707b; }
+.item-image-controls [role=alert] { color: #903d25; }
+.item-image-controls .is-busy { opacity: .65; cursor: wait; }
 @media (max-width: 700px) {
   .items-page { padding: 20px 14px 28px; }
   .items-heading { align-items: start; flex-wrap: wrap; gap: 14px; }

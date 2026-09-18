@@ -8,7 +8,7 @@ Each account configures its own start, spindle-start and end programs under **Pr
 
 ## Run
 
-The **Items** page is a private grid library with toolpath thumbnails, name/SKU/component search, sorting, and empty-item filtering. Open an item to edit its details, upload or remove components, and add components to the current sheet. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library.
+The **Items** page is a private grid library with item photos (or toolpath thumbnails), name/SKU/component search, sorting, and empty-item filtering. New and existing items support image upload, replacement and removal. Open an item to edit its details, upload or remove components, and add individual components or **Add all to sheet**. Adding a complete item nests one of each component without moving existing placements, with overflow on additional sheets. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library. The [API](docs/API.md#items-and-images) can create items with an image and retrieve, replace or remove private item images.
 
 Each item also has a [stacked flat-pack estimate](docs/PACKING.md), capped at five components per box and 120 cm outside, with overflow boxes, internal size ranges, stack layouts and editable packing measurements.
 

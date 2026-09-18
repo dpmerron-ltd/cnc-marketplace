@@ -18,12 +18,14 @@ import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
 import type { MarketplaceItem } from './models/Item'
+import { itemImageSchema, type ItemImage } from './models/ItemImage'
 import type { Part } from './models/Part'
 import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
 import { rectsOverlap } from './models/geometry'
 import { autoNest } from './nesting/nestingEngine'
+import { addItemToSheet } from './nesting/addItemToSheet'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
 import { copyProjectToAccount, privateProject } from './storage/accountProject'
 import { supabase } from './storage/supabaseClient'
@@ -33,6 +35,7 @@ import {
   deleteRemoteSheetHistory,
   loadRemoteProject,
   saveRemoteComponent,
+  saveRemoteItemImage,
   saveRemoteProject,
   saveRemoteSheetHistory,
 } from './storage/supabaseProjectStore'
@@ -161,6 +164,7 @@ function normalizeItem(item: MarketplaceItem): MarketplaceItem {
     ...item,
     uploadedBy: item.uploadedBy,
     sku: item.sku || makeItemSku(item.name),
+    image: itemImageSchema.safeParse(item.image).success ? item.image : undefined,
   }
 }
 
@@ -814,6 +818,14 @@ function App() {
     setItems((current) => current.map((item) => (item.id === itemId ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item)))
   }
 
+  async function updateItemImage(itemId: string, image: ItemImage | null) {
+    const item = items.find(value => value.id === itemId)
+    if (!item || !canEditItem(item) || !userId || accountRef.current !== userId) throw new Error('This item is not in your account.')
+    await saveRemoteItemImage(item, image, userId)
+    if (accountRef.current !== userId) return
+    setItems(current => current.map(value => value.id === itemId ? { ...value, image, updatedAt: new Date().toISOString() } : value))
+  }
+
   function deleteComponent(partId: string) {
     const part = parts.find((candidate) => candidate.id === partId)
     const item = part?.itemId ? items.find((candidate) => candidate.id === part.itemId) : undefined
@@ -839,6 +851,16 @@ function App() {
       ...current,
       instances: [...current.instances, newInstance(partId, x, y, currentSheetIndex)],
     }))
+  }
+
+  function addAllItemComponents(itemId: string): number {
+    const item = items.find(value => value.id === itemId)
+    if (!item || !userId || accountRef.current !== userId) throw new Error('This item is not in your account.')
+    const next = addItemToSheet(item, parts, sheet, userId, currentSheetIndex)
+    const count = next.instances.length - sheet.instances.length
+    setSheet(next)
+    setStatus(`Added all ${count} components of ${item.name} to the sheet.`)
+    return count
   }
 
   function updateInstance(instanceId: string, patch: Partial<PartInstance>) {
@@ -1216,9 +1238,11 @@ function App() {
           onCreateItem={createMarketplaceItem}
           onSelectItem={setSelectedItemId}
           onUpdateItem={updateMarketplaceItem}
+          onSaveImage={updateItemImage}
           onImportComponents={(itemId, files) => void importFilesForItem(itemId, files)}
           onDeleteComponent={deleteComponent}
           onAddToSheet={addPart}
+          onAddItemToSheet={addAllItemComponents}
           onOpenSheet={() => setPage('sheet')}
         />
       ) : page === 'history' ? (

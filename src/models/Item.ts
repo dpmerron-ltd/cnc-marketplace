@@ -1,4 +1,5 @@
 import type { PackingSettings } from '../packing/types'
+import type { ItemImage } from './ItemImage'
 
 export interface MarketplaceItem {
   id: string
@@ -10,4 +11,5 @@ export interface MarketplaceItem {
   createdAt: string
   updatedAt: string
   packing?: PackingSettings
+  image?: ItemImage | null
 }

@@ -4,6 +4,7 @@ import { JobError, sha256 } from '../src/jobs/generateJob'
 import type { JobRequest, JobStatus, JobManifest, JobFile } from '../src/jobs/types'
 import type { Artifact, JobRepository, StoredJob } from './handler'
 import { normalizePrograms } from '../src/gcode/programSettings'
+import { itemImageSchema } from '../src/models/ItemImage'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
@@ -36,7 +37,26 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       return row ? normalizePrograms({ startGcode: row.start_gcode, spindleStartGcode: row.spindle_start_gcode, endGcode: row.end_gcode }) : undefined
     },
     async catalog(owner, limit, offset) {
-      return checked(await db.from('marketplace_items').select('id,sku,name,description,cnc_components(id,sku,name,width,height)').eq('owner_id', owner).eq('cnc_components.owner_id', owner).order('id').range(offset, offset + limit - 1)) ?? []
+      return checked(await db.from('marketplace_items').select('id,sku,name,description,imageContentType:image->>contentType,cnc_components(id,sku,name,width,height)').eq('owner_id', owner).eq('cnc_components.owner_id', owner).order('id').range(offset, offset + limit - 1)) ?? []
+    },
+    async createItem(owner, input, actor) {
+      const result = await db.from('marketplace_items').insert({
+        id: input.id ?? crypto.randomUUID(), owner_id: owner, uploaded_by: actor,
+        name: input.name, sku: input.sku, description: input.description, image: input.image ?? null,
+      }).select('id,name,sku,description').single()
+      if (result.error?.code === '23505') throw new JobError('Item ID already exists. Use GET /v1/items to check your catalogue before retrying.', 409)
+      const row = checked(result)
+      if (!row) throw new Error('Item was not created.')
+      return row
+    },
+    async itemImage(owner, id) {
+      const row = checked(await db.from('marketplace_items').select('image').eq('owner_id', owner).eq('id', id).maybeSingle())
+      const parsed = itemImageSchema.safeParse(row?.image)
+      return parsed.success ? parsed.data : undefined
+    },
+    async updateItemImage(owner, id, image) {
+      const row = checked(await db.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('owner_id', owner).eq('id', id).select('id').maybeSingle())
+      return Boolean(row)
     },
     async loadComponents(owner, request: JobRequest) {
       const ids = request.items.flatMap(item => item.itemId ? [item.itemId] : [])

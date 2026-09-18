@@ -10,9 +10,35 @@ It also converts uploaded DXF text into new component NC through `POST /dxf-to-n
 
 In the site, open **Queue > API Access**, create a named key, and copy it before dismissing it. Keys expire after 90 days and can be revoked immediately. There may be at most 10 active keys per account. Only hashes are stored; the full key cannot be retrieved later. Key creation/revocation requires an MFA-verified signed-in session.
 
-Send `Authorization: Bearer <account API key>` on every request. A verified Supabase user access token with MFA (`aal2`) is also accepted for the operator UI. Do not use the project's public key as authentication, and never give integrations the service-role key or Supabase personal access token. Account API keys can read that account's catalog/jobs/files and create or transition its jobs; they cannot edit the component library or manage keys.
+Send `Authorization: Bearer <account API key>` on every request. A verified Supabase user access token with MFA (`aal2`) is also accepted for the operator UI. Do not use the project's public key as authentication, and never give integrations the service-role key or Supabase personal access token. Account API keys can read that account's catalog/jobs/files, create catalogue items, replace/remove item images and create or transition jobs. They cannot upload/edit components or manage keys.
 
 Store the key in your automation's secret store, not source control, browser code or order payloads. All non-OPTIONS routes require authentication. Files are private authenticated downloads, not public URLs.
+
+## Items and Images
+
+`POST /items` creates an item in the authenticated account. Send JSON with required `name` (1-200 characters) and `sku` (1-100), optional `description` (up to 10,000), optional UUID `id`, and optional `image`. Example:
+
+```json
+{
+  "id": "10000000-0000-4000-8000-000000000001",
+  "name": "Camper locker",
+  "sku": "LOCKER-800",
+  "description": "800 mm flat-packed locker",
+  "image": {"contentType": "image/jpeg", "dataBase64": "<base64 of actual JPEG bytes>"}
+}
+```
+
+Images accept JPEG or PNG, up to **512 KiB decoded**, at most 4096 pixels per side and 16 megapixels. Encode actual file bytes as standard padded base64, without a `data:` prefix or line breaks. URLs, local filenames, SVG, GIF and multipart uploads are not accepted. Resize/compress larger images before sending. JSON bodies are limited to 720 KiB. The site also accepts WebP and automatically converts/resizes uploads to JPEG, at most 1200 pixels on the longest side; transparency is flattened onto white.
+
+Creation is atomic (item and image together) and returns `201` with `id`, `name`, `sku`, `description`, and nullable `imageContentType`. It does not create components or a cutting job. For reliable retries, generate and retain a UUID `id` before the first request: an existing ID returns `409` without changing that item. Check `GET /items` after an uncertain response. Do not retry with a new ID unless you intend another item. `Idempotency-Key` applies only to jobs, not item creation. Choose unique SKUs for unambiguous job ordering.
+
+- `GET /items` includes nullable `imageContentType`, not full image bytes.
+- `GET /items/{id}/image` returns the private binary image with its MIME type; authentication is required. Missing images and inaccessible items both return `404`.
+- `PATCH /items/{id}/image` with `{"image":{"contentType":"image/png","dataBase64":"..."}}` replaces an image. Use `{"image":null}` to remove it. Returns `200` with `id` and `hasImage`; repeated identical requests are safe. No other item fields or components are changed.
+
+All reads and writes are owner-scoped. Images inherit item row-level access control and are not public URLs. Existing site autosaves cannot overwrite API image changes; reload an already-open site to see changes made by an API client. Invalid payloads return `400`, over-limit bodies `413`, and non-JSON requests `415`.
+
+In **Items**, create/open an item to upload, replace or remove its image. **Add all to sheet** adds one copy of each component, nesting from the active physical sheet onward without moving existing placements. Overflow uses additional sheets; an oversized component blocks the whole addition. For API jobs, `items: [{"itemId":"...","quantity":1}]` already includes every component once.
 
 ## Generate NC from DXF
 
@@ -91,7 +117,7 @@ The successful `200` response includes:
 
 Presets match the site: 6.35 mm cutter, account-profile spindle speed (18,000 rpm for Dan's existing settings), Z20 clearance, ramps up to 3 degrees, F600 drilling/ramping and F3000 contour cutting. Drills use the cutter diameter regardless of nominal DXF circle diameter. In 15 mm and 18 mm stock, drills peck to 2, 4, 6, 8 and 9.2 mm; in 12 mm stock, to 2, 4 and 4.5 mm. Between pecks at the same hole they retract to Z0.5 (`settings.drillPeckRetractMm`); after the final peck they retract to Z20 before lateral travel. Sheet safe-Z overrides preserve these short same-hole peck retracts. Profiles cut to 18.4 mm in two 9.2 mm passes, 15.4 mm in two 7.7 mm passes, or 12.2 mm in one pass. Profiles offset outside; doors offset inside. Through-cut parts/holes larger than 12 mm in X or Y, plus recognized doors, default to four tabs. Tabs may be removed explicitly on non-door inside holes/cut-outs, but remain mandatory for recognized doors and large outside profiles. Other contours default to zero; drills and blind pockets never receive tabs. A 35 mm circle inside a non-circular inside/door contour is automatically a 12 mm-deep hinge pocket; these require 15 mm or 18 mm stock. Other internal openings default to through-cuts, regardless of a `POCKET` layer name. Explicit `kind: "pocket"` assignments support circular and non-circular blind pockets, including concave and split clearing regions, but not nested islands. Non-circular pockets and inside cuts have automatic dogbone corner relief unless disabled. See [CAM details and supported geometry](CAM.md).
 
-Component NC has **no reach check and no screw marking**; those belong to sheet export after placement. The response always requires operator review. This endpoint does not save a component, alter an item, create a queued job, generate PDFs/labels, or send anything to the machine. To use the result with the existing jobs API, import its NC into an account item first. API keys still cannot edit the library.
+Component NC has **no reach check and no screw marking**; those belong to sheet export after placement. The response always requires operator review. This endpoint does not save a component, alter an item, create a queued job, generate PDFs/labels, or send anything to the machine. To use the result with the existing jobs API, import its NC into an account item first. API keys still cannot upload/edit components.
 
 Conversion is synchronous and stateless. `Idempotency-Key` is not required or stored for this route; retrying does not create duplicates. Repeated identical requests against the same deployed generator produce the same NC. Generator updates may change output, so retain the response/hash for an approved revision.
 
@@ -150,7 +176,7 @@ Generation is synchronous. A job and all artifacts are committed in one database
 
 ### Retry and Idempotency Rules
 
-`Idempotency-Key` is mandatory for creation, scoped to the account, and retained with the job. Use an external order ID plus a batch/revision suffix. Replaying the same normalized request returns the existing job (`200`, usually `Idempotent-Replayed: true`), even if the library subsequently changes. Concurrent identical requests publish only one job. Reusing the key with different settings/items returns `409`.
+`Idempotency-Key` is mandatory for job creation, scoped to the account, and retained with the job. Use an external order ID plus a batch/revision suffix. Replaying the same normalized request returns the existing job (`200`, usually `Idempotent-Replayed: true`), even if the library subsequently changes. Concurrent identical requests publish only one job. Reusing the key with different settings/items returns `409`.
 
 Job names and order numbers are not unique keys. To intentionally create a new revision, use a new idempotency key and cancel the obsolete job. Existing job artifacts are snapshots; edits to items or the interactive sheet never alter them.
 
@@ -158,7 +184,10 @@ Job names and order numbers are not unique keys. To intentionally create a new r
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/items?limit=25&offset=0` | Own items, SKUs and component summaries |
+| GET | `/items?limit=25&offset=0` | Own items, SKUs, image MIME types and component summaries |
+| POST | `/items` | Create an item with an optional image |
+| GET | `/items/{id}/image` | Download the private item image |
+| PATCH | `/items/{id}/image` | Replace or remove the item image |
 | POST | `/dxf-to-nc` | Stateless DXF-to-component-NC generation, operator review required |
 | POST | `/jobs` | Create nested job and all files |
 | GET | `/jobs?status=awaiting_review&limit=25&offset=0` | Queue summaries, newest first |

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MarketplaceItem } from '../models/Item'
 import { createPartFromGCode } from '../gcode/importPart'
 import { MarketplacePage } from './MarketplacePage'
+import { testImage } from '../test/imageFixture'
 
 vi.mock('./ItemPreview', () => ({ ItemPreview: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }))
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
@@ -11,12 +12,34 @@ const items = [item('a', 'Alpha cabinet'), item('b', 'Beta locker'), item('empty
 const part = (name: string, itemId: string, ownerId = 'alice') => ({ ...createPartFromGCode(`${name}.nc`, 'G21\nG90\nG00 Z20\nG00 X0 Y0\nG01 Z-2 F600\nG01 X50 Y50\nG00 Z20\nM30', undefined, itemId), name, ownerId })
 const parts = [part('Side panel', 'a'), part('Door', 'b'), part('Base', 'b'), part('Secret component', 'a', 'bob')]
 function setup() {
-  const callbacks = { onCreateItem: vi.fn(() => 'new'), onSelectItem: vi.fn(), onUpdateItem: vi.fn(), onImportComponents: vi.fn(), onDeleteComponent: vi.fn(), onAddToSheet: vi.fn(), onOpenSheet: vi.fn() }
+  const callbacks = { onCreateItem: vi.fn(() => 'new'), onSelectItem: vi.fn(), onUpdateItem: vi.fn(), onSaveImage: vi.fn(async () => {}), onImportComponents: vi.fn(), onDeleteComponent: vi.fn(), onAddToSheet: vi.fn(), onAddItemToSheet: vi.fn(() => 2), onOpenSheet: vi.fn() }
   const view = render(<MarketplacePage items={items} parts={parts} currentUserId="alice" {...callbacks} />)
   return { ...callbacks, ...view }
 }
 
 describe('item library grid', () => {
+  it('shows item images in the grid, with upload controls for a newly created item', () => {
+    const callbacks = setup()
+    callbacks.rerender(<MarketplacePage items={[{ ...items[0], image: testImage }, ...items.slice(1)]} parts={parts} currentUserId="alice" {...callbacks} />)
+    expect(screen.getByRole('img', { name: 'Alpha cabinet' })).toHaveAttribute('src', expect.stringContaining('data:image/png'))
+    expect(screen.queryByRole('img', { name: 'Alpha cabinet components' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'New item' }))
+    callbacks.rerender(<MarketplacePage items={[...items, item('new', 'New cabinet')]} parts={parts} currentUserId="alice" {...callbacks} />)
+    expect(screen.getByLabelText('Upload item image')).toBeEnabled()
+  })
+  it('adds an entire item, disables empty items and shows placement failures', () => {
+    const callbacks = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Beta locker' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
+    expect(callbacks.onAddItemToSheet).toHaveBeenCalledExactlyOnceWith('b')
+    expect(screen.getByText('2 components from Beta locker added to the sheet.')).toBeInTheDocument()
+    callbacks.onAddItemToSheet.mockImplementationOnce(() => { throw new Error('Panel does not fit') })
+    fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Panel does not fit')
+    fireEvent.click(screen.getByRole('button', { name: 'All items' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Empty item' }))
+    expect(screen.getByRole('button', { name: 'Add all to sheet' })).toBeDisabled()
+  })
   it('shows only the account library and searches names, SKUs and component files', () => {
     setup()
     expect(screen.getAllByRole('button', { name: /^Open / })).toHaveLength(3)
