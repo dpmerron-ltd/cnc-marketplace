@@ -13,6 +13,18 @@ const profile = [0, 'LWPOLYLINE', 8, 'CUT_OUTER', 90, 4, 70, 1, 10, 0, 20, 0, 10
 const drawing = dxf([profile, circle()])
 
 describe('DXF API generation', () => {
+  it('supports opt-in two-pass 12 mm generation with exact browser parity', async () => {
+    const result = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 2, filename: 'panel.dxf' })
+    expect(result.gcode).toBe(generateCam(readDxf(drawing), { thickness: 12, profilePasses: 2, units: 'auto', operations: {} }).gcode)
+    expect(result.filename).toBe('panel-12mm-2pass.nc')
+    expect(result.settings).toMatchObject({ passDepthsMm: [6.1, 12.2], cutDepthMm: 12.2, drillDepthMm: 4.5, clearanceMm: 20 })
+    expect(result.operations.find(o => o.kind === 'outside')?.tabCount).toBe(4)
+    const single = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 1 })
+    expect(single.gcode).toBe((await generateDxfNc({ dxf: drawing, thicknessMm: 12 })).gcode)
+  })
+  it.each([{ thicknessMm: 12, profilePasses: 0 }, { thicknessMm: 12, profilePasses: 3 }, { thicknessMm: 12, profilePasses: '2' }, { thicknessMm: 15, profilePasses: 2 }, { thicknessMm: 18, profilePasses: 1 }])('rejects unsupported pass selections %j', async patch => {
+    await expect(generateDxfNc({ dxf: drawing, ...patch })).rejects.toMatchObject({ status: 400 })
+  })
   it.each([12, 15, 18] as const)('exactly matches browser NC with %s mm stock', async thicknessMm => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm, filename: 'front panel.dxf' })
     const browser = generateCam(readDxf(drawing), { thickness: thicknessMm, units: 'auto', operations: {} })

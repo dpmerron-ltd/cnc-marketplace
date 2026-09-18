@@ -13,7 +13,7 @@ const slope = Math.tan(camPreset.rampDegrees * Math.PI / 180)
 const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
-export const materialPreset = (thickness: CamSettings['thickness']) => thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : { depth: 12.2, passes: [12.2], drill: 4.5 }
+export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1) => thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: 4.5 }
 
 function tabIntervals(path: Point[], count: number, circular: boolean): Array<[number, number]> {
   const metric = pathMetric(path), width = camPreset.tabWidth + camPreset.diameter
@@ -50,8 +50,9 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
-  const material = materialPreset(settings.thickness)
+  const material = materialPreset(settings.thickness, settings.profilePasses)
   if (![12, 15, 18].includes(settings.thickness)) errors.push('Select 12 mm, 15 mm or 18 mm material.')
+  if (settings.profilePasses !== undefined && (settings.thickness !== 12 || ![1, 2].includes(settings.profilePasses))) errors.push('Profile pass selection is only supported for 12 mm stock: choose 1 or 2 passes.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
   const features = drawing.features.map(f => ({ ...f, points: f.points.map(p => ({ x: p.x * factor, y: p.y * factor })), circle: f.circle ? { center: { x: f.circle.center.x * factor, y: f.circle.center.y * factor }, radius: f.circle.radius * factor } : undefined, ...settings.operations[f.id] }))
   const active = features.filter(f => f.kind !== 'ignore')

@@ -56,6 +56,7 @@ Request fields:
 | --- | --- | --- |
 | `dxf` | Yes | ASCII DXF text, at most 2,000,000 UTF-8 bytes |
 | `thicknessMm` | Yes | `12`, `15` or `18` |
+| `profilePasses` | No | Only for 12 mm stock: `1` (default) or `2` (depths 6.1, then 12.2 mm). Omit for 15/18 mm stock. |
 | `filename` | No | DXF basename, default `component.dxf`; no directories; letters, digits, spaces, dots, underscores and hyphens |
 | `units` | No | `auto` (default), `mm`, or `inches`; output is always metric |
 | `layerOperations` | No | Exact DXF layer names mapped to operation overrides |
@@ -75,6 +76,8 @@ An override can contain `kind` (`outside`, `inside`, `drill`, `pocket`, `ignore`
 ```
 
 Include that object alongside `dxf` and `thicknessMm`. Returned `features` identify the classified feature IDs and layers for subsequent requests. Invalid machining returns `422` with error details and **no G-code**. Unsupported entities must be corrected in the source drawing, not merely ignored through overrides.
+
+For the optional two-pass 12 mm preset, include `"thicknessMm": 12, "profilePasses": 2`. It returns `passDepthsMm: [6.1, 12.2]` and a filename ending `-12mm-2pass.nc`. Drilling remains 4.5 mm deep; clearance, ramps and tabs are unchanged. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass before their assigned depth. Omitting `profilePasses` preserves existing output. Unsupported pass selections or specifying it for 15/18 mm stock return `400`.
 
 The successful `200` response includes:
 - `filename` (ending `.nc`), `contentType`, `bytes`, `sha256`, and `gcode`. The hash and byte count cover the exact UTF-8 `gcode` string. The example uses `jq -j` to avoid adding an extra newline.

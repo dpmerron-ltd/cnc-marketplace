@@ -60,6 +60,39 @@ describe('DXF geometry', () => {
 })
 
 describe('CNC generation', () => {
+  it('adds a two-pass 12 mm preset without changing drilling, clearance or holding tabs', () => {
+    const job = generateCam(readDxf(source()), { ...settings, thickness: 12, profilePasses: 2, operations: { f3: { kind: 'ignore' } } })
+    expect(materialPreset(12, 2)).toEqual({ depth: 12.2, passes: [6.1, 12.2], drill: 4.5 })
+    expect(job.errors).toEqual([])
+    expect(job.simulation.warnings).toEqual([])
+    expect(job.simulation.deepestCutMm).toBe(12.2)
+    expect(job.operations.find(o => o.kind === 'drill')?.depthMm).toBe(4.5)
+    for (const depth of [2, 4, 4.5]) expect(job.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${depth === 4.5 ? 20 : 0.5}`)
+    for (const op of job.operations.filter(o => ['inside', 'outside'].includes(o.kind))) {
+      const code = job.gcode.split('\n').slice(op.firstLine - 1, op.lastLine).join('\n')
+      expect(code.match(/\(Pass depth [\d.]+ mm\)/g)).toEqual(['(Pass depth 6.1 mm)', '(Pass depth 12.2 mm)'])
+      expect(op.tabs).toHaveLength(4)
+      const moves = job.simulation.moves.filter(m => m.lineNumber >= op.firstLine && m.lineNumber <= op.lastLine)
+      for (const m of moves.filter(m => m.end.z < m.start.z - 0.001 && distance(m.start, m.end) > 0.01)) {
+        expect(Math.atan2(m.start.z - m.end.z, distance(m.start, m.end)) * 180 / Math.PI).toBeCloseTo(3, 1)
+      }
+      for (const tab of op.tabs) {
+        const midpoint = { x: (tab.start.x + tab.end.x) / 2, y: (tab.start.y + tab.end.y) / 2 }
+        const crossing = moves.filter(m => distance(m.start, m.end) > 0.01 && Math.abs(distance(m.start, midpoint) + distance(midpoint, m.end) - distance(m.start, m.end)) < 0.001)
+        expect(crossing.length).toBeGreaterThan(0)
+        expect(crossing.every(m => Math.min(m.start.z, m.end.z) >= -6.201)).toBe(true)
+      }
+    }
+    for (const m of job.simulation.moves.filter(m => m.type === 'rapid' && distance(m.start, m.end) > 0.001)) {
+      expect(m.start.z).toBe(20); expect(m.end.z).toBe(20)
+    }
+    expect(generateCam(readDxf(source()), { ...settings, thickness: 12, profilePasses: 1, operations: { f3: { kind: 'ignore' } } }).gcode).toBe(result(12).gcode)
+  })
+  it.each([{ thickness: 18, profilePasses: 2 }, { thickness: 15, profilePasses: 1 }, { thickness: 12, profilePasses: 3 }])('rejects unsupported pass selections %j', patch => {
+    const job = generateCam(readDxf(source()), { ...settings, ...patch } as CamSettings)
+    expect(job.gcode).toBe('')
+    expect(job.errors.join()).toContain('Profile pass selection')
+  })
   it.each([12, 15, 18] as const)('uses exact %s mm stock depths, source feeds, spindle and clearances', thickness => {
     const job = result(thickness), preset = materialPreset(thickness)
     expect(job.errors).toEqual([])

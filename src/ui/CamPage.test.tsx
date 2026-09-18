@@ -39,14 +39,17 @@ describe('DXF review queue', () => {
   beforeEach(() => { TestWorker.instances = []; vi.stubGlobal('Worker', TestWorker); vi.mocked(downloadText).mockClear(); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-  it.each([12, 15])('confirms one file at a time, retaining %s mm material/item but resetting overrides, units and review', async thickness => {
+  it.each(['12', '15', '12-2pass'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
+    const thickness = choice === '15' ? 15 : 12
+    const suffix = choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
     const onSave = vi.fn()
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={onSave} />)
     const first = file('first.dxf'), second = file('second.dxf')
     upload([first, second]); await generated()
     expect(screen.getByText('File 1 of 2')).toBeInTheDocument()
     expect(second.text).not.toHaveBeenCalled()
-    fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: String(thickness) } }); await generated()
+    fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
+    if (choice === '12-2pass') expect(screen.getByText('2 x 6.1 mm')).toBeInTheDocument()
     if (thickness === 15) expect(screen.getByText('2 x 7.7 mm')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('DXF units'), { target: { value: 'mm' } }); await generated()
     fireEvent.change(screen.getByRole('spinbutton', { name: /Tabs for/ }), { target: { value: '1' } }); await generated()
@@ -56,15 +59,16 @@ describe('DXF review queue', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm & add component' }))
     await waitFor(() => expect(screen.getByText('File 2 of 2')).toBeInTheDocument())
     await generated()
-    expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ filename: `first-${thickness}mm.nc`, itemId: testItem.id, source: dxf }))
-    expect(screen.getByLabelText('Material thickness')).toHaveValue(String(thickness))
+    expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ filename: `first-${suffix}.nc`, itemId: testItem.id, source: dxf }))
+    expect(screen.getByLabelText('Material thickness')).toHaveValue(choice)
     expect(screen.getByLabelText('Save generated component to item')).toHaveValue(testItem.id)
     expect(screen.getByLabelText('DXF units')).toHaveValue('auto')
     expect(screen.getByRole('spinbutton', { name: /Tabs for/ })).toHaveValue(4)
     expect(review()).not.toBeChecked()
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
-    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${thickness}mm.nc`, expect.stringContaining(`Pass depth ${thickness === 15 ? 15.4 : 12.2}`))
+    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${suffix}.nc`, expect.stringContaining(`Pass depth ${thickness === 15 ? 15.4 : 12.2}`))
+    if (choice === '12-2pass') expect(vi.mocked(downloadText).mock.calls[0][1]).toContain('Pass depth 6.1')
     expect(screen.getByText('File 2 of 2')).toBeInTheDocument()
     expect(screen.queryByText('Queue complete')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Confirm & add component' }))
@@ -72,6 +76,18 @@ describe('DXF review queue', () => {
     expect(onSave).toHaveBeenCalledTimes(2)
     expect(screen.getByText('2 confirmed / 0 skipped')).toBeInTheDocument()
     expect(review()).toBeDisabled()
+  })
+
+  it('resets review and pass selection when changing material presets', async () => {
+    render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
+    upload([file('panel.dxf')]); await generated()
+    for (const choice of ['12-2pass', '15', '12-2pass', '18', '12-2pass', '12']) {
+      fireEvent.click(review())
+      fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
+      expect(review()).not.toBeChecked()
+      expect(TestWorker.instances.at(-1)!.request.settings.profilePasses).toBe(choice === '12-2pass' ? 2 : undefined)
+      expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
+    }
   })
 
   it('keeps failed confirmations for retry and prevents duplicate asynchronous saves', async () => {

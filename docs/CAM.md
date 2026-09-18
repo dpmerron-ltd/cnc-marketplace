@@ -8,10 +8,12 @@ Programmatic conversion is available through authenticated `POST /v1/dxf-to-nc`,
 
 ## Machining Preset
 
+Select **12 mm (2 passes)** for two 6.1 mm contour passes. This option carries forward through a DXF batch and adds `-2pass` to the generated filename. Drilling remains 4.5 mm deep, with the same pecks, Z20 clearance, ramps and tabs. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass followed by their assigned depth. The original **12 mm (1 pass)** option remains available. The API equivalent is `thicknessMm: 12, profilePasses: 2`.
+
 | Setting | 18 mm stock | 15 mm stock | 12 mm stock |
 | --- | --- | --- | --- |
 | Through-cut depth | 18.4 mm | 15.4 mm | 12.2 mm |
-| Depth passes | 9.2 mm, then 18.4 mm | 7.7 mm, then 15.4 mm | One pass at 12.2 mm |
+| Depth passes | 9.2 mm, then 18.4 mm | 7.7 mm, then 15.4 mm | Default: one pass at 12.2 mm; optional: 6.1 mm, then 12.2 mm |
 | Blind drilling depth | 9.2 mm | 9.2 mm | 4.5 mm |
 | Drilling pecks | 2, 4, 6, 8, 9.2 mm | 2, 4, 6, 8, 9.2 mm | 2, 4, 4.5 mm |
 | Hinge pocket depth | 12 mm | 12 mm | Not allowed |
