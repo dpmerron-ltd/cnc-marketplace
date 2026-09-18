@@ -994,6 +994,8 @@ textarea {
   gap: 8px;
 }
 
+.export-modal .modal-actions { flex-wrap: wrap; }
+
 @media (max-width: 1100px) {
   .marketplace-page,
   .workspace {

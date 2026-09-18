@@ -6,6 +6,8 @@ You can select multiple DXFs together. Files are reviewed in selection order; **
 
 Programmatic conversion is available through authenticated `POST /v1/dxf-to-nc`, using the same generator and presets. See the [DXF API request and response contract](API.md#generate-nc-from-dxf). API conversion is stateless and does not save components or create queued jobs.
 
+After placing components on a sheet, **Export Combined > Tab map PDF** downloads printable sheet overviews and enlarged tab-location diagrams for removal after cutting. See [tab maps and detection limits](TAB_MAP.md).
+
 ## Machining Preset
 
 Select **12 mm (2 passes)** for two 6.1 mm contour passes. This option carries forward through a DXF batch and adds `-2pass` to the generated filename. Drilling remains 4.5 mm deep, with the same pecks, Z20 clearance, ramps and tabs. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass followed by their assigned depth. The original **12 mm (1 pass)** option remains available. The API equivalent is `thicknessMm: 12, profilePasses: 2`.

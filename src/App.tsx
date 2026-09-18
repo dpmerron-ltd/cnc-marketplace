@@ -6,6 +6,7 @@ import { loadProgramSettings, saveProgramSettings } from './storage/programSetti
 import type { ProgramSettings } from './gcode/programSettings'
 import { numberSheetParts } from './labels/partLabels'
 import { PartLabelsDialog } from './ui/PartLabelsDialog'
+import { TabMapDownload } from './ui/TabMapDownload'
 import { QueuePage } from './ui/QueuePage'
 import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
@@ -310,6 +311,7 @@ interface PendingExport {
   mode: 'combined' | 'sheets'
   files: PendingExportFile[]
   summary: ExportSummary
+  tabMap: { parts: Part[]; sheet: Sheet }
 }
 
 function projectToAppState(project: Project | undefined): AppPersistenceState {
@@ -1021,6 +1023,7 @@ function App() {
       mode: 'combined',
       files: [{ filename, gcode: result.gcode, simulation }],
       summary: exportSummary(result.warnings, [simulation]),
+      tabMap: { parts, sheet },
     })
   }
 
@@ -1056,6 +1059,7 @@ function App() {
       mode: 'sheets',
       files,
       summary: exportSummary(results.flatMap((result) => result.warnings), files.map((file) => file.simulation)),
+      tabMap: { parts, sheet },
     })
   }
 
@@ -1382,6 +1386,7 @@ function App() {
             )}
 
             <div className="modal-actions">
+              <TabMapDownload parts={pendingExport.tabMap.parts} sheet={pendingExport.tabMap.sheet} />
               <button type="button" onClick={() => setPendingExport(undefined)}>Cancel</button>
               <button type="button" className="primary" onClick={() => void confirmPendingExport()}>
                 Export G-code
