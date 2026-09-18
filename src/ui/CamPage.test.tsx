@@ -39,6 +39,28 @@ describe('DXF review queue', () => {
   beforeEach(() => { TestWorker.instances = []; vi.stubGlobal('Worker', TestWorker); vi.mocked(downloadText).mockClear(); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+  it('automatically removes tab defaults for cutter-width holes and keeps wider outlines protected', async () => {
+    const slot = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 0, 20, 0, 10, 100, 20, 0, 10, 100, 20, 3, 10, 0, 20, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
+    render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
+    upload([file('slot.dxf', async () => slot)]); await generated()
+    const tabs = screen.getByRole('spinbutton', { name: /Tabs for/ })
+    expect(tabs).toHaveValue(0)
+    expect(tabs).toHaveAttribute('max', '0')
+    expect(screen.getByText('6.35 mm cutter-width hole')).toBeInTheDocument()
+    expect(screen.getByText(/widened from 3 mm/)).toBeInTheDocument()
+    expect(screen.queryByText(/no holding tabs/)).not.toBeInTheDocument()
+    fireEvent.click(review())
+    fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
+    expect(vi.mocked(downloadText).mock.calls[0][1]).not.toContain('(Tab ')
+    fireEvent.change(screen.getByLabelText('Operation for LWPOLYLINE 1'), { target: { value: 'outside' } }); await generated()
+    expect(tabs).toHaveValue(4)
+    fireEvent.change(tabs, { target: { value: '2' } }); await generated()
+    fireEvent.change(screen.getByLabelText('Operation for LWPOLYLINE 1'), { target: { value: 'inside' } }); await generated()
+    expect(tabs).toHaveValue(0)
+    expect(review()).not.toBeChecked()
+    expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
+  })
+
   it.each(['12', '15', '12-2pass'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
     const thickness = choice === '15' ? 15 : 12
     const suffix = choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`

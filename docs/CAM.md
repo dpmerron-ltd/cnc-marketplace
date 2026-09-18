@@ -10,6 +10,8 @@ After placing components on a sheet, **Export Combined > Tab map PDF** downloads
 
 ## Machining Preset
 
+**Cutter-width rectangular holes:** closed rectangular/square inside cuts whose narrowest side is at most the configured 6.35 mm cutter automatically have zero tabs, regardless of length or rotation. Undersized holes are widened about their centre to fit the cutter (both dimensions for a square smaller than the cutter), with a review notice. Longer slots use a centreline toolpath and ramps up to 3 degrees; point-sized holes use 2 mm pecks with Z0.5 retracts. Both cut through to the selected material's final depth, not the blind drilling depth. Existing material pass boundaries, Z20 clearance and optional dogbone corner relief are preserved. Widening or corner relief that intersects other geometry or breaks through an enclosing outline blocks export. Explicit positive tab counts on these holes are rejected. Wider holes, circles, non-rectangular openings, blind pockets, and outer profiles retain their existing rules.
+
 Select **12 mm (2 passes)** for two 6.1 mm contour passes. This option carries forward through a DXF batch and adds `-2pass` to the generated filename. Drilling remains 4.5 mm deep, with the same pecks, Z20 clearance, ramps and tabs. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass followed by their assigned depth. The original **12 mm (1 pass)** option remains available. The API equivalent is `thicknessMm: 12, profilePasses: 2`.
 
 | Setting | 18 mm stock | 15 mm stock | 12 mm stock |

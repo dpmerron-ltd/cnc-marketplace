@@ -60,6 +60,68 @@ describe('DXF geometry', () => {
 })
 
 describe('CNC generation', () => {
+  it.each([{ thickness: 12 }, { thickness: 12, profilePasses: 2 }, { thickness: 15 }, { thickness: 18 }] as const)('cuts cutter-width slots without tabs at the selected through-depths %j', preset => {
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 100, 6.35, 'CUT_INNER')])), { ...settings, ...preset })
+    expect(job.errors).toEqual([])
+    expect(job.operations[0].tabs).toEqual([])
+    expect(job.operations[0].depthMm).toBe(materialPreset(preset.thickness).depth)
+    expect(job.gcode).toContain('Cutter-width rectangular hole: 6.35 mm / no tabs')
+    expect(job.gcode).not.toContain('(Tab ')
+    expect(job.warnings.join()).not.toContain('no holding tabs')
+    expect(job.simulation.errors).toEqual([])
+    expect(job.simulation.warnings).toEqual([])
+    expect(job.simulation.deepestCutMm).toBe(materialPreset(preset.thickness).depth)
+    for (const move of job.simulation.moves.filter(m => m.type === 'rapid' && distance(m.start, m.end) > 0.001)) {
+      expect(move.start.z).toBe(20); expect(move.end.z).toBe(20)
+    }
+    for (const move of job.simulation.moves.filter(m => m.end.z < m.start.z - 0.001 && distance(m.start, m.end) > 0.01)) {
+      expect(Math.atan2(move.start.z - move.end.z, distance(move.start, move.end)) * 180 / Math.PI).toBeLessThanOrEqual(3.02)
+      expect(move.feedMmPerMinute).toBe(600)
+    }
+  })
+  it('widens smaller slots to the cutter and retains corner relief unless disabled', () => {
+    const drawing = readDxf(dxf([rectangle(0, 0, 100, 3, 'CUT_INNER')]))
+    const relieved = generateCam(drawing, settings)
+    expect(relieved.errors).toEqual([])
+    expect(relieved.warnings.join()).toContain('widened from 3 mm to the 6.35 mm cutter')
+    expect(relieved.gcode).toContain('Automatic corner overcuts: 4')
+    const plain = generateCam(drawing, { ...settings, operations: { f0: { cornerOvercuts: false } } })
+    expect(plain.errors).toEqual([])
+    expect(plain.operations[0].path).toHaveLength(2)
+    expect(plain.operations[0].path[0].y).toBeCloseTo(plain.shift.y + 1.5)
+    expect(plain.operations[0].path[1].x - plain.operations[0].path[0].x).toBeCloseTo(100 - 6.35)
+    expect(plain.gcode).not.toContain('Automatic corner overcuts')
+    expect(generateCam(drawing, { ...settings, operations: { f0: { tabs: 2 } } }).errors.join()).toContain('Set tabs to 0')
+  })
+  it.each([true, false])('pecks square cutter-sized holes through the stock, with corner relief %s', cornerOvercuts => {
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 3, 3, 'CUT_INNER')])), { ...settings, operations: { f0: { cornerOvercuts } } })
+    expect(job.errors).toEqual([])
+    expect(job.simulation.warnings).toEqual([])
+    expect(job.operations[0].tabs).toEqual([])
+    expect(job.simulation.deepestCutMm).toBe(18.4)
+    expect(job.gcode).toContain('G01 Z-2 F600\nG00 Z0.5')
+    expect(job.gcode).toContain('G01 Z-9.2 F600')
+    expect(job.gcode).toContain('G01 Z-18.4 F600')
+    expect(job.warnings.join()).toContain('in both dimensions')
+    const pecks = job.simulation.moves.filter(m => distance(m.start, m.end) < 0.001 && m.end.z < 0 && m.end.z < m.start.z)
+    let deepest = 0
+    for (const peck of pecks) { expect(-peck.end.z - deepest).toBeLessThanOrEqual(2.0001); deepest = -peck.end.z }
+  })
+  it('blocks widened slots that break through surrounding walls or touch neighbouring holes', () => {
+    const wall = generateCam(readDxf(dxf([rectangle(), rectangle(30, 0.5, 100, 3, 'CUT_INNER')])), settings)
+    expect(wall.gcode).toBe('')
+    expect(wall.errors.join()).toContain('cutter-width opening breaks through')
+    const neighbours = generateCam(readDxf(dxf([rectangle(0, 0, 100, 3, 'CUT_INNER'), rectangle(0, 5, 100, 3, 'CUT_INNER')])), settings)
+    expect(neighbours.gcode).toBe('')
+    expect(neighbours.errors.join()).toContain('cutter-width opening intersects')
+  })
+  it('applies the slot rule after converting inch geometry to millimetres', () => {
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 4, 0.25, 'CUT_INNER')], 1)), settings)
+    expect(job.errors).toEqual([])
+    expect(job.operations[0].tabs).toEqual([])
+    expect(job.gcode).toContain('Cutter-width rectangular hole')
+    expect(job.operations[0].depthMm).toBe(18.4)
+  })
   it('adds a two-pass 12 mm preset without changing drilling, clearance or holding tabs', () => {
     const job = generateCam(readDxf(source()), { ...settings, thickness: 12, profilePasses: 2, operations: { f3: { kind: 'ignore' } } })
     expect(materialPreset(12, 2)).toEqual({ depth: 12.2, passes: [6.1, 12.2], drill: 4.5 })

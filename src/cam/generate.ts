@@ -5,7 +5,8 @@ import { parseGCode } from '../gcode/parser'
 import { defaultProgramSettings, programLines, startProgramLines, validatePrograms } from '../gcode/programSettings'
 import { hasControllerStart } from '../gcode/controllerStart'
 import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
-import { camPreset, defaultTabCount, requiresHoldingTabs } from './types'
+import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs } from './types'
+import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
 
 const toolRadius = camPreset.diameter / 2
@@ -71,6 +72,10 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const approach = (point: Point) => emit('G00 Z20', `G00 ${xy(point)}`, 'G00 Z0.5', 'G01 Z0 F600')
   const contours: Array<{ feature: CamFeature; path: Point[] }> = []
   const overcuts: Array<{ feature: CamFeature; centers: Point[] }> = []
+  const openingOutlines = new Map(active.flatMap(feature => {
+    const rectangle = cutterWidthOpening(feature)
+    return rectangle ? [[feature.id, cutterWidthGeometry(rectangle, camPreset.diameter, false).outline] as const] : []
+  }))
   const relieve = (feature: CamFeature, paths: Point[][]) => {
     if (feature.circle || settings.operations[feature.id]?.cornerOvercuts === false) return paths
     const result = cornerOvercuts(feature.points, paths, toolRadius)
@@ -176,6 +181,46 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: offset(f.points, -toolRadius), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
         continue
       }
+      const opening = cutterWidthOpening(f)
+      if (opening) {
+        if (settings.operations[f.id]?.tabs !== undefined && settings.operations[f.id].tabs !== 0) throw new Error('Cutter-width rectangular holes cannot retain tabs. Set tabs to 0.')
+        const { path, centers, pointHole } = cutterWidthGeometry(opening, camPreset.diameter, settings.operations[f.id]?.cornerOvercuts !== false)
+        emit(`(Cutter-width rectangular hole: ${n(camPreset.diameter)} mm / no tabs)`)
+        if (opening.width < camPreset.diameter - 1e-6) warnings.push(`${f.name}: rectangular hole widened from ${n(opening.width)} mm to the ${camPreset.diameter} mm cutter${opening.length < camPreset.diameter - 1e-6 ? ' in both dimensions' : ''}.`)
+        if (centers.length) {
+          overcuts.push({ feature: f, centers })
+          emit(`(Automatic corner overcuts: ${centers.length})`)
+          warnings.push(`${f.name}: ${centers.length} dogbone corner overcuts extend beyond the cutter-width opening.`)
+        } else warnings.push(`${f.name}: cutter-width hole has rounded ends/corners; corner overcuts are disabled.`)
+        const metric = pathMetric(path)
+        approach(path[0])
+        let previous = 0
+        for (const depth of material.passes) {
+          emit(`(Pass depth ${n(depth)} mm)`)
+          if (pointHole) {
+            const pecks = Math.ceil((depth - previous) / 2)
+            for (let peck = 1; peck <= pecks; peck++) {
+              emit(`G01 Z-${n(Math.min(previous + peck * 2, depth))} F600`)
+              if (peck < pecks) emit('G00 Z0.5')
+            }
+          } else {
+            const turns = Math.ceil((depth - previous) / (metric.length * slope))
+            if (turns > 1000) throw new Error('Slot entry is too short for a ramp. Revise the geometry.')
+            let current = previous
+            for (let turn = 0; turn < turns; turn++) {
+              const next = Math.min(depth, current + metric.length * slope)
+              for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, camPreset.rampFeed)
+              current = next
+            }
+          }
+          if (metric.length > 1e-6) for (const entry of metric.between(0, metric.length)) linear(entry.point, depth, camPreset.cutFeed)
+          previous = depth
+          if (pointHole && depth !== material.depth) emit('G00 Z0.5')
+        }
+        emit('G00 Z20')
+        operations.push({ featureId: f.id, name: f.name, kind: f.kind, path, tabs: [], depthMm: material.depth, firstLine, lastLine: lines.length })
+        continue
+      }
       let path = offset(f.points, f.kind === 'outside' ? toolRadius : -toolRadius)
       if (f.kind === 'inside') path = relieve(f, [path])[0]
       if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
@@ -239,11 +284,17 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     } catch (error) { errors.push(`${f.name} (${f.layer}): ${(error as Error).message}`) }
   }
   const outer = contours.filter(c => c.feature.kind === 'outside')
+  for (const feature of active.filter(f => openingOutlines.has(f.id))) for (const other of active.filter(f => f.id !== feature.id && f.closed)) {
+    const outline = openingOutlines.get(feature.id)!, boundary = openingOutlines.get(other.id) ?? other.points
+    const enclosing = Math.abs(intersectionArea(feature.points, other.points) - Math.abs(area(feature.points))) < 0.05
+    const overlap = intersectionArea(outline, boundary)
+    if (enclosing ? Math.abs(area(outline)) - overlap > 0.05 : overlap > 0.05) errors.push(`${feature.name}: cutter-width opening ${enclosing ? 'breaks through' : 'intersects'} ${other.name}. Move or resize the geometry.`)
+  }
   for (const { feature, centers } of overcuts) for (const other of active.filter(f => f.id !== feature.id && f.closed)) {
     const enclosing = Math.abs(intersectionArea(feature.points, other.points) - Math.abs(area(feature.points))) < 0.05
     for (const center of centers) {
       const footprint = arcPoints(center, toolRadius, 0, Math.PI * 2).slice(0, -1)
-      const overlap = intersectionArea(footprint, other.points)
+      const overlap = intersectionArea(footprint, openingOutlines.get(other.id) ?? other.points)
       if (enclosing ? Math.abs(area(footprint)) - overlap > 0.05 : overlap > 0.05) {
         errors.push(`${feature.name}: corner overcut ${enclosing ? 'breaks through' : 'intersects'} ${other.name}. Disable corner overcuts or change the geometry.`)
         break

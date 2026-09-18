@@ -13,6 +13,17 @@ const profile = [0, 'LWPOLYLINE', 8, 'CUT_OUTER', 90, 4, 70, 1, 10, 0, 20, 0, 10
 const drawing = dxf([profile, circle()])
 
 describe('DXF API generation', () => {
+  it.each([12, 15, 18] as const)('automatically cuts narrow rectangular holes tab-free in %s mm stock', async thicknessMm => {
+    const slot = [0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 50, 20, 50, 10, 150, 20, 50, 10, 150, 20, 53, 10, 50, 20, 53]
+    const source = dxf([profile, slot, circle()])
+    const result = await generateDxfNc({ dxf: source, thicknessMm })
+    expect(result.gcode).toBe(generateCam(readDxf(source), { thickness: thicknessMm, units: 'auto', operations: {} }).gcode)
+    expect(result.operations.find(op => op.featureId === 'f1')).toMatchObject({ kind: 'inside', tabCount: 0, depthMm: thicknessMm === 18 ? 18.4 : thicknessMm === 15 ? 15.4 : 12.2 })
+    expect(result.operations.find(op => op.featureId === 'f0')?.tabCount).toBe(4)
+    expect(result.warnings.join()).toContain('widened from 3 mm to the 6.35 mm cutter')
+    expect(result.settings.drillDepthMm).toBe(thicknessMm === 12 ? 4.5 : 9.2)
+    await expect(generateDxfNc({ dxf: source, thicknessMm, operations: { f1: { tabs: 2 } } })).rejects.toMatchObject({ status: 422 })
+  })
   it('supports opt-in two-pass 12 mm generation with exact browser parity', async () => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 2, filename: 'panel.dxf' })
     expect(result.gcode).toBe(generateCam(readDxf(drawing), { thickness: 12, profilePasses: 2, units: 'auto', operations: {} }).gcode)

@@ -79,6 +79,8 @@ Include that object alongside `dxf` and `thicknessMm`. Returned `features` ident
 
 For the optional two-pass 12 mm preset, include `"thicknessMm": 12, "profilePasses": 2`. It returns `passDepthsMm: [6.1, 12.2]` and a filename ending `-12mm-2pass.nc`. Drilling remains 4.5 mm deep; clearance, ramps and tabs are unchanged. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass before their assigned depth. Omitting `profilePasses` preserves existing output. Unsupported pass selections or specifying it for 15/18 mm stock return `400`.
 
+Rectangular/square `inside` holes with a narrowest side <= the configured cutter diameter (6.35 mm) automatically use zero tabs, regardless of length/rotation. Smaller holes are widened centrally to cutter size, with a review warning. They remain through-holes at the material's cut depth, not blind drills. Slots use centreline ramping; point-sized holes use 2 mm pecks. `cornerOvercuts` remains supported. `tabs` must be omitted or `0` for these holes; a positive value returns `422`. Widening/relief collisions block export. Wider holes and outer profiles retain their existing tab rules.
+
 The successful `200` response includes:
 - `filename` (ending `.nc`), `contentType`, `bytes`, `sha256`, and `gcode`. The hash and byte count cover the exact UTF-8 `gcode` string. The example uses `jq -j` to avoid adding an extra newline.
 - `reviewRequired: true`, and `warnings`, including unspecified drawing units or insufficient room for all tabs. Neither an empty warnings list nor HTTP 200 certifies a machine setup.

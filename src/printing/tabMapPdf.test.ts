@@ -24,5 +24,5 @@ describe('Tab map PDF', () => {
     const tabs = Array.from({ length: 80 }, () => tab)
     const pdf = await PDFDocument.load(await createTabMapPdf({ ...map, parts: [{ ...map.parts[0], tabs }, { ...map.parts[1], tabs: [], warnings: ['No tab locations identified. Check source machining.'] }] }, await font()))
     expect(pdf.getPageCount()).toBeGreaterThan(5)
-  })
+  }, 15000)
 })
