@@ -28,6 +28,10 @@ export function validatePrograms(value: ProgramSettings, safeZ = 20): string[] {
   for (const key of Object.keys(defaultProgramSettings) as Array<keyof ProgramSettings>) {
     const label = { startGcode: 'Start program', spindleStartGcode: 'Spindle start', endGcode: 'End program' }[key]
     const code = value[key]
+    if (typeof code === 'string' && !code.trim()) {
+      if (key !== 'spindleStartGcode') errors.push(`${label}: this field is required.`)
+      continue
+    }
     if (typeof code !== 'string' || !code.trim() || code.length > 8000 || code.split('\n').length > 100) {
       errors.push(`${label}: enter 1-100 lines, at most 8,000 characters.`); continue
     }
@@ -65,14 +69,14 @@ export function validatePrograms(value: ProgramSettings, safeZ = 20): string[] {
         if (m === 3) spindle = true
         if (m === 5) { spindle = false; stopped = true }
         if (m === 2 || m === 30) {
-          if (!stopped) fail('Stop the spindle with M05 before ending the program.')
+          if (!stopped && (typeof value.spindleStartGcode !== 'string' || value.spindleStartGcode.trim())) fail('Stop the spindle with M05 before ending the program.')
           terminated = true
           if (line.words.at(-1)?.letter !== 'M' || line.words.at(-1)?.value !== m) fail('M02/M30 must be the last command.')
         }
       }
     }
     if (key === 'spindleStartGcode' && (!spindle || !speed)) errors.push('Spindle start must set a positive S speed and leave M03 active.')
-    if (key === 'endGcode' && !terminated) errors.push('End program must finish with M02 or M30 after M05.')
+    if (key === 'endGcode' && !terminated) errors.push(value.spindleStartGcode?.trim() ? 'End program must finish with M02 or M30 after M05.' : 'End program must finish with M02 or M30.')
   }
   return [...new Set(errors)]
 }

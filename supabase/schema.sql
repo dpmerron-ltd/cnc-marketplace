@@ -217,10 +217,13 @@ create policy "component item ownership"
 create table if not exists public.user_program_settings (
   owner_id uuid primary key references auth.users(id) on delete cascade,
   start_gcode text not null check (length(start_gcode) between 1 and 8000),
-  spindle_start_gcode text not null check (length(spindle_start_gcode) between 1 and 8000),
+  spindle_start_gcode text not null check (length(spindle_start_gcode) between 0 and 8000),
   end_gcode text not null check (length(end_gcode) between 1 and 8000),
   updated_at timestamptz not null default now()
 );
+-- An empty block means no automatic spindle start; retain NOT NULL and size limits.
+alter table public.user_program_settings drop constraint if exists user_program_settings_spindle_start_gcode_check;
+alter table public.user_program_settings add constraint user_program_settings_spindle_start_gcode_check check (length(spindle_start_gcode) between 0 and 8000);
 alter table public.user_program_settings enable row level security;
 grant select, insert, update on public.user_program_settings to authenticated;
 grant all on public.user_program_settings to service_role;

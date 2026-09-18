@@ -5,12 +5,33 @@ import { generateJob, parseJobRequest } from '../jobs/generateJob'
 import { testItem, testParts, testRequest } from '../test/jobFixtures'
 
 describe('account CNC programs', () => {
+  it('allows a manual router without adding spindle start commands', () => {
+    const programs = { startGcode: 'M98 P"0:/macros/Probe"\nM400\nM291 P"Check clearance" S3 Z1', spindleStartGcode: '', endGcode: 'M30' }
+    expect(validatePrograms(programs)).toEqual([])
+    expect(spindleRpm(programs)).toBe(0)
+    const job = generateCam({ units: 'mm', errors: [], warnings: [], features: [{ id: 'p', name: 'Hole', layer: 'DRILL', points: [{ x: 20, y: 20 }], kind: 'drill', closed: false }] }, { thickness: 18, units: 'mm', operations: {}, programs })
+    expect(job.errors).toEqual([])
+    expect(job.gcode).not.toMatch(/M03|S18000/)
+    expect(job.gcode).toContain('G01 Z-9.2 F600')
+    expect(job.warnings.join()).toContain('Manual cutter control')
+    expect(validatePrograms({ ...programs, startGcode: 'M291 P"Check" S3 Z20' }).length).toBeGreaterThan(0)
+    expect(validatePrograms({ ...programs, spindleStartGcode: 'M03' }).length).toBeGreaterThan(0)
+  })
   it('validates supported setup, spindle delay, shutdown and parking commands', () => {
     const programs = { startGcode: '(Account setup)\nG21 G17 G90 G94\nG54\nG40 G49 G80\nM08', spindleStartGcode: 'S16000 M03\nG04 P3', endGcode: 'M05\nM09\nG00 Z25\nG00 X0 Y0\nM30' }
     expect(validatePrograms(programs)).toEqual([])
     expect(spindleRpm(programs)).toBe(16000)
     expect(normalizePrograms({ ...programs, endGcode: ' M05\r\nM30\r\n' }).endGcode).toBe('M05\nM30')
     expect(validatePrograms(programs, 30).join()).toContain('safe Z 30')
+  })
+  it('exports manual-router sheets without silently inserting a spindle command', async () => {
+    const programs = { startGcode: 'G21 G90', spindleStartGcode: '', endGcode: 'M30' }
+    const request = parseJobRequest({ ...testRequest, sheet: { ...testRequest.sheet, screwMarks: false } })
+    const result = await generateJob(request, [testItem], testParts, programs)
+    expect(result.manifest.programSettings).toEqual(programs)
+    for (const sheet of result.exported) expect(sheet.gcode).not.toMatch(/M03|S18000/)
+    expect(result.manifest.setup.join()).toContain('manual cutter control')
+    await expect(generateJob(parseJobRequest(testRequest), [testItem], testParts, programs)).rejects.toMatchObject({ details: expect.arrayContaining([expect.stringContaining('Disable screw marking')]) })
   })
   it.each(['G20', 'G91', 'G92 X0', 'G10 L2 P1 X0', 'G28', 'G53 G00 Z0', 'G01 Z-2 F600', 'M30', 'S18000 M03', 'G00 Z0.5', '(comment) M30', 'G21 garbage', 'G21.1', 'G04', 'G00 Z20\nG00 X999999'])('rejects incompatible startup: %s', startGcode => {
     expect(validatePrograms({ ...defaultProgramSettings, startGcode }).length).toBeGreaterThan(0)

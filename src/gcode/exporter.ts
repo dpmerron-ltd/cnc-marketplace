@@ -120,7 +120,7 @@ function screwMarkingLines(parts: Part[], sheet: Sheet, sheetIndex: number): { l
   const spindleCommand = spindleWords.filter(word => word.letter === 'M' && [3, 4, 5].includes(word.value)).at(-1)?.value
   const spindleSpeed = spindleWords.filter(word => word.letter === 'S').at(-1)?.value
   if (spindleCommand !== 3 || !spindleSpeed || spindleSpeed <= 0 || !Number.isFinite(spindleSpeed)) {
-    result.errors.push('Screw marking requires a spindle start block with a positive S speed and M03.')
+    result.errors.push('Screw marking requires a spindle start block with a positive S speed and M03. Disable screw marking for a manually switched router; M05 cannot stop it for fitting screws.')
     return result
   }
   if (!Number.isFinite(sheet.gcodeSettings.safeZ) || sheet.gcodeSettings.safeZ < 0.5) {

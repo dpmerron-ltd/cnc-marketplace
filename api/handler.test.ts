@@ -89,9 +89,9 @@ describe('jobs HTTP API', () => {
     expect(error.details.length).toBeGreaterThan(0)
     expect(error.gcode).toBeUndefined()
   })
-  it('applies Duet startup only from the authenticated profile in API DXF generation', async () => {
+  it.each(['S12000 M03', ''])('applies Duet startup only from the authenticated profile in API DXF generation with spindle %s', async spindleStartGcode => {
     const f = fixture()
-    const programs = { ...defaultProgramSettings, startGcode: 'M98 P"0:/macros/Probe"\nM400\nG00 Z5', spindleStartGcode: 'S12000 M03' }
+    const programs = { ...defaultProgramSettings, startGcode: 'M98 P"0:/macros/Probe"\nM400\nG00 Z5', spindleStartGcode }
     f.repo.programSettings = vi.fn(async owner => owner === 'alice' ? programs : { ...defaultProgramSettings })
     const dxf = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', '0', 'CIRCLE', '8', 'DRILL', '10', '20', '20', '20', '40', '3', '0', 'ENDSEC', '0', 'EOF', ''].join('\n')
     const response = await f.call('/dxf-to-nc', 'POST', { dxf, thicknessMm: 18 })
@@ -101,6 +101,10 @@ describe('jobs HTTP API', () => {
     expect(result.gcode).toContain(programs.startGcode)
     expect(result.gcode.indexOf('M98')).toBeLessThan(result.gcode.indexOf('G00 Z20'))
     expect(result.gcode).toContain('G01 Z-9.2 F600\nG00 Z20')
+    if (!spindleStartGcode) {
+      expect(result.gcode).not.toMatch(/M03|S18000/)
+      expect(result.settings.spindleRpm).toBe(0)
+    }
     const other = await f.call('/dxf-to-nc', 'POST', { dxf, thicknessMm: 18 }, 'bob')
     expect((await other.json()).gcode).not.toContain('M98')
     expect(f.jobs.size).toBe(0)

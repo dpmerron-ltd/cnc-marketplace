@@ -263,6 +263,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const simulation = simulateGCode(candidate)
   errors.push(...simulation.errors)
   warnings.push(...simulation.warnings)
+  if (!programs.spindleStartGcode.trim()) warnings.push('Manual cutter control: no automatic spindle start. Start and stop the cutter manually; M05 cannot stop a manually switched router.')
   if (simulation.moves.some(m => m.type === 'rapid' && (m.start.z < -0.001 || m.end.z < -0.001) && distance(m.start, m.end) > 0.001)) errors.push('Unexpected below-surface rapid travel.')
   return { drawing: { ...drawing, features }, operations, gcode: errors.length ? '' : candidate, simulation, errors: [...new Set(errors)], warnings: [...new Set(warnings)], shift }
 }

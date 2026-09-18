@@ -39,6 +39,12 @@ describe('private profile storage', () => {
     expect(mock.row).toMatchObject({ owner_id: 'alice', start_gcode: programs.startGcode })
     expect(await loadProgramSettings('alice')).toEqual(programs)
   })
+  it('persists an intentionally empty spindle block without defaults', async () => {
+    const programs = { startGcode: 'G21 G90', spindleStartGcode: '', endGcode: 'M30' }
+    expect(await saveProgramSettings('alice', programs)).toEqual(programs)
+    mock.row = mock.calls[0].write
+    expect(await loadProgramSettings('alice')).toEqual(programs)
+  })
   it('fails closed on read/write errors, mismatched ownership and invalid programs', async () => {
     mock.error = { message: 'Offline' }
     await expect(loadProgramSettings('alice')).rejects.toThrow('Offline')

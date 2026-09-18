@@ -27,6 +27,14 @@ do $$ declare affected integer; begin
   exception when insufficient_privilege then null; end;
 end $$;
 insert into public.user_program_settings (owner_id, start_gcode, spindle_start_gcode, end_gcode) values (auth.uid(), 'G21', 'S16000 M03', 'M05 M30');
+update public.user_program_settings set spindle_start_gcode = '', end_gcode = 'M30' where owner_id = auth.uid();
+do $$ begin
+  if not exists (select 1 from public.user_program_settings where owner_id = auth.uid() and spindle_start_gcode = '') then raise exception 'Manual router settings not saved'; end if;
+  begin
+    update public.user_program_settings set spindle_start_gcode = repeat('x', 8001) where owner_id = auth.uid();
+    raise exception 'Oversized spindle settings accepted';
+  exception when check_violation then null; end;
+end $$;
 set local request.jwt.claim.aal = 'aal1';
 do $$ declare affected integer; begin
   if (select count(*) from public.user_program_settings) <> 0 then raise exception 'MFA bypass on read'; end if;

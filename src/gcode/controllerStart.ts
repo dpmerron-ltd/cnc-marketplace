@@ -53,7 +53,7 @@ export function validateControllerStart(code: string): string[] {
       if (is('M', 98)) { allowed = 'P'; valid = string('P', 200) }
       else if (is('M', 400, 5, 7, 8, 9, 0, 1)) valid = true
       else if (is('M', 291)) {
-        allowed = 'PRST'; valid = string('P', 249) && (get('R') === undefined || string('R', 60)) && optional('S', 0, 3, true) && optional('T', 0, 600)
+        allowed = 'PRSTXYZ'; valid = string('P', 249) && (get('R') === undefined || string('R', 60)) && optional('S', 0, 3, true) && optional('T', 0, 600) && ['X', 'Y', 'Z'].every(axis => optional(axis, 0, 1, true))
       } else if (is('M', 563)) {
         allowed = 'PSDH'; valid = num('P', 0, 65535, true) && ((string('S', 60) && get('D') === undefined && get('H') === undefined) || (get('S') === undefined && get('D') === -1 && get('H') === -1))
       } else if (is('T', -1) || command.letter === 'T' && typeof command.value === 'number' && Number.isInteger(command.value) && command.value >= 0 && command.value <= 65535) valid = true

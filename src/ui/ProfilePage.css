@@ -7,6 +7,8 @@
 .profile-section-heading h3 { font-size: 16px; margin: 0; }
 .profile-section-heading span, .profile-actions span { color: #62717b; font-size: 12px; }
 .profile-programs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.profile-programs > div { min-width: 0; }
+.profile-programs textarea[aria-invalid="true"] { border-color: #962f2f; }
 .profile-programs label { font-size: 13px; font-weight: 600; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .profile-programs textarea { width: 100%; box-sizing: border-box; min-height: 320px; resize: vertical; border: 1px solid #becbd1; border-radius: 4px; background: #f8fafb; padding: 12px; color: #203039; font: 13px/1.6 monospace; }
 .profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 20px; }
