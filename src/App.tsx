@@ -31,6 +31,7 @@ import {
   deleteRemoteComponent,
   deleteRemoteSheetHistory,
   loadRemoteProject,
+  saveRemoteComponent,
   saveRemoteProject,
   saveRemoteSheetHistory,
 } from './storage/supabaseProjectStore'
@@ -768,11 +769,14 @@ function App() {
     setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
   }
 
-  function saveGeneratedComponent(value: CamSave) {
+  async function saveGeneratedComponent(value: CamSave) {
     const target = items.find(item => item.id === value.itemId)
     if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
-    const part = { ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), ownerId: userId }
-    setParts(current => [...current, normalizePart(part, target!.sku, current.filter(p => p.itemId === value.itemId).length)])
+    const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, parts.filter(p => p.itemId === value.itemId).length)
+    const result = await saveRemoteComponent(part, userId!)
+    if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
+    if (accountRef.current !== userId) return
+    setParts(current => [...current.filter(p => p.id !== part.id), part])
     setItems(current => current.map(item => item.id === value.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
     setStatus(`Generated component added to ${target!.name}.`)
   }

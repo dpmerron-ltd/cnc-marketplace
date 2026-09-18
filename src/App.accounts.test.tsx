@@ -32,6 +32,7 @@ vi.mock('./storage/supabaseProjectStore', () => ({
   loadRemoteProject: (...args: unknown[]) => mock.load(...args),
   saveRemoteProject: (...args: unknown[]) => mock.save(...args),
   deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(),
+  saveRemoteComponent: vi.fn(async () => ({ ok: true })),
 }))
 vi.mock('./storage/programSettingsStore', () => ({ loadProgramSettings: (...args: unknown[]) => mock.programs(...args), saveProgramSettings: (...args: unknown[]) => mock.savePrograms(...args) }))
 

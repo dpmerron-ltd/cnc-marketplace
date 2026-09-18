@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteProject, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteProject, saveRemoteComponent, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { testParts } from '../test/jobFixtures'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', queries: [] as { table: string; filters: [string, string][]; write?: unknown }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, queries: [] as { table: string; filters: [string, string][]; write?: unknown }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
@@ -16,7 +17,7 @@ vi.mock('./supabaseClient', () => ({
         order: () => builder,
         maybeSingle: () => builder,
         upsert: (value: unknown) => { query.write = value; return builder },
-        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : [], error: null }).then(resolve),
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : [], error: mock.error }).then(resolve),
       }
       return builder
     },
@@ -26,7 +27,26 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(() => { mock.queries = []; mock.userId = 'alice' })
+  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null })
+
+  it('saves a confirmed component independently, with a stable ID for retries', async () => {
+    const part = { ...testParts[0], ownerId: 'alice' }
+    expect(await saveRemoteComponent(part, 'alice')).toEqual({ ok: true })
+    expect(mock.queries).toHaveLength(1)
+    expect(mock.queries[0].table).toBe('cnc_components')
+    expect(mock.queries[0].write).toEqual([expect.objectContaining({ id: part.id, owner_id: 'alice', item_id: part.itemId, gcode: part.gcode })])
+    mock.error = { message: 'Storage unavailable' }
+    expect(await saveRemoteComponent(part, 'alice')).toEqual({ ok: false, error: 'Storage unavailable' })
+    expect(mock.queries[1].write).toEqual(mock.queries[0].write)
+  })
+
+  it('does not save confirmed components for another session or owner', async () => {
+    const part = { ...testParts[0], ownerId: 'alice' }
+    expect((await saveRemoteComponent(part, 'bob')).ok).toBe(false)
+    expect((await saveRemoteComponent({ ...part, ownerId: 'bob' }, 'alice')).ok).toBe(false)
+    expect((await saveRemoteComponent({ ...part, itemId: undefined }, 'alice')).ok).toBe(false)
+    expect(mock.queries).toEqual([])
+  })
 
   it('filters every cloud read by the authenticated owner, including empty accounts', async () => {
     const result = await loadRemoteProject('alice')

@@ -2,6 +2,8 @@
 
 Open **Generate** while signed in. Upload an ASCII DXF, select 12 mm or 18 mm stock, review operations and the toolpath preview, then download a component program or add it to an item in your own account. The drawing stays in the browser until you explicitly add the generated component to an item. Switching accounts unmounts the generator and clears its draft.
 
+You can select multiple DXFs together. Files are reviewed in selection order; **Confirm & add component** adds the current component to the selected catalogue item and opens the next. Downloading NC is a separate action and does not advance the queue. Each drawing requires its own review. Material thickness and the selected catalogue item carry forward, while units, operation overrides and preview state reset. **Add DXFs** appends to an unfinished queue; **Skip file** moves past a file without adding its component. The queue shows confirmed/skipped counts and remains browser-only; leaving Generate or switching accounts clears unprocessed uploads. Each file retains the same individual size and geometry limits.
+
 Programmatic conversion is available through authenticated `POST /v1/dxf-to-nc`, using the same generator and presets. See the [DXF API request and response contract](API.md#generate-nc-from-dxf). API conversion is stateless and does not save components or create queued jobs.
 
 ## Machining Preset

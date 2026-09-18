@@ -2,6 +2,18 @@
 .cam-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 16px 20px; border-bottom: 1px solid #dce3e7; }
 .cam-heading h2 { font-size: 20px; margin: 0; }
 .cam-heading > span { color: #67737d; font-size: 13px; overflow-wrap: anywhere; flex: 1; }
+.cam-queue { padding: 12px 20px; border-bottom: 1px solid #dce3e7; background: #f3f8f6; font-size: 12px; }
+.cam-queue-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; }
+.cam-queue-heading > span:first-child { font-weight: 600; }
+.cam-queue-heading > button { margin-left: auto; }
+.cam-queue details { margin-top: 8px; }
+.cam-queue summary { cursor: pointer; color: #4e5c65; }
+.cam-queue ol { list-style: none; padding: 0; margin: 8px 0 0; max-height: 180px; overflow: auto; }
+.cam-queue li { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 12px; padding: 7px 8px; border-top: 1px solid #dce3e7; }
+.cam-queue li[aria-current=step] { background: #e2efeb; }
+.cam-queue li > span:first-child { overflow-wrap: anywhere; }
+.cam-queue li > span:last-child { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #4e5c65; }
+.cam-action-error { color: #962f2f; font-size: 12px; overflow-wrap: anywhere; }
 .cam-settings { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #dce3e7; background: #f5f8f8; }
 .cam-page label { display: flex; gap: 5px; font-size: 12px; color: #4e5c65; }
 .cam-settings > label, .cam-export-actions > label { flex-direction: column; }
@@ -62,7 +74,7 @@
   .cam-workspace { display: flex; flex-direction: column-reverse; }
   .cam-operations { max-height: 400px; border-right: 0; border-top: 1px solid #ccd7dc; }
   .cam-operation { grid-template-columns: minmax(0, 1fr) 150px; }
-  .cam-heading, .cam-settings, .cam-export { padding: 12px; }
+  .cam-heading, .cam-queue, .cam-settings, .cam-export { padding: 12px; }
   .cam-heading > span { order: 2; flex-basis: 100%; }
   .cam-heading > button { margin-left: auto; }
   .cam-settings { gap: 12px; }

@@ -60,6 +60,26 @@ export function canUseSupabase(): boolean {
   return isSupabaseConfigured && Boolean(supabase)
 }
 
+function componentRow(part: Part) {
+  return {
+    id: part.id, owner_id: part.ownerId, item_id: part.itemId, sku: part.sku, name: part.name,
+    original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
+    width: part.width, height: part.height, bounding_box: part.boundingBox,
+    original_bounds: part.originalBounds, metadata: part.metadata, date_imported: part.dateImported,
+  }
+}
+
+export async function saveRemoteComponent(part: Part, expectedUserId: string): Promise<RemoteSaveResult> {
+  if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
+  const userId = await getUserId()
+  if (!userId || userId !== expectedUserId || part.ownerId !== userId || !part.itemId) {
+    return { ok: false, error: 'The component must belong to an item in your signed-in account.' }
+  }
+  // The item's ownership is also enforced by the database's component RLS policy.
+  const result = await supabase.from('cnc_components').upsert([componentRow(part)])
+  return result.error ? { ok: false, error: result.error.message } : { ok: true }
+}
+
 async function getUserId(): Promise<string | undefined> {
   if (!supabase) return undefined
   const result = await supabase.auth.getUser()
@@ -190,22 +210,7 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
 
   if (saveableParts.length > 0) {
     const componentsResult = await supabase.from('cnc_components').upsert(
-      saveableParts.map((part) => ({
-        id: part.id,
-        owner_id: userId,
-        item_id: part.itemId,
-        sku: part.sku,
-        name: part.name,
-        original_filename: part.originalFilename,
-        gcode: part.gcode,
-        dxf: part.dxf ?? null,
-        width: part.width,
-        height: part.height,
-        bounding_box: part.boundingBox,
-        original_bounds: part.originalBounds,
-        metadata: part.metadata,
-        date_imported: part.dateImported,
-      })),
+      saveableParts.map(componentRow),
     )
     if (componentsResult.error) {
       console.warn('Supabase component save failed.', componentsResult.error)

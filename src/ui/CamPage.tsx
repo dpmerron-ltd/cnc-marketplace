@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, FileUp, Save } from 'lucide-react'
+import { Check, Download, FileUp, Save, SkipForward } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
 import { camPreset, defaultTabCount } from '../cam/types'
@@ -11,11 +11,19 @@ import './CamPage.css'
 import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
 
 const kinds = Object.keys(operationNames) as OperationKind[]
-export interface CamSave { itemId: string; filename: string; source: string; gcode: string }
+export interface CamSave { id: string; itemId: string; filename: string; source: string; gcode: string }
+interface QueuedDxf { file: File; status: 'pending' | 'confirmed' | 'skipped' }
 
-export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void; programs: ProgramSettings }) {
+export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void | Promise<void>; programs: ProgramSettings }) {
   const fileInput = useRef<HTMLInputElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
   const loadId = useRef(0)
+  const confirming = useRef(false)
+  const [queue, setQueue] = useState<QueuedDxf[]>([])
+  const [fileIndex, setFileIndex] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [componentId, setComponentId] = useState(() => crypto.randomUUID())
+  const [actionError, setActionError] = useState('')
   const [source, setSource] = useState('')
   const [filename, setFilename] = useState('')
   const [settings, setSettings] = useState<CamSettings>({ thickness: 18, units: 'auto', operations: {} })
@@ -31,17 +39,20 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
   useEffect(() => {
     if (!source) return
     let active = true
+    const id = loadId.current
     const worker = new Worker(new URL('../cam/worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = event => {
-      if (!active) return
+      if (!active || id !== loadId.current) return
       setResult(event.data.result); setError(event.data.error ?? ''); setBusy(false)
     }
-    worker.onerror = () => { if (active) { setError('Generation failed. Check the DXF and try again.'); setBusy(false); setResult(undefined) } }
+    worker.onerror = () => { if (active && id === loadId.current) { setError('Generation failed. Check the DXF and try again.'); setBusy(false); setResult(undefined) } }
     worker.postMessage({ source, settings: { ...settings, programs } })
     return () => { active = false; worker.terminate() }
   }, [source, settings, programs])
   useEffect(() => () => { loadId.current++ }, [])
   function update(patch: Partial<CamSettings>) {
+    if (confirming.current) return
+    setComponentId(crypto.randomUUID())
     setReviewed(false); setSaved(false); setBusy(Boolean(source)); setSettings(s => ({ ...s, ...patch }))
   }
   function operation(ids: string[], patch: OperationOverride) {
@@ -49,26 +60,73 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     for (const id of ids) operations[id] = { ...operations[id], ...patch }
     update({ operations })
   }
-  async function upload(file?: File) {
-    if (!file) return
+  async function loadFile(file: File) {
     const id = ++loadId.current
-    setError(''); setReviewed(false); setResult(undefined); setSaved(false); setBusy(true); setSource(''); setFilename(file.name)
+    setComponentId(crypto.randomUUID())
+    setError(''); setActionError(''); setReviewed(false); setResult(undefined); setSaved(false); setBusy(true); setSource(''); setFilename(file.name); setSelected(undefined); setView('preview')
+    setSettings(s => ({ ...s, units: 'auto', operations: {} }))
+    heading.current?.focus({ preventScroll: true })
+    window.scrollTo({ top: 0 })
     try {
       if (!/\.dxf$/i.test(file.name)) throw new Error('Choose a DXF file.')
       if (file.size > 2000000) throw new Error('DXF exceeds 2 MB.')
       const text = await file.text()
       if (id !== loadId.current) return
       if (!text.trim()) throw new Error('DXF is empty.')
-      setFilename(file.name); setSettings(s => ({ ...s, units: 'auto', operations: {} })); setSelected(undefined); setSource(text)
+      setSource(text)
     } catch (error) { if (id === loadId.current) { setError((error as Error).message); setBusy(false) } }
+  }
+  function upload(files: File[]) {
+    if (!files.length || confirming.current) return
+    const added: QueuedDxf[] = files.map(file => ({ file, status: 'pending' }))
+    if (queue[fileIndex]?.status === 'pending') {
+      setQueue(current => [...current, ...added])
+    } else {
+      setQueue(added); setFileIndex(0); void loadFile(files[0])
+    }
+  }
+  function advance(status: 'confirmed' | 'skipped') {
+    setQueue(current => current.map((entry, index) => index === fileIndex ? { ...entry, status } : entry))
+    // Keep the existing single-file download/add workflow; batches advance immediately.
+    if (queue.length === 1 && status === 'confirmed') return
+    const next = fileIndex + 1
+    setFileIndex(next)
+    if (queue[next]) void loadFile(queue[next].file)
+    else {
+      loadId.current++
+      setSource(''); setResult(undefined); setFilename(''); setError(''); setActionError(''); setBusy(false); setReviewed(false); setSelected(undefined)
+      heading.current?.focus({ preventScroll: true })
+      window.scrollTo({ top: 0 })
+    }
   }
   const features = result?.drawing.features ?? []
   const layers = [...new Set(features.map(f => f.layer))]
   const problems = [error, ...(result?.errors ?? [])].filter(Boolean)
-  const ready = Boolean(result?.gcode) && !busy && !problems.length && reviewed
+  const ready = Boolean(result?.gcode) && !busy && !saving && !problems.length && reviewed
   const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm.nc`
+  const batch = queue.length > 1
+  const currentFile = queue[fileIndex]
+  const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')
+  async function confirm(action: 'download' | 'save') {
+    if (!ready || confirming.current || action === 'save' && (saved || !items.some(item => item.id === itemId))) return
+    confirming.current = true
+    setSaving(true); setActionError('')
+    const id = loadId.current
+    try {
+      if (action === 'save') await onSave({ id: componentId, itemId, filename: outputName, source, gcode: result!.gcode })
+      else downloadText(outputName, result!.gcode)
+      if (id !== loadId.current) return
+      if (action === 'save') { setSaved(true); advance('confirmed') }
+    } catch (error) {
+      if (id === loadId.current) setActionError(error instanceof Error ? error.message : 'Unable to confirm this file. Try again.')
+    } finally { confirming.current = false; setSaving(false) }
+  }
   return <main className="cam-page">
-    <div className="cam-heading"><h2>Generate G-code</h2><span>{filename || 'DXF'}</span><button type="button" className="icon-text-button" onClick={() => fileInput.current?.click()}><FileUp size={17} />Upload DXF</button><input ref={fileInput} className="hidden-file" type="file" accept=".dxf" aria-label="Upload DXF file" onChange={e => { void upload(e.target.files?.[0]); e.target.value = '' }} /></div>
+    <div className="cam-heading"><h2 ref={heading} tabIndex={-1}>Generate G-code</h2><span>{filename || 'DXF'}</span><button type="button" className="icon-text-button" disabled={saving} onClick={() => fileInput.current?.click()}><FileUp size={17} />{currentFile?.status === 'pending' ? 'Add DXFs' : 'Upload DXFs'}</button><input ref={fileInput} className="hidden-file" type="file" accept=".dxf" multiple disabled={saving} aria-label="Upload DXF files" onChange={e => { upload(Array.from(e.target.files ?? [])); e.target.value = '' }} /></div>
+    {batch && <section className="cam-queue" aria-label="DXF queue">
+      <div className="cam-queue-heading"><span role="status">{complete ? 'Queue complete' : `File ${fileIndex + 1} of ${queue.length}`}</span><span>{queue.filter(entry => entry.status === 'confirmed').length} confirmed / {queue.filter(entry => entry.status === 'skipped').length} skipped</span>{currentFile?.status === 'pending' && <button type="button" className="icon-text-button" disabled={saving} onClick={() => advance('skipped')}><SkipForward size={16} />Skip file</button>}</div>
+      <details><summary>{complete ? 'Processed files' : 'Queued files'}</summary><ol>{queue.map((entry, index) => <li key={index} aria-current={index === fileIndex && entry.status === 'pending' ? 'step' : undefined}><span>{index + 1}. {entry.file.name}</span><span>{entry.status === 'confirmed' ? <><Check size={14} />Confirmed</> : entry.status === 'skipped' ? 'Skipped' : index === fileIndex ? 'In review' : 'Waiting'}</span></li>)}</ol></details>
+    </section>}
     <div className="cam-settings">
       <label>Material thickness<select value={settings.thickness} onChange={e => update({ thickness: Number(e.target.value) as 12 | 18 })}><option value="18">18 mm</option><option value="12">12 mm</option></select></label>
       <label>DXF units<select value={settings.units} onChange={e => update({ units: e.target.value as CamSettings['units'] })}><option value="auto">From DXF{result ? ` (${result.drawing.units})` : ''}</option><option value="mm">Millimetres</option><option value="inches">Inches</option></select></label>
@@ -103,15 +161,16 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
       </aside>
       <section className="cam-main">
         <div className="cam-section-heading"><div className="cam-view-tabs" role="tablist" aria-label="CAM view"><button type="button" role="tab" aria-selected={view === 'preview'} onClick={() => setView('preview')}>Toolpaths</button><button type="button" role="tab" aria-selected={view === 'code'} onClick={() => setView('code')}>G-code</button></div><span role="status">{busy ? 'Generating...' : result ? `${result.operations.length} operations / ${Math.ceil(result.simulation.estimatedSeconds / 60)} min` : ''}</span></div>
-        {view === 'preview' ? <CamPreview result={result} selected={selected} onSelect={setSelected} /> : <textarea className="cam-code" aria-label="Generated G-code" readOnly value={busy ? '' : result?.gcode ?? ''} />}
+        {view === 'preview' ? <CamPreview key={`${fileIndex}:${filename}`} result={result} selected={selected} onSelect={setSelected} /> : <textarea className="cam-code" aria-label="Generated G-code" readOnly value={busy ? '' : result?.gcode ?? ''} />}
         {result && <div className="cam-extents"><span>Extent X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
         {problems.length > 0 && <section className="cam-problems" role="alert"><h3>Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
         {!!result?.warnings.length && <details className="cam-warnings"><summary>Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
       </section>
     </div>
     <footer className="cam-export">
-      <label className="cam-review"><input type="checkbox" checked={reviewed} disabled={!result?.gcode || busy} onChange={e => setReviewed(e.target.checked)} />Units, operations, hole sizes, tabs, stock, cutter, origin, clamps and DDCS spindle delay reviewed</label>
-      <div className="cam-export-actions"><button type="button" className="primary icon-text-button" disabled={!ready} onClick={() => downloadText(outputName, result!.gcode)}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className="icon-text-button" disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => { onSave({ itemId, filename: outputName, source, gcode: result!.gcode }); setSaved(true) }}><Save size={17} />{saved ? 'Added to item' : 'Add component'}</button></div>
+      <label className="cam-review"><input type="checkbox" checked={reviewed} disabled={!result?.gcode || busy || saving || problems.length > 0} onChange={e => setReviewed(e.target.checked)} />Units, operations, hole sizes, tabs, stock, cutter, origin, clamps and DDCS spindle delay reviewed</label>
+      {actionError && <p className="cam-action-error" role="alert">{actionError}</p>}
+      <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? 'Added to item' : batch ? 'Confirm & add component' : 'Add component'}</button></div>
     </footer>
   </main>
 }
