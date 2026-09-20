@@ -1,0 +1,11 @@
+.component-save-queue { padding: 10px 20px; border-bottom: 1px solid #ccd7dc; background: #f4f6f8; color: #22313a; font-size: 12px; min-width: 0; }
+.component-save-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.component-save-heading button { margin-left: auto; }
+.component-save-queue ul { list-style: none; padding: 0; margin: 8px 0 0; max-height: 160px; overflow: auto; }
+.component-save-queue li { display: flex; align-items: center; gap: 10px; border-top: 1px solid #dce3e7; padding: 7px 0; }
+.component-save-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.component-save-name small, .component-save-name [role=alert] { display: block; margin-top: 3px; }
+.component-save-name small { color: #52616b; }
+.component-save-state { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 80px; }
+.component-save-queue li button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
+@media (max-width: 650px) { .component-save-queue { padding: 10px 12px; } }

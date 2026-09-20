@@ -123,27 +123,23 @@ describe('DXF review queue', () => {
     }
   })
 
-  it('keeps failed confirmations for retry and prevents duplicate asynchronous saves', async () => {
-    let reject!: (error: Error) => void
-    const onSave = vi.fn().mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail })).mockResolvedValue(undefined)
+  it('advances immediately after enqueueing, without waiting for background persistence', async () => {
+    const onSave = vi.fn(() => new Promise<void>(() => {}))
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={onSave} />)
     upload([file('one.dxf'), file('two.dxf')]); await generated()
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Confirm & add component' }))
-    expect(screen.getByRole('button', { name: 'Confirming...' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Skip file' })).toBeDisabled()
-    expect(screen.getByLabelText('Upload DXF files')).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Confirming...' }))
-    expect(onSave).toHaveBeenCalledTimes(1)
-    await act(async () => reject(new Error('Save failed')))
-    expect(screen.getByRole('alert')).toHaveTextContent('Save failed')
-    expect(screen.getByText('File 1 of 2')).toBeInTheDocument()
-    expect(review()).toBeChecked()
+    expect(screen.getByText('File 2 of 2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Skip file' })).toBeEnabled()
+    expect(screen.getByLabelText('Upload DXF files')).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Confirm & add component' }))
-    await screen.findByText('File 2 of 2')
+    expect(onSave).toHaveBeenCalledTimes(1)
+    await generated()
+    expect(review()).not.toBeChecked()
+    fireEvent.click(review())
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm & add component' }))
+    await screen.findByText('Queue complete')
     expect(onSave).toHaveBeenCalledTimes(2)
-    expect(screen.queryByText('Save failed')).not.toBeInTheDocument()
-    expect(onSave.mock.calls[1][0].id).toBe(onSave.mock.calls[0][0].id)
   })
 
   it('appends uploads without discarding the current review and can skip an unreadable file', async () => {
@@ -192,7 +188,7 @@ describe('DXF review queue', () => {
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add component' }))
-    await screen.findByRole('button', { name: 'Added to item' })
+    await screen.findByRole('button', { name: /^Confirmed$/ })
     expect(onSave).toHaveBeenCalledTimes(1)
     upload([file('bad.dxf', async () => 'invalid'), file('good.dxf')])
     await waitFor(() => expect(TestWorker.instances.at(-1)?.request.source).toBe('invalid'))

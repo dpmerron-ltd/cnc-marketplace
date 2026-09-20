@@ -49,6 +49,8 @@ import { PartLibrary } from './ui/PartLibrary'
 import { PropertiesPanel } from './ui/PropertiesPanel'
 import { SheetEditor } from './ui/SheetEditor'
 import type { CamSave } from './ui/CamPage'
+import { useComponentSaveQueue } from './ui/useComponentSaveQueue'
+import { ComponentSaveQueue } from './ui/ComponentSaveQueue'
 import { materialProfiles, materialVariantsSchema, type MaterialProfileId } from './cam/materialProfiles'
 import { selectMaterialParts } from './gcode/materialSelection'
 
@@ -443,6 +445,7 @@ function App() {
   const [programReload, setProgramReload] = useState(0)
   const programs = programState.ownerId === userId && !programState.loading && !programState.error ? programState.programs : undefined
   const programSheet = programs ? { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } : sheet
+  const componentSaves = useComponentSaveQueue(userId, persistGeneratedComponent)
 
   useEffect(() => {
     if (!userId || !mfaReady) return
@@ -732,6 +735,7 @@ function App() {
   }
 
   async function signOut() {
+    if (componentSaves.pending && !window.confirm('Some components have not saved. Signing out will discard queued and failed saves. Sign out anyway?')) return
     if (userId && loadedAccountId === userId) saveProject(buildProject(), userId)
     if (userId && loadedAccountId === userId && remoteHydratedRef.current && canUseSupabase()) {
       const result = await saveRemoteProject(items, parts, sheet, selectedItemId, userId)
@@ -779,17 +783,24 @@ function App() {
     setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
   }
 
-  async function saveGeneratedComponent(value: CamSave) {
+  function saveGeneratedComponent(value: CamSave) {
     const target = items.find(item => item.id === value.itemId)
     if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
-    const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, parts.filter(p => p.itemId === value.itemId).length)
+    const reserved = new Set([...parts.filter(p => p.itemId === value.itemId).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId).map(job => job.id)]).size
+    const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, reserved)
     part.name = part.name.replace(/-(?:6|12|15|18)mm(?:-2pass)?$/, '')
     part.metadata.materialVariants = materialVariantsSchema.parse(value.materialVariants)
+    componentSaves.enqueue(part, target!.name)
+  }
+
+  async function persistGeneratedComponent(part: Part) {
+    const target = items.find(item => item.id === part.itemId)
+    if (!canEditItem(target) || part.ownerId !== userId || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
     const result = await saveRemoteComponent(part, userId!)
     if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
     if (accountRef.current !== userId) return
     setParts(current => [...current.filter(p => p.id !== part.id), part])
-    setItems(current => current.map(item => item.id === value.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
+    setItems(current => current.map(item => item.id === part.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
     setStatus(`Generated component added to ${target!.name}.`)
   }
 
@@ -1242,8 +1253,9 @@ function App() {
         </div></>}
         {(page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
+      <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}

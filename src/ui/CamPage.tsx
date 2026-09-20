@@ -11,12 +11,13 @@ import { CamOperationSwatch } from './CamOperationSwatch'
 import './CamPage.css'
 import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
 import { materialProfiles, type MaterialVariants } from '../cam/materialProfiles'
+import type { ComponentSaveJob } from './useComponentSaveQueue'
 
 const kinds = Object.keys(operationNames) as OperationKind[]
 export interface CamSave { id: string; itemId: string; filename: string; source: string; gcode: string; materialVariants: MaterialVariants }
 interface QueuedDxf { file: File; status: 'pending' | 'confirmed' | 'skipped' }
 
-export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void | Promise<void>; programs: ProgramSettings }) {
+export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void; programs: ProgramSettings; saveJobs?: ComponentSaveJob[] }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const loadId = useRef(0)
@@ -117,7 +118,9 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
   const batch = queue.length > 1
   const currentFile = queue[fileIndex]
   const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')
-  async function confirm(action: 'download' | 'save') {
+  const saveStatus = saveJobs.find(job => job.id === componentId)?.status
+  const savedLabel = saveStatus === 'saved' ? 'Added to item' : saveStatus === 'failed' ? 'Save failed' : saveStatus ? 'Queued for saving' : 'Confirmed'
+  function confirm(action: 'download' | 'save') {
     if (!ready || confirming.current || action === 'save' && (saved || !items.some(item => item.id === itemId))) return
     confirming.current = true
     setSaving(true); setActionError('')
@@ -125,7 +128,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     try {
       if (action === 'save') {
         if (!materialVariants) throw new Error('Material variants have not finished generating. Try generating again.')
-        await onSave({ id: componentId, itemId, filename: outputName, source, gcode: result!.gcode, materialVariants })
+        onSave({ id: componentId, itemId, filename: outputName, source, gcode: result!.gcode, materialVariants })
       }
       else downloadText(outputName, result!.gcode)
       if (id !== loadId.current) return
@@ -185,7 +188,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     <footer className="cam-export">
       <label className="cam-review"><input type="checkbox" checked={reviewed} disabled={!result?.gcode || busy || saving || problems.length > 0} onChange={e => setReviewed(e.target.checked)} />Units, operations, hole sizes, tabs, stock, cutter, origin, clamps and DDCS spindle delay reviewed</label>
       {actionError && <p className="cam-action-error" role="alert"><CircleAlert size={16} aria-hidden="true" />{actionError}</p>}
-      <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? 'Added to item' : batch ? 'Confirm & add component' : 'Add component'}</button></div>
+      <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? savedLabel : batch ? 'Confirm & add component' : 'Add component'}</button></div>
     </footer>
   </main>
 }
