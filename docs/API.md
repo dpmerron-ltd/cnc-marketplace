@@ -102,8 +102,8 @@ Request fields:
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `dxf` | Yes | ASCII DXF text, at most 2,000,000 UTF-8 bytes |
-| `thicknessMm` | Yes | `12`, `15` or `18` |
-| `profilePasses` | No | Only for 12 mm stock: `1` (default) or `2` (depths 6.1, then 12.2 mm). Omit for 15/18 mm stock. |
+| `thicknessMm` | Yes | `6`, `12`, `15` or `18` |
+| `profilePasses` | No | Only for 12 mm stock: `1` (default) or `2` (depths 6.1, then 12.2 mm). Omit for 6/15/18 mm stock. |
 | `filename` | No | DXF basename, default `component.dxf`; no directories; letters, digits, spaces, dots, underscores and hyphens |
 | `units` | No | `auto` (default), `mm`, or `inches`; output is always metric |
 | `layerOperations` | No | Exact DXF layer names mapped to operation overrides |
@@ -125,6 +125,8 @@ An override can contain `kind` (`outside`, `inside`, `drill`, `pocket`, `ignore`
 Include that object alongside `dxf` and `thicknessMm`. Returned `features` identify the classified feature IDs and layers for subsequent requests. Invalid machining returns `422` with error details and **no G-code**. Unsupported entities must be corrected in the source drawing, not merely ignored through overrides.
 
 For the optional two-pass 12 mm preset, include `"thicknessMm": 12, "profilePasses": 2`. It returns `passDepthsMm: [6.1, 12.2]` and a filename ending `-12mm-2pass.nc`. Drilling remains 4.5 mm deep; clearance, ramps and tabs are unchanged. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass before their assigned depth. Omitting `profilePasses` preserves existing output. Unsupported pass selections or specifying it for 15/18 mm stock return `400`.
+
+For 6 mm stock, use `"thicknessMm": 6` and omit `profilePasses`: profiles and inside openings cut to 6.2 mm in a single pass (`passDepthsMm: [6.2]`). Spindle settings come from the same account profile; cutting remains F3000, ramps/drilling F600, and clearance Z20. Blind drilling remains 4.5 mm with 2 mm pecks. Hinge pockets are blocked; other blind pockets must be shallower than 6 mm. Existing tab rules/height are retained. Supplying `profilePasses` for 6 mm stock returns `400`.
 
 Rectangular/square `inside` holes with a narrowest side <= the configured cutter diameter (6.35 mm) automatically use zero tabs, regardless of length/rotation. Smaller holes are widened centrally to cutter size, with a review warning. They remain through-holes at the material's cut depth, not blind drills. Slots use centreline ramping; point-sized holes use 2 mm pecks. `cornerOvercuts` remains supported. `tabs` must be omitted or `0` for these holes; a positive value returns `422`. Widening/relief collisions block export. Wider holes and outer profiles retain their existing tab rules.
 

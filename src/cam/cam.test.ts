@@ -19,6 +19,21 @@ const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELE
 const result = (thickness: CamSettings['thickness'] = 18) => generateCam(readDxf(source()), { ...settings, thickness, operations: thickness === 12 ? { f3: { kind: 'ignore' } } : {} })
 
 describe('DXF geometry', () => {
+  it('cuts 6 mm profiles and inside openings to 6.2 mm in one pass while retaining tabs and feeds', () => {
+    const job = generateCam(readDxf(source()), { ...settings, thickness: 6, operations: { f3: { kind: 'ignore' } } })
+    expect(job.errors).toEqual([])
+    expect(materialPreset(6)).toEqual({ depth: 6.2, passes: [6.2], drill: 4.5 })
+    expect(job.simulation.deepestCutMm).toBe(6.2)
+    expect(job.operations.filter(op => ['inside', 'outside'].includes(op.kind)).map(op => [op.depthMm, op.tabs.length])).toEqual([[6.2, 4], [6.2, 4]])
+    expect(job.gcode.match(/Pass depth 6.2/g)).toHaveLength(2)
+    expect(job.gcode).toContain('F3000')
+    expect(job.gcode).toContain('F600')
+    expect(job.gcode).toContain('S18000')
+    expect(job.gcode).toContain('G00 Z20')
+    expect(job.gcode).not.toContain('Z-12.2')
+    expect(job.simulation.moves.filter(move => move.type !== 'rapid' && move.lengthMm > 0).every(move => [600, 3000].includes(move.feedMmPerMinute))).toBe(true)
+    expect(generateCam(readDxf(source()), { ...settings, thickness: 6 }).errors.join()).toContain('hinge pockets are only supported in 15 mm or 18 mm stock')
+  })
   it('recognizes layer operations, millimetres and circular pocket depth', () => {
     const parsed = readDxf(source())
     expect(parsed.errors).toEqual([])
@@ -60,7 +75,7 @@ describe('DXF geometry', () => {
 })
 
 describe('CNC generation', () => {
-  it.each([{ thickness: 12 }, { thickness: 12, profilePasses: 2 }, { thickness: 15 }, { thickness: 18 }] as const)('cuts cutter-width slots without tabs at the selected through-depths %j', preset => {
+  it.each([{ thickness: 6 }, { thickness: 12 }, { thickness: 12, profilePasses: 2 }, { thickness: 15 }, { thickness: 18 }] as const)('cuts cutter-width slots without tabs at the selected through-depths %j', preset => {
     const job = generateCam(readDxf(dxf([rectangle(0, 0, 100, 6.35, 'CUT_INNER')])), { ...settings, ...preset })
     expect(job.errors).toEqual([])
     expect(job.operations[0].tabs).toEqual([])

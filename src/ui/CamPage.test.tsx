@@ -61,8 +61,8 @@ describe('DXF review queue', () => {
     expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
   })
 
-  it.each(['12', '15', '12-2pass'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
-    const thickness = choice === '15' ? 15 : 12
+  it.each(['6', '12', '15', '12-2pass'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
+    const thickness = choice === '15' ? 15 : choice === '6' ? 6 : 12
     const suffix = choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
     const onSave = vi.fn()
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={onSave} />)
@@ -89,7 +89,7 @@ describe('DXF review queue', () => {
     expect(review()).not.toBeChecked()
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
-    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${suffix}.nc`, expect.stringContaining(`Pass depth ${thickness === 15 ? 15.4 : 12.2}`))
+    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${suffix}.nc`, expect.stringContaining(`Pass depth ${thickness === 15 ? 15.4 : thickness === 6 ? 6.2 : 12.2}`))
     if (choice === '12-2pass') expect(vi.mocked(downloadText).mock.calls[0][1]).toContain('Pass depth 6.1')
     expect(screen.getByText('File 2 of 2')).toBeInTheDocument()
     expect(screen.queryByText('Queue complete')).not.toBeInTheDocument()
@@ -103,7 +103,7 @@ describe('DXF review queue', () => {
   it('resets review and pass selection when changing material presets', async () => {
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
     upload([file('panel.dxf')]); await generated()
-    for (const choice of ['12-2pass', '15', '12-2pass', '18', '12-2pass', '12']) {
+    for (const choice of ['12-2pass', '6', '12-2pass', '15', '12-2pass', '18', '12-2pass', '12']) {
       fireEvent.click(review())
       fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
       expect(review()).not.toBeChecked()

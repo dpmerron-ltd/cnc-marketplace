@@ -13,6 +13,16 @@ const profile = [0, 'LWPOLYLINE', 8, 'CUT_OUTER', 90, 4, 70, 1, 10, 0, 20, 0, 10
 const drawing = dxf([profile, circle()])
 
 describe('DXF API generation', () => {
+  it('supports single-pass 6 mm stock with unchanged feeds, spindle, clearance and browser parity', async () => {
+    const result = await generateDxfNc({ dxf: drawing, thicknessMm: 6 })
+    expect(result.gcode).toBe(generateCam(readDxf(drawing), { thickness: 6, units: 'auto', operations: {} }).gcode)
+    expect(result.settings).toMatchObject({ thicknessMm: 6, cutDepthMm: 6.2, passDepthsMm: [6.2], drillDepthMm: 4.5, spindleRpm: 18000, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 600, clearanceMm: 20 })
+    expect(result.summary.deepestCutMm).toBe(6.2)
+    expect(result.operations.find(op => op.kind === 'outside')).toMatchObject({ depthMm: 6.2, tabCount: 4 })
+    expect(result.gcode.match(/Pass depth /g)).toHaveLength(1)
+    expect(result.gcode).not.toContain('Z-12.2')
+    await expect(generateDxfNc({ dxf: drawing, thicknessMm: 6, profilePasses: 2 })).rejects.toMatchObject({ status: 400 })
+  })
   it.each([12, 15, 18] as const)('automatically cuts narrow rectangular holes tab-free in %s mm stock', async thicknessMm => {
     const slot = [0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 50, 20, 50, 10, 150, 20, 50, 10, 150, 20, 53, 10, 50, 20, 53]
     const source = dxf([profile, slot, circle()])
