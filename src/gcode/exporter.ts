@@ -27,7 +27,11 @@ export interface SheetExportResult extends ExportResult {
 }
 
 function instanceStartPoint(part: Part, instance: Sheet['instances'][number], transformed: ReturnType<typeof transformPartProgram>): Point {
-  return transformed.segments[0]?.start ?? transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
+  const first = transformed.segments[0]
+  const cutsBeforeFirstXY = first && part.parsed.bodyLines.some(line => line.lineNumber < first.lineNumber! && ['G01', 'G02', 'G03'].includes(line.effectiveMotion ?? ''))
+  // An entry rapid has no meaningful source start: arrive at its destination at safe Z.
+  // Cutting/arc entries still require their actual start to preserve the first cut.
+  return first ? first.type === 'rapid' && !cutsBeforeFirstXY ? first.end : first.start : transformLocalPoint(part, instance, { x: part.originalBounds.minX, y: part.originalBounds.minY })
 }
 
 function wordValue(line: ParsedLine, letter: string): number | undefined {

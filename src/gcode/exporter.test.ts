@@ -93,6 +93,13 @@ describe('G-code exporter source machining settings', () => {
     expect(result.gcode).toContain('G02 X10 Y10 Z-1 I-2.25 J0 F4500')
   })
 
+  it('keeps the first drill position when a plunge precedes the first body XY rapid', () => {
+    const part = createPartFromGCode('drill-first.nc', 'G21\nG90\nG00 Z20\nG00 X20 Y20\nG01 Z-4.5 F600\nG00 Z20\nG00 X80 Y80\nG01 Z-4.5 F600\nG00 Z20\nG01 X0 Y0 F3000\nG01 X100 Y100\nG00 Z20\nM30')
+    const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))
+    expect(result.errors).toEqual([])
+    expect(result.gcode).toContain('G00 X30 Y30\nG01 Z-4.5 F600')
+  })
+
   it('emits spindle start before the first cutting or ramping move', () => {
     const part = createPartFromGCode('spindle.nc', 'G21\nG90\nG01 X0 Y0\nG01 Z-1\nM30')
     const result = exportCombinedGCode([part], makeSheet(makeInstance(part.id)))

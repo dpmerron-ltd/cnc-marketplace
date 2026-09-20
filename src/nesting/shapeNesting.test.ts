@@ -132,6 +132,10 @@ describe('shape-aware sheet nesting', () => {
     const simulation = simulateGCode(exported.gcode)
     expect(simulation.errors).toEqual([])
     expect(simulation.deepestCutMm).toBe(6.2)
+    for (const move of simulation.moves) {
+      expect(move.end.x).toBeGreaterThanOrEqual(0); expect(move.end.x).toBeLessThanOrEqual(sheet.width)
+      expect(move.end.y).toBeGreaterThanOrEqual(0); expect(move.end.y).toBeLessThanOrEqual(sheet.height)
+    }
     expect(part.gcode).toBe(cam.gcode)
   })
 

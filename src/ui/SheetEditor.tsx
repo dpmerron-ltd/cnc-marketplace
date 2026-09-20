@@ -145,7 +145,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
           </g>
           {placed.map(({ transformed, instance }) =>
             transformed.segments.map((segment, index) =>
-              segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? (
+              index === 0 && segment.type === 'rapid' ? null : segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? (
                 <polyline
                   key={`${instance.id}-${index}`}
                   points={arcPolylinePoints(segment)}
