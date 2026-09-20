@@ -4,6 +4,7 @@ import type { MarketplaceItem } from '../models/Item'
 import { createPartFromGCode } from '../gcode/importPart'
 import { MarketplacePage } from './MarketplacePage'
 import { testImage } from '../test/imageFixture'
+vi.mock('../storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
 vi.mock('./ItemPreview', () => ({ ItemPreview: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }))
 afterEach(() => { cleanup(); vi.restoreAllMocks() })

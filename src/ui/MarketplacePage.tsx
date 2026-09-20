@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileUp, Package, Plus, Search, Trash2, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
@@ -8,7 +8,8 @@ import { ItemPreview } from './ItemPreview'
 import { PackingPanel } from './PackingPanel'
 import { boxSize } from '../packing/format'
 import { packingPieces } from '../packing/packing'
-import type { PackingEstimate } from '../packing/types'
+import { useBoxStock } from '../storage/useBoxStock'
+import { usePackingEstimates } from '../packing/usePackingEstimates'
 import './MarketplacePage.css'
 
 interface MarketplacePageProps {
@@ -50,18 +51,9 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
     }
     return map
   }, [parts, currentUserId])
-  const packingJobs = JSON.stringify(ownItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing })))
-  const [packingState, setPackingState] = useState<{ input: string; results: Record<string, { result?: PackingEstimate; error?: string }> }>({ input: '', results: {} })
-  const estimates = packingState.input === packingJobs ? packingState.results : {}
-  useEffect(() => {
-    if (typeof Worker === 'undefined') return
-    const worker = new Worker(new URL('../packing/worker.ts', import.meta.url), { type: 'module' })
-    let active = true
-    worker.onmessage = event => { if (active) setPackingState(state => ({ input: packingJobs, results: { ...(state.input === packingJobs ? state.results : {}), [event.data.id]: event.data } })) }
-    worker.onerror = () => { if (active) setPackingState({ input: packingJobs, results: Object.fromEntries(JSON.parse(packingJobs).map((item: { id: string }) => [item.id, { error: 'Packing calculation unavailable.' }])) }) }
-    worker.postMessage(JSON.parse(packingJobs))
-    return () => { active = false; worker.terminate() }
-  }, [packingJobs])
+  const stock = useBoxStock(currentUserId)
+  const packingJobs = stock.boxes ? JSON.stringify(ownItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
+  const estimates = usePackingEstimates(packingJobs)
   const selectedItem = ownItems.find(item => item.id === detailId)
   const selectedParts = selectedItem ? partsByItem.get(selectedItem.id) ?? [] : []
   const term = query.trim().toLowerCase()
@@ -109,7 +101,7 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
       <ItemImageEditor key={`${currentUserId}:${selectedItem.id}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} />
-      {selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
+      {selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedParts.length}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}
       {addError && <p role="alert">{addError}</p>}
@@ -130,6 +122,7 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
         <label>Sort by<select aria-label="Sort items" value={sort} onChange={event => setSort(event.target.value)}><option value="name">Name A-Z</option><option value="updated">Recently updated</option><option value="components">Most components</option></select></label>
       </div>
       <p className="items-result-count" role="status">{visibleItems.length} of {ownItems.length} items</p>
+      {stock.error && <p role="alert">Box stock: {stock.error} <button type="button" onClick={stock.reload}>Retry box stock</button></p>}
       {visibleItems.length ? <div className="items-grid">
         {visibleItems.map(item => {
           const components = partsByItem.get(item.id) ?? []

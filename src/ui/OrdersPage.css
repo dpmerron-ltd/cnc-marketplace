@@ -1,0 +1,15 @@
+.orders-store { color: #52616b; font-size: 13px; overflow-wrap: anywhere; }
+.orders-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 20px 0 12px; }
+.orders-filters label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; min-width: 0; }
+.orders-filters input, .orders-filters select { min-height: 36px; max-width: 100%; box-sizing: border-box; }
+.orders-search { flex: 1; max-width: 300px; }
+.orders-summary { color: #52616b; font-size: 13px; min-height: 20px; }
+.orders-item-list { list-style: none; padding: 0; margin: 0; overflow-wrap: anywhere; }
+.orders-item-list li + li { margin-top: 10px; }
+.orders-detail { border-top: 1px solid #c6d0d9; margin-top: 24px; padding-top: 20px; }
+.orders-detail h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.orders-admin { display: inline-flex; align-items: center; gap: 6px; }
+.orders-lines td { overflow-wrap: anywhere; max-width: 360px; }
+.orders-lines code { white-space: normal; }
+.orders-detail-error { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 600px) { .orders-search { flex-basis: 150px; } .orders-filters select { width: 100%; } }

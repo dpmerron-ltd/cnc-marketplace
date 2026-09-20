@@ -7,9 +7,12 @@ import { normalizePrograms } from '../src/gcode/programSettings'
 import { itemImageSchema } from '../src/models/ItemImage'
 import { materialVariantsSchema } from '../src/cam/materialProfiles'
 import { parseComponent } from './components'
+import { boxStockSchema } from '../src/packing/boxStock'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
+    if (/BOX_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Box stock changed. Refresh before updating the count.', 409)
+    if (/BOX_NOT_FOUND/.test(result.error.message)) throw new JobError('Box not found.', 404)
     if (/COMPONENT_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Component changed since the expected revision. Nothing was replaced.', 409)
     if (/COMPONENT_NOT_FOUND/.test(result.error.message)) throw new JobError('Component not found.', 404)
     if (/IDEMPOTENCY_CONFLICT/.test(result.error.message)) throw new JobError('Idempotency-Key was already used with a different request.', 409)
@@ -22,6 +25,17 @@ function checked<T>(result: { data: T; error: { message: string } | null }): T {
 export function supabaseRepository(db: SupabaseClient): JobRepository {
   const get = async (owner: string, id: string) => checked(await db.from('cnc_jobs').select('*').eq('owner_id', owner).eq('id', id).maybeSingle()) as StoredJob | undefined
   return {
+    async boxes(_owner) {
+      return boxStockSchema.array().parse(checked(await db.from('box_stock').select('id,name,length_mm,width_mm,height_mm,quantity,details,version,updated_at').order('length_mm').order('id')) ?? [])
+    },
+    async createBox(owner, input) {
+      const response = await db.from('box_stock').insert({ ...input, updated_by: owner }).select('id,name,length_mm,width_mm,height_mm,quantity,details,version,updated_at').single()
+      if (response.error?.code === '23505') throw new JobError('This box ID or size already exists. Refresh box stock before retrying.', 409)
+      return boxStockSchema.parse(checked(response))
+    },
+    async countBox(owner, id, input) {
+      return boxStockSchema.parse(checked(await db.rpc('count_cnc_boxes', { p_actor: owner, p_id: id, p_quantity: input.quantity, p_expected_version: input.expectedVersion })))
+    },
     async authenticate(token) {
       if (token.length > 4096) return undefined
       if (/^cnc_[0-9a-f]{64}$/.test(token)) {

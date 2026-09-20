@@ -9,11 +9,16 @@ import type { ProgramSettings } from '../src/gcode/programSettings'
 import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
 import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
 import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement } from './components'
+import { shopifyReader, type ShopifyReader } from './shopify'
+import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
 export interface StoredJob extends CuttingJob { request_hash: string }
 export interface JobRepository {
+  boxes(owner: string): Promise<BoxStock[]>
+  createBox(owner: string, input: BoxInput): Promise<BoxStock>
+  countBox(owner: string, id: string, input: BoxCount): Promise<BoxStock>
   authenticate(token: string): Promise<Identity | undefined>
   allowRequest(owner: string): Promise<boolean>
   programSettings(owner: string): Promise<ProgramSettings | undefined>
@@ -58,7 +63,7 @@ async function body(request: Request, maxBytes = 65536): Promise<unknown> {
   try { return JSON.parse(value + decoder.decode()) } catch { throw new JobError('Invalid JSON.', 400) }
 }
 
-export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
+export function createApi(repository: JobRepository, fontBytes: Uint8Array, getShopify: () => ShopifyReader = () => shopifyReader()) {
   return async (request: Request): Promise<Response> => {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
     const requestId = crypto.randomUUID()
@@ -70,6 +75,22 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
       if (!await repository.allowRequest(owner)) return json({ error: 'Account rate limit exceeded. Retry in 60 seconds.', requestId }, 429, { 'Retry-After': '60' })
       const url = new URL(request.url)
       const path = url.pathname.replace(/^.*?\/cnc-api(?=\/|$)/, '')
+      if (path === '/v1/boxes' && request.method === 'GET') return json({ boxes: await repository.boxes(owner) })
+      if (path === '/v1/boxes' && request.method === 'POST') {
+        const input = boxInputSchema.safeParse(await body(request))
+        if (!input.success) throw new JobError('Invalid box dimensions, name or stock count.', 400)
+        return json(await repository.createBox(owner, input.data), 201)
+      }
+      const boxMatch = path.match(/^\/v1\/boxes\/([0-9a-f-]{36})$/i)
+      if (boxMatch && z.uuid().safeParse(boxMatch[1]).success && request.method === 'PATCH') {
+        const input = boxCountSchema.safeParse(await body(request))
+        if (!input.success) throw new JobError('Supply quantity and expectedVersion.', 400)
+        return json(await repository.countBox(owner, boxMatch[1], input.data))
+      }
+      if (path === '/v1/shopify/connection' && request.method === 'GET') return json(getShopify().connection(owner))
+      if (path === '/v1/shopify/orders' && request.method === 'GET') return json(await getShopify().orders(owner, url.searchParams))
+      const shopifyOrder = path.match(/^\/v1\/shopify\/orders\/(\d{1,30})$/)
+      if (shopifyOrder && request.method === 'GET') return json(await getShopify().order(owner, shopifyOrder[1], url.searchParams))
       const programsForOwner = async () => {
         const programs = await repository.programSettings(owner)
         if (!programs) throw new JobError('Configure CNC program settings in your User Profile before generating G-code.', 422)

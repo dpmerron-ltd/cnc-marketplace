@@ -9,11 +9,15 @@ import { defaultProgramSettings } from '../src/gcode/programSettings'
 import { testImage } from '../src/test/imageFixture'
 import { imageBytes } from '../src/models/ItemImage'
 import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
+import { shopifyReader } from './shopify'
 
 const font = new Uint8Array(await readFile(new URL('./assets/NotoSans-Regular.ttf', import.meta.url)))
 function fixture() {
   const jobs = new Map<string, StoredJob & { owner: string; key: string; artifacts: Artifact[] }>()
   const repo: JobRepository = {
+    boxes: vi.fn(async () => []),
+    createBox: vi.fn(async (_owner, input) => ({ ...input, version: 1, updated_at: '2026-09-21' })),
+    countBox: vi.fn(async () => { throw new JobError('Not found', 404) }),
     authenticate: async token => ['alice', 'bob'].includes(token) ? { ownerId: token, actor: `api_key:${token}` } : undefined,
     allowRequest: async () => true,
     programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
@@ -49,6 +53,31 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('authenticates Shopify routes and rejects writes without any Shopify mutation', async () => {
+    const f = fixture(), reader = shopifyReader(), api = createApi(f.repo, font, () => reader)
+    const invoke = (path: string, token = 'alice', method = 'GET') => api(new Request(`http://localhost/v1${path}`, { method, headers: { Authorization: `Bearer ${token}` } }))
+    expect((await invoke('/shopify/connection', 'invalid')).status).toBe(401)
+    const response = await invoke('/shopify/connection')
+    expect(await response.json()).toEqual({ accountId: 'alice', connected: false })
+    expect(response.headers.get('Cache-Control')).toContain('no-store')
+    expect((await invoke('/shopify/orders')).status).toBe(404)
+    expect((await invoke('/shopify/orders/123')).status).toBe(404)
+    expect((await invoke('/shopify/orders/123', 'alice', 'PATCH')).status).toBe(404)
+  })
+  it('validates authenticated shared box reads, creation and revision-checked counts', async () => {
+    const f = fixture(), id = crypto.randomUUID()
+    expect((await f.call('/boxes', 'GET')).status).toBe(200)
+    expect(f.repo.boxes).toHaveBeenCalledWith('alice')
+    const input = { id, name: 'Box', length_mm: 1050, width_mm: 350, height_mm: 400, quantity: 10 }
+    expect((await f.call('/boxes', 'POST', input)).status).toBe(201)
+    expect(f.repo.createBox).toHaveBeenCalledWith('alice', { ...input, details: '' })
+    expect((await f.call('/boxes', 'POST', { ...input, owner_id: 'bob' })).status).toBe(400)
+    expect((await f.call(`/boxes/${id}`, 'PATCH', { quantity: -1, expectedVersion: 1 })).status).toBe(400)
+    expect((await f.call(`/boxes/${id}`, 'PATCH', { quantity: 9 })).status).toBe(400)
+    expect((await f.call(`/boxes/${id}`, 'PATCH', { quantity: 9, expectedVersion: 1 }, 'bob')).status).toBe(404)
+    expect(f.repo.countBox).toHaveBeenCalledWith('bob', id, { quantity: 9, expectedVersion: 1 })
+    expect((await f.call('/boxes', 'GET', undefined, 'invalid')).status).toBe(401)
+  })
   it('scopes program replacement to owned items and requires an expected revision', async () => {
     const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
     const path = `/items/${testItem.id}/components/${id}/gcode`

@@ -16,9 +16,11 @@ export interface PackingLayer { height: number; z: number; parts: PackingPlaceme
 export interface PackingPlan {
   internal: PackingSize; external: PackingSize; rangeMax: PackingSize
   volumeLitres: number; layers: PackingLayer[]
+  stockId?: string; stockName?: string; stockQuantity?: number; stockInternal?: PackingSize
 }
 export interface PackingEstimate {
   pieces: PackingPiece[]; boxes: PackingPlan[]; errors: string[]; warnings: string[]
   settings: { paddingMm: number; separatorMm: number; wallMm: number }
   candidates: number
+  suggestedBox?: PackingPlan
 }

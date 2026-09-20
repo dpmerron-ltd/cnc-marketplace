@@ -156,4 +156,18 @@ begin
 end $$;
 revoke all on function public.replace_cnc_component_gcode(uuid, uuid, text, text, jsonb, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.replace_cnc_component_gcode(uuid, uuid, text, text, jsonb, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) to service_role;
+create or replace function public.count_cnc_boxes(p_actor uuid, p_id uuid, p_quantity integer, p_expected_version integer)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare current_box public.box_stock;
+begin
+  select * into current_box from public.box_stock where id = p_id for update;
+  if current_box.id is null then raise exception 'BOX_NOT_FOUND'; end if;
+  if current_box.version <> p_expected_version then raise exception 'BOX_REVISION_CONFLICT'; end if;
+  update public.box_stock set quantity = p_quantity, version = version + 1, updated_at = now(), updated_by = p_actor
+    where id = p_id returning * into current_box;
+  return to_jsonb(current_box) - 'updated_by';
+end $$;
+revoke all on function public.count_cnc_boxes(uuid, uuid, integer, integer) from public, anon, authenticated;
+grant execute on function public.count_cnc_boxes(uuid, uuid, integer, integer) to service_role;
+
 commit;

@@ -261,4 +261,33 @@ select id, E'G21\nG17\nG90\nG94', 'S18000 M03', E'M05\nM30'
 from auth.users where lower(email) = 'dan@dpmerron.co.uk'
 on conflict (owner_id) do nothing;
 
+create table if not exists public.box_stock (
+  id uuid primary key default gen_random_uuid(),
+  updated_by uuid references auth.users(id) on delete set null,
+  name text not null check (length(name) between 1 and 100),
+  length_mm integer not null check (length_mm between 10 and 1200),
+  width_mm integer not null check (width_mm between 10 and 1200),
+  height_mm integer not null check (height_mm between 10 and 1200),
+  quantity integer not null default 0 check (quantity between 0 and 100000),
+  details text not null default '' check (length(details) <= 500),
+  version integer not null default 1 check (version > 0),
+  updated_at timestamptz not null default now(),
+  unique (length_mm, width_mm, height_mm)
+);
+alter table public.box_stock enable row level security;
+revoke all on public.box_stock from anon, authenticated;
+grant select on public.box_stock to authenticated;
+grant all on public.box_stock to service_role;
+drop policy if exists "shared box stock" on public.box_stock;
+create policy "shared box stock" on public.box_stock for select to authenticated using (auth.uid() is not null and auth.jwt()->>'aal' = 'aal2');
+drop policy if exists "box access guard" on public.box_stock;
+create policy "box access guard" on public.box_stock as restrictive for all using (auth.uid() is not null and auth.jwt()->>'aal' = 'aal2') with check (false);
+
+-- Shared workshop stock; repeated deployments never reset inventory counts.
+insert into public.box_stock (name, length_mm, width_mm, height_mm, quantity, details)
+select sizes.name, sizes.length_mm, 350, 400, 10,
+  '0201 regular slotted carton; single wall; plain brown kraft; no hand holes. Internal dimensions.'
+from (values ('105 x 35 x 40 cm', 1050), ('120 x 35 x 40 cm', 1200)) sizes(name, length_mm)
+on conflict (length_mm, width_mm, height_mm) do nothing;
+
 commit;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
+vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
 const mock = vi.hoisted(() => ({
   userId: 'alice',

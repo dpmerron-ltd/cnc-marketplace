@@ -14,6 +14,23 @@ function fixture() {
   return { query, db, repo: supabaseRepository(db as unknown as SupabaseClient) }
 }
 describe('API credential verification', () => {
+  it('shares inventory while recording the acting account and mapping revision conflicts', async () => {
+    const row = { id: crypto.randomUUID(), name: 'Box', length_mm: 1050, width_mm: 350, height_mm: 400, quantity: 10, version: 1, updated_at: '2026-09-21', details: '' }
+    const calls: { method: string; args: unknown[] }[] = []
+    const query: Record<string, (...args: unknown[]) => unknown> = {}
+    for (const method of ['select', 'eq', 'insert', 'order']) query[method] = (...args) => { calls.push({ method, args }); return query }
+    query.then = (resolve) => (resolve as (value: unknown) => unknown)({ data: [row], error: null })
+    query.single = async () => ({ data: row, error: null })
+    const rpc = vi.fn(async () => ({ data: null, error: { message: 'BOX_REVISION_CONFLICT' } }))
+    const repo = supabaseRepository({ from: () => query, rpc } as unknown as SupabaseClient)
+    expect(await repo.boxes('alice')).toEqual([row])
+    expect(calls.some(call => call.method === 'eq')).toBe(false)
+    const { version: _version, updated_at: _updated, ...input } = row
+    await repo.createBox('alice', input)
+    expect(calls).toContainEqual({ method: 'insert', args: [{ ...input, updated_by: 'alice' }] })
+    await expect(repo.countBox('bob', row.id, { quantity: 9, expectedVersion: 1 })).rejects.toMatchObject({ status: 409 })
+    expect(rpc).toHaveBeenCalledWith('count_cnc_boxes', { p_actor: 'bob', p_id: row.id, p_quantity: 9, p_expected_version: 1 })
+  })
   it('validates replacements before an owner-scoped compare-and-swap, preserving source and identity', async () => {
     const id = '20000000-0000-4000-8000-000000000001'
     const row = { id, name: 'Side', sku: 'SIDE', original_filename: 'side.nc', dxf: 'original DXF' }

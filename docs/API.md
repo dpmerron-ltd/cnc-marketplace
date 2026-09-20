@@ -6,6 +6,8 @@ Creates immutable, private cutting jobs from the authenticated account's item li
 
 It also converts uploaded DXF text into new component NC through `POST /dxf-to-nc`, using the same generator as the site's **Generate** page.
 
+Read-only Shopify orders and shared workshop box inventory are also available. See [Shopify and shared boxes](SHOPIFY-AND-BOXES.md) for routes, server-side connection setup and packing assumptions. Shopify orders remain account-private and contain no prices/customer details. Box stock is deliberately shared by all authenticated users; changing a count requires its current revision.
+
 ## Authentication
 
 In the site, open **Queue > API Access**, create a named key, and copy it before dismissing it. Keys expire after 90 days and can be revoked immediately. There may be at most 10 active keys per account. Only hashes are stored; the full key cannot be retrieved later. Key creation/revocation requires an MFA-verified signed-in session.
