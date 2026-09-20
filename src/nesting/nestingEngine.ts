@@ -83,6 +83,7 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
   const placed: PlacedShape[] = []
   const orientationCache = new Map<Part, ReturnType<typeof orientations>>()
   const noFitCache = new WeakMap<Point[], WeakMap<Point[], ClipperLib.Path>>()
+  const failedFits = new Map<Part, Map<number, { revision: number; orientations: Set<Point[]> }>>()
   function optionsFor(part: Part, current: number) {
     let options = orientationCache.get(part)
     if (!options) { options = orientations(part, current); orientationCache.set(part, options) }
@@ -128,9 +129,13 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
     const lastSheet = Math.max(0, ...placed.map(p => p.sheetIndex)) + 1
     for (let sheetIndex = 0; !best && sheetIndex <= lastSheet; sheetIndex++) {
       const onSheet = placed.filter(p => p.sheetIndex === sheetIndex)
+      const previousFailure = failedFits.get(part)?.get(sheetIndex)
+      const failedOrientations = previousFailure?.revision === onSheet.length ? previousFailure.orientations : new Set<Point[]>()
       const occupiedTop = Math.max(0, ...onSheet.map(p => p.bounds.maxY))
       const occupiedRight = Math.max(0, ...onSheet.map(p => p.bounds.maxX))
       for (const { rotation, points, bounds, offset } of options) {
+        // An unchanged sheet cannot produce a new result for the same shape and angle.
+        if (failedOrientations.has(points)) continue
         for (const point of candidatePositions(sheet, placed, sheetIndex, points, noFit)) {
           const top = Math.max(point.y + bounds.maxY, occupiedTop)
           const right = Math.max(point.x + bounds.maxX, occupiedRight)
@@ -141,6 +146,12 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
           if (onSheet.some(other => footprintsOverlap(other.points, translated, sheet.spacing))) continue
           best = { instance: { ...instance, sheetIndex, rotation, x: point.x + offset.x, y: point.y + offset.y }, score }
         }
+      }
+      if (!best) {
+        let failures = failedFits.get(part)
+        if (!failures) { failures = new Map(); failedFits.set(part, failures) }
+        for (const option of options) failedOrientations.add(option.points)
+        failures.set(sheetIndex, { revision: onSheet.length, orientations: failedOrientations })
       }
     }
     if (best) { Object.assign(instance, best.instance); add(part, instance) }

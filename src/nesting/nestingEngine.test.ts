@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import ClipperLib from 'clipper-lib'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
 import { createPartFromGCode } from '../gcode/importPart'
@@ -63,5 +64,36 @@ describe('autoNest', () => {
     part.originalBounds = { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
     const instances = [makeInstance('i1', part.id)]
     expect(autoNest([part], makeSheet(instances))).toEqual(instances)
+  })
+
+  it('does not repeat geometry searches on unchanged sheets that already rejected a component', () => {
+    const part = makePart('large')
+    const execute = vi.spyOn(ClipperLib.Clipper.prototype, 'Execute')
+    const run = (count: number) => {
+      execute.mockClear()
+      const sheet = { ...makeSheet(Array.from({ length: count }, (_, i) => makeInstance(`i${i}`, part.id))), width: 120, height: 70 }
+      const result = autoNest([part], sheet)
+      expect(result.map(instance => instance.sheetIndex)).toEqual(Array.from({ length: count }, (_, i) => i))
+      expect(result.every(instance => instance.x === 10 && instance.y === 10 && instance.rotation === 0)).toBe(true)
+      return execute.mock.calls.length
+    }
+    try {
+      const smaller = run(20)
+      expect(smaller).toBeGreaterThan(0)
+      expect(run(40)).toBeLessThan(smaller * 2.2)
+    } finally { execute.mockRestore() }
+  })
+
+  it('matches fresh searches when other components change earlier sheets', () => {
+    const large = makePart('large')
+    const small = { ...createPartFromGCode('small.nc', 'G21\nG90\nG01 X0 Y0\nG01 X30 Y20\nM30'), id: 'small' }
+    const parts = [large, small]
+    const instances = [large, large, small, large, small, large].map((part, i) => makeInstance(`i${i}`, part.id))
+    const sheet = { ...makeSheet(instances), width: 140, height: 100 }
+    let expected: PartInstance[] = []
+    for (const instance of instances) {
+      expected = autoNest(parts, { ...sheet, instances: [...expected.map(placed => ({ ...placed, locked: true })), instance] })
+    }
+    expect(autoNest(parts, sheet)).toEqual(expected.map(instance => ({ ...instance, locked: false })))
   })
 })
