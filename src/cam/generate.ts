@@ -5,7 +5,7 @@ import { parseGCode } from '../gcode/parser'
 import { defaultProgramSettings, programLines, startProgramLines, validatePrograms } from '../gcode/programSettings'
 import { hasControllerStart } from '../gcode/controllerStart'
 import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
-import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs } from './types'
+import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
 
@@ -183,7 +183,6 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       }
       const opening = cutterWidthOpening(f)
       if (opening) {
-        if (settings.operations[f.id]?.tabs !== undefined && settings.operations[f.id].tabs !== 0) throw new Error('Cutter-width rectangular holes cannot retain tabs. Set tabs to 0.')
         const { path, centers, pointHole } = cutterWidthGeometry(opening, camPreset.diameter, settings.operations[f.id]?.cornerOvercuts !== false)
         emit(`(Cutter-width rectangular hole: ${n(camPreset.diameter)} mm / no tabs)`)
         if (opening.width < camPreset.diameter - 1e-6) warnings.push(`${f.name}: rectangular hole widened from ${n(opening.width)} mm to the ${camPreset.diameter} mm cutter${opening.length < camPreset.diameter - 1e-6 ? ' in both dimensions' : ''}.`)
@@ -225,14 +224,19 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       if (f.kind === 'inside') path = relieve(f, [path])[0]
       if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
       let metric = pathMetric(path)
-      const requestedTabs = settings.operations[f.id]?.tabs ?? defaultTabCount(f)
+      const tabFree = tabFreeOpening(f)
+      let requestedTabs = tabFree ? 0 : settings.operations[f.id]?.tabs ?? defaultTabCount(f)
       if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
       const tabsRequired = requiresHoldingTabs(f)
       if (tabsRequired && !requestedTabs) throw new Error('Doors and outside profiles larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
       let intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
-      if (requestedTabs && !intervals.length) throw new Error(tabsRequired ? 'No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.' : 'No straight segment can hold a 10 mm tab. Change the geometry or explicitly set zero tabs after reviewing workholding.')
+      if (requestedTabs && !intervals.length) {
+        if (tabsRequired) throw new Error('No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.')
+        warnings.push(`${f.name}: tabs automatically removed because no 10 mm tab fits; verify cutout waste cannot move into the cutter.`)
+        requestedTabs = 0
+      }
       if (intervals.length < requestedTabs) warnings.push(`${f.name}: ${intervals.length} of ${requestedTabs} tabs fit with the required spacing.`)
-      if (!requestedTabs) warnings.push(`${f.name}: no holding tabs; verify independent workholding.`)
+      if (!requestedTabs && !tabFree) warnings.push(`${f.name}: no holding tabs; verify independent workholding.`)
       // Start in the longest tab-free span. Every ramp stays in a cleared, tab-free path segment.
       let start = 0
       if (intervals.length) {

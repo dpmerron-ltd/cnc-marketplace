@@ -7,6 +7,7 @@ import { readDxf } from '../cam/dxf'
 import { generateCam } from '../cam/generate'
 import type { CamSettings } from '../cam/types'
 import { downloadText } from '../storage/projectStorage'
+import { generateMaterialVariants } from '../cam/materialVariants'
 
 vi.mock('./CamPreview', () => ({ CamPreview: () => <div>Preview</div> }))
 vi.mock('../storage/projectStorage', () => ({ downloadText: vi.fn() }))
@@ -20,7 +21,11 @@ class TestWorker {
   terminate = vi.fn()
   constructor() { TestWorker.instances.push(this) }
   postMessage(request: TestWorker['request']) { this.request = request }
-  respond() { this.onmessage?.({ data: { result: generateCam(readDxf(this.request.source, this.request.settings.units), this.request.settings) } }) }
+  respond() {
+    const drawing = readDxf(this.request.source, this.request.settings.units)
+    const result = generateCam(drawing, this.request.settings)
+    this.onmessage?.({ data: { result, materialVariants: generateMaterialVariants(drawing, this.request.settings, result) } })
+  }
 }
 function file(name: string, text: () => Promise<string> = async () => dxf) {
   return Object.assign(new File([dxf], name), { text: vi.fn(text) })
@@ -39,15 +44,18 @@ describe('DXF review queue', () => {
   beforeEach(() => { TestWorker.instances = []; vi.stubGlobal('Worker', TestWorker); vi.mocked(downloadText).mockClear(); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-  it('automatically removes tab defaults for cutter-width holes and keeps wider outlines protected', async () => {
+  it.each([3, 12])('automatically removes tabs for %s mm holes and keeps outer outlines protected', async width => {
     const slot = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 0, 20, 0, 10, 100, 20, 0, 10, 100, 20, 3, 10, 0, 20, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
-    upload([file('slot.dxf', async () => slot)]); await generated()
+    upload([file('slot.dxf', async () => slot.replaceAll('\n20\n3\n', `\n20\n${width}\n`))]); await generated()
     const tabs = screen.getByRole('spinbutton', { name: /Tabs for/ })
     expect(tabs).toHaveValue(0)
     expect(tabs).toHaveAttribute('max', '0')
-    expect(screen.getByText('6.35 mm cutter-width hole')).toBeInTheDocument()
-    expect(screen.getByText(/widened from 3 mm/)).toBeInTheDocument()
+    expect(tabs).toBeDisabled()
+    if (width === 3) {
+      expect(screen.getByText('6.35 mm cutter-width hole')).toBeInTheDocument()
+      expect(screen.getByText(/widened from 3 mm/)).toBeInTheDocument()
+    }
     expect(screen.queryByText(/no holding tabs/)).not.toBeInTheDocument()
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
@@ -82,6 +90,9 @@ describe('DXF review queue', () => {
     await waitFor(() => expect(screen.getByText('File 2 of 2')).toBeInTheDocument())
     await generated()
     expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ filename: `first-${suffix}.nc`, itemId: testItem.id, source: dxf }))
+    expect(Object.keys(onSave.mock.calls[0][0].materialVariants.profiles)).toHaveLength(5)
+    expect(onSave.mock.calls[0][0].materialVariants.profiles['6'].gcode).toContain('Pass depth 6.2')
+    expect(onSave.mock.calls[0][0].materialVariants.profiles['18'].gcode).toContain('Pass depth 18.4')
     expect(screen.getByLabelText('Material thickness')).toHaveValue(choice)
     expect(screen.getByLabelText('Save generated component to item')).toHaveValue(testItem.id)
     expect(screen.getByLabelText('DXF units')).toHaveValue('auto')

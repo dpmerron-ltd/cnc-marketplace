@@ -5,6 +5,7 @@ import type { Sheet } from '../models/Sheet'
 import type { Bounds, Point } from '../models/geometry'
 import { boundsPolygon, expandedFootprint, footprintScale, footprintsOverlap, fromPath, instanceFootprint, nestingRotations, polygonBounds, toPath } from '../gcode/footprint'
 import { convexSum } from './convexSum'
+import { selectMaterialParts } from '../gcode/materialSelection'
 
 interface PlacedShape { sheetIndex: number; bounds: Bounds; points: Point[]; localPoints: Point[]; origin: Point }
 type NoFit = (obstacle: PlacedShape, candidate: Point[]) => ClipperLib.Path
@@ -79,6 +80,9 @@ export function partFitsSheet(part: Part, sheet: Sheet): boolean {
 }
 
 export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {
+  const selection = selectMaterialParts(parts, sheet)
+  if (selection.errors.length) throw new Error(selection.errors.join(' '))
+  parts = selection.parts
   const instances = sheet.instances.map(instance => ({ ...instance }))
   const placed: PlacedShape[] = []
   const orientationCache = new Map<Part, ReturnType<typeof orientations>>()

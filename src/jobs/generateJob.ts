@@ -13,6 +13,8 @@ import type { Sheet } from '../models/Sheet'
 import type { Part } from '../models/Part'
 import type { MarketplaceItem } from '../models/Item'
 import type { JobManifest, JobRequest } from './types'
+import { materialProfileId } from '../cam/materialProfiles'
+import { selectMaterialParts } from '../gcode/materialSelection'
 
 export class JobError extends Error {
   status: number
@@ -24,9 +26,9 @@ export const jobRequestSchema = z.strictObject({
   jobName: text(160), orderNumber: text(100), notes: z.string().trim().max(2000).default(''),
   items: z.array(z.strictObject({ itemId: z.uuid().optional(), sku: text(100).optional(), quantity: z.number().int().min(1).max(20) }).refine(value => Boolean(value.itemId) !== Boolean(value.sku), 'Supply either itemId or sku, not both.')).min(1).max(20),
   sheet: z.strictObject({
-    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.number().positive().max(500).optional(),
+    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2)]).optional(),
     spacingMm: z.number().min(0).max(100).default(30), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(true),
-  }).refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.'),
+  }).refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => value.profilePasses === undefined || value.thicknessMm === 12, 'Profile pass selection requires 12 mm stock.'),
   labels: z.strictObject({ widthMm: z.number().min(40).max(190).default(50), heightMm: z.number().min(20).max(277).default(25) }).default({ widthMm: 50, heightMm: 25 }),
 })
 
@@ -50,7 +52,12 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
     counts.set(matches[0].id, (counts.get(matches[0].id) ?? 0) + line.quantity)
   }
   const items = catalog.filter(item => counts.has(item.id))
-  const parts = components.filter(part => counts.has(part.itemId ?? '')).sort((a, b) => a.id.localeCompare(b.id))
+  const sourceParts = components.filter(part => counts.has(part.itemId ?? '')).sort((a, b) => a.id.localeCompare(b.id))
+  const materialProfile = request.sheet.thicknessMm === undefined ? undefined : materialProfileId(request.sheet.thicknessMm, request.sheet.profilePasses)
+  const selection = selectMaterialParts(sourceParts, { materialProfile, instances: sourceParts.map(part => ({ partId: part.id })) })
+  if (selection.errors.length) throw new JobError('The selected sheet thickness is unavailable for one or more components.', 422, selection.errors)
+  const parts = selection.parts
+  if (parts.reduce((sum, part) => sum + part.gcode.length, 0) > 2000000) throw new JobError('Selected component programs exceed 2 MB. Split the order into smaller jobs.')
   const manifestItems = items.map(item => {
     const componentsPerItem = parts.filter(part => part.itemId === item.id).length
     if (!componentsPerItem) throw new JobError(`${item.name} has no components.`)
@@ -62,7 +69,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   if (sourceLines > 5000) throw new JobError('Expanded machining programs exceed 5,000 lines. Split this order into smaller jobs.')
   const settings = request.sheet
   let sheet: Sheet = {
-    name: request.jobName, orderNumber: request.orderNumber, material: settings.material,
+    name: request.jobName, orderNumber: request.orderNumber, material: settings.material, materialProfile,
     width: settings.widthMm, height: settings.heightMm, spacing: settings.spacingMm, borderSpacing: settings.borderMm,
     safeZOverrideMm: settings.safeZMm, screwMarkingEnabled: settings.screwMarks,
     gcodeSettings: { ...programs, safeZ: settings.safeZMm },

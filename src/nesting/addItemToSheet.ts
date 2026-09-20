@@ -3,9 +3,13 @@ import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { numberSheetParts } from '../labels/partLabels'
 import { autoNest, partFitsSheet } from './nestingEngine'
+import { selectMaterialParts } from '../gcode/materialSelection'
 
 export function addItemToSheet(item: MarketplaceItem, parts: Part[], sheet: Sheet, ownerId: string, sheetIndex: number): Sheet {
   if (item.ownerId !== ownerId) throw new Error('This item is not in your account.')
+  const selection = selectMaterialParts(parts, { ...sheet, instances: [...sheet.instances, ...parts.filter(part => part.ownerId === ownerId && part.itemId === item.id).map(part => ({ partId: part.id }))] })
+  if (selection.errors.length) throw new Error(selection.errors.join(' '))
+  parts = selection.parts
   const components = parts.filter(part => part.ownerId === ownerId && part.itemId === item.id)
   if (!components.length) throw new Error('This item has no components.')
   const oversized = components.find(part => !partFitsSheet(part, sheet))

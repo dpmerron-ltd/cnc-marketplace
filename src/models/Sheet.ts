@@ -1,4 +1,5 @@
 import type { PartInstance } from './PartInstance'
+import type { MaterialProfileId } from '../cam/materialProfiles'
 
 export interface GCodeSettings {
   startGcode: string
@@ -19,6 +20,7 @@ export interface Sheet {
   name: string
   orderNumber?: string
   material?: string
+  materialProfile?: MaterialProfileId
   nextPartNumber?: number
   width: number
   height: number

@@ -5,6 +5,7 @@ import type { Part } from '../models/Part'
 import type { SheetHistoryEntry } from '../models/Project'
 import type { GCodePreset, Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
+import { materialVariantsSchema } from '../cam/materialProfiles'
 
 interface ComponentRow {
   id: string
@@ -16,6 +17,7 @@ interface ComponentRow {
   gcode: string
   dxf: string | null
   date_imported: string
+  material_variants?: unknown
 }
 
 interface ProjectRow {
@@ -62,11 +64,13 @@ export function canUseSupabase(): boolean {
 }
 
 function componentRow(part: Part) {
+  const { materialVariants, ...metadata } = part.metadata
   return {
     id: part.id, owner_id: part.ownerId, item_id: part.itemId, sku: part.sku, name: part.name,
     original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
     width: part.width, height: part.height, bounding_box: part.boundingBox,
-    original_bounds: part.originalBounds, metadata: part.metadata, date_imported: part.dateImported,
+    original_bounds: part.originalBounds, metadata, date_imported: part.dateImported,
+    ...(materialVariants ? { material_variants: materialVariants } : {}),
   }
 }
 
@@ -154,6 +158,7 @@ export async function loadRemoteProject(expectedUserId: string): Promise<RemoteP
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
   const parts: Part[] = ((componentsResult.data ?? []) as ComponentRow[]).filter((row) => row.owner_id === userId && itemSkuById.has(row.item_id)).map((row) => {
     const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, row.item_id)
+    if (row.material_variants != null) part.metadata.materialVariants = materialVariantsSchema.parse(row.material_variants)
     const itemSku = itemSkuById.get(row.item_id) ?? 'ITEM'
     return {
       ...part,
@@ -227,9 +232,11 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     }
   }
 
-  if (saveableParts.length > 0) {
+  // Keep bulk row keys uniform: a missing field in a mixed upsert can become NULL.
+  for (const group of [saveableParts.filter(part => !part.metadata.materialVariants), saveableParts.filter(part => part.metadata.materialVariants)]) {
+    if (!group.length) continue
     const componentsResult = await supabase.from('cnc_components').upsert(
-      saveableParts.map(componentRow),
+      group.map(componentRow),
     )
     if (componentsResult.error) {
       console.warn('Supabase component save failed.', componentsResult.error)

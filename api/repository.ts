@@ -5,6 +5,7 @@ import type { JobRequest, JobStatus, JobManifest, JobFile } from '../src/jobs/ty
 import type { Artifact, JobRepository, StoredJob } from './handler'
 import { normalizePrograms } from '../src/gcode/programSettings'
 import { itemImageSchema } from '../src/models/ItemImage'
+import { materialVariantsSchema } from '../src/cam/materialProfiles'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
@@ -65,16 +66,18 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       if (part.ownerId !== owner || !part.itemId) throw new JobError('Item not found.', 404)
       const parent = checked(await db.from('marketplace_items').select('id').eq('owner_id', owner).eq('id', part.itemId).maybeSingle())
       if (!parent) throw new JobError('Item not found.', 404)
+      const { materialVariants, ...metadata } = part.metadata
       const row = {
         id: part.id, owner_id: owner, item_id: part.itemId, name: part.name, sku: part.sku,
         original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
         width: part.width, height: part.height, bounding_box: part.boundingBox, original_bounds: part.originalBounds,
-        metadata: part.metadata, date_imported: part.dateImported,
+        metadata, date_imported: part.dateImported,
+        ...(materialVariants ? { material_variants: materialVariants } : {}),
       }
       const result = await db.from('cnc_components').insert(row)
       if (result.error?.code === '23505') {
-        const previous = checked(await db.from('cnc_components').select('item_id,name,sku,original_filename,gcode,dxf').eq('owner_id', owner).eq('id', part.id).maybeSingle())
-        if (previous && previous.item_id === row.item_id && previous.name === row.name && previous.sku === row.sku && previous.original_filename === row.original_filename && previous.gcode === row.gcode && previous.dxf === row.dxf) return { created: false }
+        const previous = checked(await db.from('cnc_components').select('item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('owner_id', owner).eq('id', part.id).maybeSingle())
+        if (previous && previous.item_id === row.item_id && previous.name === row.name && previous.sku === row.sku && previous.original_filename === row.original_filename && previous.gcode === row.gcode && previous.dxf === row.dxf && JSON.stringify(materialVariantsSchema.optional().parse(previous.material_variants ?? undefined)) === JSON.stringify(materialVariantsSchema.optional().parse(part.metadata.materialVariants))) return { created: false }
         throw new JobError('Component ID already exists with different content or ownership. Existing components were not changed.', 409)
       }
       checked(result)
@@ -89,10 +92,13 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       const rows = [...new Map([...byId, ...bySku].map(item => [item.id, item])).values()]
       if (rows.length > 20) throw new JobError('Too many matching items or ambiguous SKUs.')
       const items = rows.map(row => ({ id: row.id, ownerId: row.owner_id, sku: row.sku, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at }))
-      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported').eq('owner_id', owner).in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
-      if (components.length > 20 || components.reduce((sum, row) => sum + row.gcode.length, 0) > 2000000) throw new JobError('Selected component library exceeds the per-job limit. Split the order into smaller jobs.')
-      if (components.reduce((sum, row) => sum + row.gcode.split('\n').length, 0) > 5000) throw new JobError('Selected source programs exceed 5,000 lines. Split the order into smaller jobs.')
-      const parts = components.map(row => ({ ...createPartFromGCode(row.original_filename, row.gcode, undefined, row.item_id), id: row.id, ownerId: row.owner_id, name: row.name, sku: row.sku, dateImported: row.date_imported }))
+      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported,material_variants').eq('owner_id', owner).in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
+      if (components.length > 20 || components.reduce((sum, row) => sum + row.gcode.length + JSON.stringify(row.material_variants ?? {}).length, 0) > 12000000) throw new JobError('Selected component library exceeds the per-job limit. Split the order into smaller jobs.')
+      const parts = components.map(row => {
+        const part = { ...createPartFromGCode(row.original_filename, row.gcode, undefined, row.item_id), id: row.id, ownerId: row.owner_id, name: row.name, sku: row.sku, dateImported: row.date_imported }
+        if (row.material_variants != null) part.metadata.materialVariants = materialVariantsSchema.parse(row.material_variants)
+        return part
+      })
       return { items, parts }
     },
     async list(owner, limit, offset, status?: JobStatus) {

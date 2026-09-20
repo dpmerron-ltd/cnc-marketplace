@@ -4,6 +4,8 @@ import { generateDxfNc } from './dxf'
 import { readDxf } from '../src/cam/dxf'
 import { generateCam } from '../src/cam/generate'
 import { sha256 } from '../src/jobs/generateJob'
+import { materialProfiles } from '../src/cam/materialProfiles'
+import { parseComponent } from './components'
 
 function dxf(entities: (string | number)[][], units = 4) {
   return [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, units, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', ...entities.flat(), 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
@@ -13,6 +15,17 @@ const profile = [0, 'LWPOLYLINE', 8, 'CUT_OUTER', 90, 4, 70, 1, 10, 0, 20, 0, 10
 const drawing = dxf([profile, circle()])
 
 describe('DXF API generation', () => {
+  it('returns all profiles as an uploadable bundle while retaining the requested primary response', async () => {
+    const result = await generateDxfNc({ dxf: drawing, thicknessMm: 6, operations: { f0: { tabs: 2 } } })
+    expect(result.materialVariants.primaryProfile).toBe('6')
+    expect(result.materialVariants.profiles['6'].gcode).toBe(result.gcode)
+    for (const profile of materialProfiles) {
+      expect(result.materialVariants.profiles[profile.id].errors).toEqual([])
+      expect(result.materialVariants.profiles[profile.id].gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
+    }
+    const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: 'panel.nc', dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
+    expect(uploaded.part.metadata.materialVariants).toEqual(result.materialVariants)
+  })
   it('supports single-pass 6 mm stock with unchanged feeds, spindle, clearance and browser parity', async () => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm: 6 })
     expect(result.gcode).toBe(generateCam(readDxf(drawing), { thickness: 6, units: 'auto', operations: {} }).gcode)
@@ -32,7 +45,8 @@ describe('DXF API generation', () => {
     expect(result.operations.find(op => op.featureId === 'f0')?.tabCount).toBe(4)
     expect(result.warnings.join()).toContain('widened from 3 mm to the 6.35 mm cutter')
     expect(result.settings.drillDepthMm).toBe(thicknessMm === 12 ? 4.5 : 9.2)
-    await expect(generateDxfNc({ dxf: source, thicknessMm, operations: { f1: { tabs: 2 } } })).rejects.toMatchObject({ status: 422 })
+    const overridden = await generateDxfNc({ dxf: source, thicknessMm, operations: { f1: { tabs: 2 } } })
+    expect(overridden.operations.find(op => op.featureId === 'f1')?.tabCount).toBe(0)
   })
   it('supports opt-in two-pass 12 mm generation with exact browser parity', async () => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 2, filename: 'panel.dxf' })
@@ -42,6 +56,16 @@ describe('DXF API generation', () => {
     expect(result.operations.find(o => o.kind === 'outside')?.tabCount).toBe(4)
     const single = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 1 })
     expect(single.gcode).toBe((await generateDxfNc({ dxf: drawing, thicknessMm: 12 })).gcode)
+  })
+  it('forces a 12 mm wide opening tab-free in every generated material variant', async () => {
+    const slot = [0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 0, 20, 0, 10, 100, 20, 0, 10, 100, 20, 12, 10, 0, 20, 12]
+    const result = await generateDxfNc({ dxf: dxf([slot]), thicknessMm: 18, operations: { f0: { tabs: 4 } } })
+    expect(result.operations[0].tabCount).toBe(0)
+    for (const variant of Object.values(result.materialVariants.profiles)) {
+      expect(variant.errors).toEqual([])
+      expect(variant.gcode).not.toContain('(Tab ')
+      expect(variant.gcode).not.toBe('')
+    }
   })
   it.each([{ thicknessMm: 12, profilePasses: 0 }, { thicknessMm: 12, profilePasses: 3 }, { thicknessMm: 12, profilePasses: '2' }, { thicknessMm: 15, profilePasses: 2 }, { thicknessMm: 18, profilePasses: 1 }])('rejects unsupported pass selections %j', async patch => {
     await expect(generateDxfNc({ dxf: drawing, ...patch })).rejects.toMatchObject({ status: 400 })

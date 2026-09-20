@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rectangleGeometry } from './rectangle'
+import { minimumOpeningWidth, rectangleGeometry } from './rectangle'
 import { cutterWidthOpening, defaultTabCount, requiresHoldingTabs, type CamFeature } from './types'
 
 function rectangle(width: number, length = 100, degrees = 0): CamFeature {
@@ -19,8 +19,9 @@ describe('Cutter-width rectangular holes', () => {
     for (const length of [width, 100]) expect(defaultTabCount(rectangle(width, length))).toBe(0)
   })
   it('preserves wider hole and outer profile defaults, including doors', () => {
-    expect(defaultTabCount(rectangle(6.351))).toBe(4)
-    expect(defaultTabCount(rectangle(12))).toBe(4)
+    expect(defaultTabCount(rectangle(6.351))).toBe(0)
+    expect(defaultTabCount(rectangle(12))).toBe(0)
+    expect(defaultTabCount(rectangle(12.001))).toBe(4)
     expect(defaultTabCount({ ...rectangle(6.35), kind: 'outside' })).toBe(4)
     expect(requiresHoldingTabs({ ...rectangle(6.35), kind: 'outside' })).toBe(true)
     expect(requiresHoldingTabs({ ...rectangle(100, 300), door: true })).toBe(true)
@@ -28,6 +29,16 @@ describe('Cutter-width rectangular holes', () => {
     expect(cutterWidthOpening({ ...rectangle(6.35), kind: 'pocket' })).toBeUndefined()
     expect(cutterWidthOpening({ ...rectangle(6.35), closed: false })).toBeUndefined()
     expect(cutterWidthOpening(rectangle(6), 5)).toBeUndefined()
+  })
+  it.each([0, 17, 45, 90, 137, 270])('measures the 12 mm cutoff at %s degrees, including non-rectangular openings', degrees => {
+    const feature = rectangle(12, 200, degrees)
+    expect(minimumOpeningWidth(feature.points)).toBeCloseTo(12)
+    expect(defaultTabCount(feature)).toBe(0)
+    expect(defaultTabCount({ ...feature, door: true })).toBe(0)
+    feature.points.splice(1, 1)
+    expect(minimumOpeningWidth(feature.points)).toBeLessThanOrEqual(12.000001)
+    expect(defaultTabCount(feature)).toBe(0)
+    expect(defaultTabCount(rectangle(12.001, 200, degrees))).toBe(4)
   })
   it('accepts reversed winding, repeated closing vertices and collinear DXF edges', () => {
     const feature = rectangle(6.35)

@@ -5,6 +5,7 @@ import { isFiniteBounds } from '../models/geometry'
 import { numberSheetParts, partNumberText } from '../labels/partLabels'
 import { simulateGCode, type SimulatedMove } from '../gcode/simulator'
 import { instanceBounds, transformLocalPoint } from '../gcode/transform'
+import { selectMaterialParts } from '../gcode/materialSelection'
 
 export interface TabLocation {
   points: Point[]
@@ -107,6 +108,9 @@ export function locatePartTabs(part: Part) {
 }
 
 export function buildTabMap(parts: Part[], input: Sheet): TabMap {
+  const selection = selectMaterialParts(parts, input)
+  if (selection.errors.length) throw new Error(selection.errors.join(' '))
+  parts = selection.parts
   if (![input.width, input.height].every(value => Number.isFinite(value) && value > 0)) throw new Error('Tab maps require valid sheet dimensions.')
   if (!input.instances.length) throw new Error('Place parts on the sheet before downloading a tab map.')
   const sheet = numberSheetParts(input)

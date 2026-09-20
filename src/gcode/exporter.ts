@@ -11,6 +11,8 @@ import { transformLocalPoint, transformPartProgram } from './transform'
 import type { ParsedLine } from './types'
 import type { Point } from '../models/geometry'
 import { numberSheetParts, partNumberText } from '../labels/partLabels'
+import { selectMaterialParts } from './materialSelection'
+import { materialProfiles } from '../cam/materialProfiles'
 
 function commentText(value: string): string {
   return value.replace(/[\r\n()]/g, ' ')
@@ -201,6 +203,9 @@ function transformedInstanceLines(
 }
 
 export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: ProgramSettings): ExportResult {
+  const selection = selectMaterialParts(parts, sheet)
+  if (selection.errors.length) return { gcode: '', errors: selection.errors, warnings: [] }
+  parts = selection.parts
   const safeZ = effectiveSafeZ(sheet)
   if (programs) {
     const errors = validatePrograms(programs, safeZ)
@@ -218,6 +223,7 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
   output.push(`(Sheet name: ${commentText(sheet.name)})`)
   if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
   output.push(`(Sheet: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
+  if (sheet.materialProfile) output.push(`(Material thickness: ${commentText(materialProfiles.find(profile => profile.id === sheet.materialProfile)!.label)})`)
   output.push(`(Physical sheets: ${sheetCount})`)
   output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
 
@@ -260,6 +266,9 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
 
 export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?: ProgramSettings): SheetExportResult[] {
   const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
+  const selection = selectMaterialParts(parts, sheet)
+  if (selection.errors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: selection.errors, warnings: [] }))
+  parts = selection.parts
   const safeZ = effectiveSafeZ(sheet)
   if (programs) {
     const errors = validatePrograms(programs, safeZ)
@@ -279,6 +288,7 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?
     if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
     output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
     output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
+    if (sheet.materialProfile) output.push(`(Material thickness: ${commentText(materialProfiles.find(profile => profile.id === sheet.materialProfile)!.label)})`)
     output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
     const reachCheck = reachCheckLines(parts, sheet, sheetIndex)
     output.push(...reachCheck.lines)

@@ -4,6 +4,7 @@ import { generateCam, materialPreset } from '../src/cam/generate'
 import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/types'
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
+import { generateMaterialVariants } from '../src/cam/materialVariants'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -56,10 +57,11 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 10000 || bytes > 2000000) throw new JobError('Generated NC exceeds 10,000 lines or 2 MB. Split the drawing.', 422)
   const material = materialPreset(input.thicknessMm, input.profilePasses)
+  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, units: input.units, operations, programs }, result)
   return {
     filename: input.filename.replace(/\.dxf$/i, input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
-    reviewRequired: true,
+    reviewRequired: true, materialVariants,
     programSettings: { ...programs },
     warnings: result.warnings,
     settings: {

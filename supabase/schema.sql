@@ -66,6 +66,9 @@ alter table public.cnc_components
 alter table public.cnc_components
   add column if not exists sku text not null default '';
 
+alter table public.cnc_components
+  add column if not exists material_variants jsonb;
+
 update public.cnc_components component
 set sku = item.sku || '-C' || upper(right(regexp_replace(component.id, '[^a-zA-Z0-9]+', '', 'g'), 6))
 from public.marketplace_items item

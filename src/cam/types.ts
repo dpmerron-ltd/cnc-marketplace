@@ -1,7 +1,7 @@
 import type { Point } from '../models/geometry'
 import type { GCodeSimulation } from '../gcode/simulator'
 import type { ProgramSettings } from '../gcode/programSettings'
-import { rectangleGeometry } from './rectangle'
+import { minimumOpeningWidth, rectangleGeometry } from './rectangle'
 
 export type OperationKind = 'outside' | 'inside' | 'drill' | 'pocket' | 'ignore' | 'unassigned'
 export interface CamFeature {
@@ -52,9 +52,14 @@ export function cutterWidthOpening(feature: TabFeature, diameter: number = camPr
   return rectangle && rectangle.width <= diameter + 1e-6 ? rectangle : undefined
 }
 // Feature coordinates must be in millimetres, before cutter compensation.
+export function tabFreeOpening(feature: TabFeature): boolean {
+  if (feature.kind !== 'inside' || !feature.closed) return false
+  const width = feature.circle ? feature.circle.radius * 2 : minimumOpeningWidth(feature.points)
+  return width <= 12 + 1e-6
+}
 function defaultsToHoldingTabs(feature: TabFeature): boolean {
   if (feature.kind !== 'inside' && feature.kind !== 'outside') return false
-  if (cutterWidthOpening(feature)) return false
+  if (tabFreeOpening(feature)) return false
   if (feature.door || /DOOR/i.test(feature.layer)) return true
   const xs = feature.points.map(p => p.x), ys = feature.points.map(p => p.y)
   const span = feature.circle ? feature.circle.radius * 2 : Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))

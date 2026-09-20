@@ -34,6 +34,9 @@ end $$;
 insert into public.cnc_components (id, owner_id, item_id, name, original_filename, gcode, width, height, bounding_box, original_bounds, metadata)
   values ('account-a-part', auth.uid(), '10000000-0000-4000-8000-000000000001', 'Part A', 'a.nc', 'G21', 1, 1, '{}', '{}', '{}');
 insert into public.sheet_projects (id, owner_id, sheet) values ('account-a-sheet', auth.uid(), '{}');
+update public.cnc_components set material_variants = '{"version":1,"profiles":{"6":{"gcode":"G21"}}}' where id = 'account-a-part';
+-- Older clients write metadata without knowing about the separate variants column.
+update public.cnc_components set metadata = '{"warnings":[]}' where id = 'account-a-part';
 insert into public.sheet_history (id, owner_id, name, sheet) values ('account-a-history', auth.uid(), 'A', '{}');
 insert into public.gcode_presets (id, owner_id, name, settings) values ('account-a-preset', auth.uid(), 'A', '{}');
 
@@ -55,6 +58,9 @@ begin
   update public.marketplace_items set image = null where id = '10000000-0000-4000-8000-000000000001';
   get diagnostics affected = row_count;
   if affected <> 0 then raise exception 'Foreign item image removal allowed'; end if;
+  update public.cnc_components set material_variants = null where id = 'account-a-part';
+  get diagnostics affected = row_count;
+  if affected <> 0 then raise exception 'Foreign material variant removal allowed'; end if;
 
   begin
     insert into public.marketplace_items (id, owner_id, name)
@@ -89,6 +95,7 @@ do $$
 declare table_name text; visible_count integer;
 begin
   if (select image->>'contentType' from public.marketplace_items where id = '10000000-0000-4000-8000-000000000001') is distinct from 'image/png' then raise exception 'Owner image was lost'; end if;
+  if (select material_variants #>> '{profiles,6,gcode}' from public.cnc_components where id = 'account-a-part') is distinct from 'G21' then raise exception 'Material variants were lost'; end if;
   foreach table_name in array array['marketplace_items', 'cnc_components', 'sheet_projects', 'sheet_history', 'gcode_presets'] loop
     execute format('select count(*) from public.%I', table_name) into visible_count;
     if visible_count <> 1 then raise exception 'Account A ownership failed: %', table_name; end if;

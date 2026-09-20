@@ -1,10 +1,12 @@
 import type { Bounds } from './geometry'
 import type { ParsedProgram, ToolpathSegment } from '../gcode/types'
+import type { MaterialVariants } from '../cam/materialProfiles'
 
 export interface PartMetadata {
   units: 'mm' | 'inch' | 'unknown'
   positioning: 'absolute' | 'incremental' | 'unknown'
   warnings: string[]
+  materialVariants?: MaterialVariants
 }
 
 export interface Part {

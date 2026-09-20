@@ -49,6 +49,8 @@ import { PartLibrary } from './ui/PartLibrary'
 import { PropertiesPanel } from './ui/PropertiesPanel'
 import { SheetEditor } from './ui/SheetEditor'
 import type { CamSave } from './ui/CamPage'
+import { materialProfiles, materialVariantsSchema, type MaterialProfileId } from './cam/materialProfiles'
+import { selectMaterialParts } from './gcode/materialSelection'
 
 const CamPage = lazy(() => import('./ui/CamPage').then(module => ({ default: module.CamPage })))
 
@@ -473,10 +475,11 @@ function App() {
     return false
   }
 
+  const sheetParts = useMemo(() => selectMaterialParts(parts, sheet).parts, [parts, sheet])
   const selectedInstance = sheet.instances.find((instance) => instance.id === selectedInstanceId)
-  const selectedInstancePart = selectedInstance ? parts.find((part) => part.id === selectedInstance.partId) : undefined
+  const selectedInstancePart = selectedInstance ? sheetParts.find((part) => part.id === selectedInstance.partId) : undefined
   const selectedItem = items.find((item) => item.id === selectedItemId)
-  const visibleParts = selectedItemId ? parts.filter((part) => part.itemId === selectedItemId) : []
+  const visibleParts = selectedItemId ? sheetParts.filter((part) => part.itemId === selectedItemId) : []
   const sheetCount = sheetCountFor(sheet)
   const currentSheetIndex = Math.min(activeSheetIndex, sheetCount - 1)
   const issues = useMemo(() => validateSheet(parts, sheet), [parts, sheet])
@@ -780,6 +783,8 @@ function App() {
     const target = items.find(item => item.id === value.itemId)
     if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
     const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, parts.filter(p => p.itemId === value.itemId).length)
+    part.name = part.name.replace(/-(?:6|12|15|18)mm(?:-2pass)?$/, '')
+    part.metadata.materialVariants = materialVariantsSchema.parse(value.materialVariants)
     const result = await saveRemoteComponent(part, userId!)
     if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
     if (accountRef.current !== userId) return
@@ -873,7 +878,7 @@ function App() {
 
   function duplicateSelected() {
     if (!selectedInstance || !selectedInstancePart) return
-    const copy = findDuplicatePlacement(selectedInstancePart, selectedInstance, parts, sheet)
+    const copy = findDuplicatePlacement(selectedInstancePart, selectedInstance, sheetParts, sheet)
     setSheet((current) => numberSheetParts({ ...current, instances: [...current.instances, copy] }))
     setSelectedInstanceId(copy.id)
     setStatus('Duplicated part at the nearest open position.')
@@ -1005,14 +1010,14 @@ function App() {
       physicalSheets: sheetCount,
       placedParts: sheet.instances.length,
       uniqueComponents: new Set(sheet.instances.map((instance) => instance.partId)).size,
-      deepestCutMm: deepestSourceCut(parts, sheet),
+      deepestCutMm: deepestSourceCut(sheetParts, sheet),
       safeZ: effectiveSafeZ(sheet),
       estimatedCuttingTimeSeconds,
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
       simulationWarnings: simulations.reduce((total, simulation) => total + simulation.warnings.length, 0),
       reachCheckEnabled: sheet.instances.length > 0,
-      screwMarkCount: Array.from({ length: sheetCount }, (_, index) => planScrewPositions(parts, sheet, index).points.length).reduce((total, count) => total + count, 0),
+      screwMarkCount: Array.from({ length: sheetCount }, (_, index) => planScrewPositions(sheetParts, sheet, index).points.length).reduce((total, count) => total + count, 0),
       spindleStartEnabled: sheet.gcodeSettings.spindleStartGcode.trim().length > 0,
       validationErrors: errors.length,
       validationWarnings: warnings.length,
@@ -1179,6 +1184,17 @@ function App() {
             <input value={sheet.material ?? ''} onChange={(event) => setSheet({ ...sheet, material: event.target.value })} />
           </label>
           <label>
+            Thickness
+            <select aria-label="Sheet material thickness" value={sheet.materialProfile ?? ''} onChange={event => {
+              setSheet({ ...sheet, materialProfile: event.target.value ? event.target.value as MaterialProfileId : undefined })
+              setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+              setStatus('Sheet material changed. Review the updated machining before export.')
+            }}>
+              <option value="">Original NC</option>
+              {materialProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+            </select>
+          </label>
+          <label>
             W
             <input type="number" value={sheet.width} onChange={(event) => setSheet({ ...sheet, width: Number(event.target.value) })} />
           </label>
@@ -1278,7 +1294,7 @@ function App() {
               ))}
             </div>
             <SheetEditor
-              parts={parts}
+              parts={sheetParts}
               sheet={sheet}
               sheetIndex={currentSheetIndex}
               selectedId={selectedInstance?.sheetIndex === currentSheetIndex ? selectedInstanceId : undefined}

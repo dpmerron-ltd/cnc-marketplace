@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, CircleAlert, Download, FileUp, Save, SkipForward, TriangleAlert } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
-import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs } from '../cam/types'
+import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from '../cam/types'
 import { materialPreset } from '../cam/generate'
 import { downloadText } from '../storage/projectStorage'
 import { CamPreview } from './CamPreview'
@@ -10,9 +10,10 @@ import { operationNames } from './camAppearance'
 import { CamOperationSwatch } from './CamOperationSwatch'
 import './CamPage.css'
 import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
+import { materialProfiles, type MaterialVariants } from '../cam/materialProfiles'
 
 const kinds = Object.keys(operationNames) as OperationKind[]
-export interface CamSave { id: string; itemId: string; filename: string; source: string; gcode: string }
+export interface CamSave { id: string; itemId: string; filename: string; source: string; gcode: string; materialVariants: MaterialVariants }
 interface QueuedDxf { file: File; status: 'pending' | 'confirmed' | 'skipped' }
 
 export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[]; onSave: (value: CamSave) => void | Promise<void>; programs: ProgramSettings }) {
@@ -29,6 +30,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
   const [filename, setFilename] = useState('')
   const [settings, setSettings] = useState<CamSettings>({ thickness: 18, units: 'auto', operations: {} })
   const [result, setResult] = useState<CamResult>()
+  const [materialVariants, setMaterialVariants] = useState<MaterialVariants>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string>()
@@ -44,9 +46,9 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     const worker = new Worker(new URL('../cam/worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = event => {
       if (!active || id !== loadId.current) return
-      setResult(event.data.result); setError(event.data.error ?? ''); setBusy(false)
+      setResult(event.data.result); setMaterialVariants(event.data.materialVariants); setError(event.data.error ?? ''); setBusy(false)
     }
-    worker.onerror = () => { if (active && id === loadId.current) { setError('Generation failed. Check the DXF and try again.'); setBusy(false); setResult(undefined) } }
+    worker.onerror = () => { if (active && id === loadId.current) { setError('Generation failed. Check the DXF and try again.'); setBusy(false); setResult(undefined); setMaterialVariants(undefined) } }
     worker.postMessage({ source, settings: { ...settings, programs } })
     return () => { active = false; worker.terminate() }
   }, [source, settings, programs])
@@ -61,13 +63,14 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     for (const id of ids) {
       operations[id] = { ...operations[id], ...patch }
       const feature = features.find(feature => feature.id === id)
-      if (patch.kind && feature && cutterWidthOpening({ ...feature, ...patch })) operations[id].tabs = 0
-      else if (patch.kind && feature && cutterWidthOpening(feature)) operations[id].tabs = undefined
+      if (patch.kind && feature && tabFreeOpening({ ...feature, ...patch })) operations[id].tabs = 0
+      else if (patch.kind && feature && tabFreeOpening(feature)) operations[id].tabs = undefined
     }
     update({ operations })
   }
   async function loadFile(file: File) {
     const id = ++loadId.current
+    setMaterialVariants(undefined)
     setComponentId(crypto.randomUUID())
     setError(''); setActionError(''); setReviewed(false); setResult(undefined); setSaved(false); setBusy(true); setSource(''); setFilename(file.name); setSelected(undefined); setView('preview')
     setSettings(s => ({ ...s, units: 'auto', operations: {} }))
@@ -100,6 +103,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     if (queue[next]) void loadFile(queue[next].file)
     else {
       loadId.current++
+      setMaterialVariants(undefined)
       setSource(''); setResult(undefined); setFilename(''); setError(''); setActionError(''); setBusy(false); setReviewed(false); setSelected(undefined)
       heading.current?.focus({ preventScroll: true })
       window.scrollTo({ top: 0 })
@@ -119,7 +123,10 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
     setSaving(true); setActionError('')
     const id = loadId.current
     try {
-      if (action === 'save') await onSave({ id: componentId, itemId, filename: outputName, source, gcode: result!.gcode })
+      if (action === 'save') {
+        if (!materialVariants) throw new Error('Material variants have not finished generating. Try generating again.')
+        await onSave({ id: componentId, itemId, filename: outputName, source, gcode: result!.gcode, materialVariants })
+      }
       else downloadText(outputName, result!.gcode)
       if (id !== loadId.current) return
       if (action === 'save') { setSaved(true); advance('confirmed') }
@@ -153,7 +160,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
                 <button type="button" className="cam-operation-name" aria-pressed={selected === f.id} onClick={() => setSelected(f.id)}><CamOperationSwatch kind={f.kind} />{f.name}</button>
                 <select aria-label={`Operation for ${f.name}`} value={f.kind} onChange={e => operation([f.id], { kind: e.target.value as OperationKind })}>{kinds.map(kind => <option key={kind} value={kind}>{operationNames[kind]}</option>)}</select>
                 <div className="cam-operation-fields">
-                  {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min={requiresHoldingTabs(f) ? 1 : 0} max={cutterWidthOpening(f) ? 0 : 4} step="1" value={override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
+                  {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min={requiresHoldingTabs(f) ? 1 : 0} max={tabFreeOpening(f) ? 0 : 4} disabled={tabFreeOpening(f)} step="1" value={tabFreeOpening(f) || result?.operations.find(op => op.featureId === f.id)?.tabs.length === 0 ? 0 : override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
                   {cutterWidthOpening(f) && <span>{camPreset.diameter} mm cutter-width hole</span>}
                   {f.kind === 'pocket' && <label>Depth (mm)<input aria-label={`Pocket depth for ${f.name}`} type="number" min="0.1" max={settings.thickness - 0.1} step="0.1" value={override.depthMm ?? f.depthMm ?? ''} onChange={e => operation([f.id], { depthMm: Number(e.target.value) })} /></label>}
                   {!f.circle && (f.kind === 'pocket' || f.kind === 'inside') && <label><input type="checkbox" aria-label={`Corner overcuts for ${f.name}`} checked={override.cornerOvercuts ?? true} onChange={e => operation([f.id], { cornerOvercuts: e.target.checked })} />Corner overcuts</label>}
@@ -172,6 +179,7 @@ export function CamPage({ items, onSave, programs }: { items: MarketplaceItem[];
         {result && <div className="cam-extents"><span>Extent X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
         {problems.length > 0 && <section className="cam-problems" role="alert"><h3><CircleAlert size={16} aria-hidden="true" />Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
         {!!result?.warnings.length && <details className="cam-warnings"><summary><TriangleAlert size={15} aria-hidden="true" />Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
+        {!busy && materialVariants && <details className="cam-warnings"><summary>Material variants</summary><ul>{materialProfiles.map(profile => <li key={profile.id}>{profile.label}: {materialVariants.profiles[profile.id].errors.length ? `Unavailable: ${materialVariants.profiles[profile.id].errors.join(' ')}` : 'Generated'}</li>)}</ul></details>}
       </section>
     </div>
     <footer className="cam-export">

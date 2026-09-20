@@ -8,7 +8,7 @@ export interface JobRequest {
   orderNumber: string
   notes: string
   items: Array<{ itemId?: string; sku?: string; quantity: number }>
-  sheet: { widthMm: number; heightMm: number; material: string; thicknessMm?: number; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
+  sheet: { widthMm: number; heightMm: number; material: string; thicknessMm?: number; profilePasses?: 1 | 2; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
   labels: { widthMm: number; heightMm: number }
 }
 export interface JobCut extends PartLabel {

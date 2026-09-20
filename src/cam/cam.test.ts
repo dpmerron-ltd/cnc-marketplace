@@ -106,7 +106,9 @@ describe('CNC generation', () => {
     expect(plain.operations[0].path[0].y).toBeCloseTo(plain.shift.y + 1.5)
     expect(plain.operations[0].path[1].x - plain.operations[0].path[0].x).toBeCloseTo(100 - 6.35)
     expect(plain.gcode).not.toContain('Automatic corner overcuts')
-    expect(generateCam(drawing, { ...settings, operations: { f0: { tabs: 2 } } }).errors.join()).toContain('Set tabs to 0')
+    const explicitTabs = generateCam(drawing, { ...settings, operations: { f0: { tabs: 2 } } })
+    expect(explicitTabs.errors).toEqual([])
+    expect(explicitTabs.operations[0].tabs).toEqual([])
   })
   it.each([true, false])('pecks square cutter-sized holes through the stock, with corner relief %s', cornerOvercuts => {
     const job = generateCam(readDxf(dxf([rectangle(0, 0, 3, 3, 'CUT_INNER')])), { ...settings, operations: { f0: { cornerOvercuts } } })
@@ -345,13 +347,41 @@ describe('CNC generation', () => {
     expect(job.errors.join()).toContain('cannot be exported without holding tabs')
     expect(job.errors.join()).not.toContain('set zero tabs')
   })
-  it.each([[12, 12, false], [12.001, 8, true], [8, 12.001, true], [100, 8, true], [8, 100, true]])('uses uncompensated X/Y size %s x %s mm to require tabs: %s', (width, height, required) => {
+  it.each([[12, 12, false], [12.001, 8, true], [8, 12.001, true], [100, 8, true], [8, 100, true]])('preserves outer holding tabs but removes tabs from narrow %s x %s mm holes', (width, height, required) => {
     const feature = readDxf(dxf([rectangle(0, 0, Number(width), Number(height), 'CUT_INNER')])).features[0]
     expect(requiresHoldingTabs(feature)).toBe(false)
-    expect(defaultTabCount(feature)).toBe(required ? 4 : 0)
+    expect(defaultTabCount(feature)).toBe(0)
     expect(requiresHoldingTabs({ ...feature, kind: 'outside' })).toBe(required)
     expect(requiresHoldingTabs({ ...feature, kind: 'pocket' })).toBe(false)
     expect(requiresHoldingTabs({ ...feature, kind: 'drill' })).toBe(false)
+  })
+  it.each([6, 12, 15, 18] as const)('forces zero tabs on openings up to 12 mm wide in %s mm stock, including overrides', thickness => {
+    for (const [width, height] of [[8, 100], [100, 12], [12, 12]]) {
+      const parsed = readDxf(dxf([rectangle(0, 0, width, height, 'CUT_INNER')]))
+      for (const tabs of [undefined, 4]) {
+        const job = generateCam(parsed, { ...settings, thickness, operations: { f0: { tabs } } })
+        expect(job.errors).toEqual([])
+        expect(job.operations[0].tabs).toEqual([])
+        expect(job.simulation.deepestCutMm).toBe(materialPreset(thickness).depth)
+        expect(job.gcode).not.toContain('(Tab ')
+        expect(job.warnings.join()).not.toContain('no holding tabs')
+      }
+    }
+  })
+  it('removes non-fitting tabs from ordinary internal holes but retains door and outer safeguards', () => {
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 14, 20, 'CUT_INNER')])), settings)
+    expect(job.errors).toEqual([])
+    expect(job.operations[0].tabs).toEqual([])
+    expect(job.warnings.join()).toContain('tabs automatically removed')
+    const narrowDoor = generateCam(readDxf(dxf([rectangle(0, 0, 100, 12, 'CUT_DOOR')])), { ...settings, operations: { f0: { tabs: 4 } } })
+    expect(narrowDoor.errors).toEqual([])
+    expect(narrowDoor.operations[0].tabs).toEqual([])
+    const inch = generateCam(readDxf(dxf([rectangle(0, 0, 4, 12 / 25.4, 'CUT_INNER')], 1)), { ...settings, operations: { f0: { tabs: 4 } } })
+    expect(inch.errors).toEqual([])
+    expect(inch.operations[0].tabs).toEqual([])
+    const circular = generateCam(readDxf(dxf([circle(30, 30, 6, 'CUT_INNER')])), { ...settings, operations: { f0: { tabs: 4 } } })
+    expect(circular.errors).toEqual([])
+    expect(circular.operations[0].tabs).toEqual([])
   })
   it.each([12, 15, 18] as const)('allows circle tab removal but protects outer profiles above 12 mm in %s mm stock', thickness => {
     for (const entity of [circle(50, 50, 20, 'CUT_INNER'), rectangle()]) {

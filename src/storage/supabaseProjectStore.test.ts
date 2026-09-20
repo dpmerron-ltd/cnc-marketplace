@@ -3,8 +3,9 @@ import type { Sheet } from '../models/Sheet'
 import { loadRemoteProject, saveRemoteComponent, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
+import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, rows: [] as unknown[], queries: [] as { table: string; filters: [string, string][]; write?: unknown; options?: unknown }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; filters: [string, string][]; write?: unknown; options?: unknown }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
@@ -20,7 +21,7 @@ vi.mock('./supabaseClient', () => ({
         single: () => builder,
         update: (value: unknown) => { query.write = value; return builder },
         upsert: (value: unknown, options?: unknown) => { query.write = value; query.options = options; return builder },
-        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : [], error: mock.error }).then(resolve),
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : table === 'cnc_components' ? mock.components : [], error: mock.error }).then(resolve),
       }
       return builder
     },
@@ -30,7 +31,23 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null; mock.rows = [] })
+  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null; mock.rows = []; mock.components = [] })
+
+  it('round-trips owned material variants separately so legacy metadata autosaves cannot erase them', async () => {
+    const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
+    const part = { ...testParts[0], ownerId: 'alice', metadata: { ...testParts[0].metadata, materialVariants } }
+    await saveRemoteComponent(part, 'alice')
+    const rows = mock.queries[0].write as unknown[]
+    expect(rows).toEqual([expect.objectContaining({ material_variants: materialVariants, metadata: testParts[0].metadata })])
+    mock.components = rows
+    mock.rows = [{ id: part.itemId, owner_id: 'alice', name: 'Test', sku: 'TEST' }]
+    const loaded = await loadRemoteProject('alice')
+    expect(loaded?.parts[0].metadata.materialVariants).toEqual(materialVariants)
+    expect(loaded?.parts[0].gcode).toBe(part.gcode)
+    mock.queries = []
+    await saveRemoteComponent({ ...testParts[0], ownerId: 'alice' }, 'alice')
+    expect(mock.queries[0].write).toEqual([expect.not.objectContaining({ material_variants: expect.anything() })])
+  })
 
   it('saves images separately so stale autosaves never overwrite an API image', async () => {
     const item = { id: 'item', ownerId: 'alice', name: 'Cabinet', sku: 'CAB', description: '', createdAt: '', updatedAt: '', image: testImage }
@@ -43,6 +60,19 @@ describe('cloud account boundaries', () => {
     expect(mock.queries[0].write).toEqual([expect.not.objectContaining({ image: expect.anything() })])
     await saveRemoteItemImage(item, null, 'alice')
     expect(mock.queries.at(-1)?.write).toEqual({ image: null, updated_at: expect.any(String) })
+  })
+
+  it('separates legacy and variant component bulk writes to preserve omitted columns', async () => {
+    const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
+    const legacy = { ...testParts[0], ownerId: 'alice' }
+    const generated = { ...legacy, id: 'generated', metadata: { ...legacy.metadata, materialVariants } }
+    const item = { id: legacy.itemId!, ownerId: 'alice', name: 'Test', sku: 'TEST', description: '', createdAt: '', updatedAt: '' }
+    expect((await saveRemoteProject([item], [legacy, generated], sheet, item.id, 'alice')).ok).toBe(true)
+    const writes = mock.queries.filter(query => query.table === 'cnc_components').map(query => query.write)
+    expect(writes).toEqual([
+      [expect.not.objectContaining({ material_variants: expect.anything() })],
+      [expect.objectContaining({ material_variants: materialVariants })],
+    ])
   })
 
   it('loads only validated owner images and rejects foreign image writes and failed saves', async () => {

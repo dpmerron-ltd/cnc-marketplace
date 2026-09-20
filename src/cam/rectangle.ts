@@ -1,4 +1,21 @@
 import type { Point } from '../models/geometry'
+import { convexHull } from '../gcode/footprint'
+
+// Minimum caliper width measures a whole opening independently of its rotation.
+export function minimumOpeningWidth(points: Point[]): number {
+  if (points.length < 3 || points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return Infinity
+  const hull = convexHull(points)
+  if (hull.length < 3) return Infinity
+  let width = Infinity, opposite = 1
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const distance = (j: number) => Math.abs(dx * (hull[j].y - a.y) - dy * (hull[j].x - a.x))
+    while (distance((opposite + 1) % hull.length) > distance(opposite) + 1e-9) opposite = (opposite + 1) % hull.length
+    width = Math.min(width, distance(opposite) / Math.hypot(dx, dy))
+  }
+  return width
+}
 
 export interface Rectangle {
   center: Point
