@@ -1,6 +1,7 @@
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
-import { emptyBounds, includePoint, rotatePointInBounds, rotateVector } from '../models/geometry'
+import { emptyBounds, includePoint, rotateVector } from '../models/geometry'
+import { instanceFootprint, placementPoint, polygonBounds } from './footprint'
 import type { Bounds, Point } from '../models/geometry'
 import { formatWord, wordsToLine } from './format'
 import { createInitialState, getWord, updatePositionFromLine } from './state'
@@ -24,20 +25,11 @@ function replaceOrAppend(words: GCodeWord[], letter: string, value: number): GCo
 }
 
 export function transformLocalPoint(part: Part, instance: PartInstance, absolutePoint: Point): Point {
-  const local = { x: absolutePoint.x - part.originalBounds.minX, y: absolutePoint.y - part.originalBounds.minY }
-  const rotated = rotatePointInBounds(local, { width: part.width, height: part.height }, instance.rotation)
-  return { x: instance.x + rotated.x, y: instance.y + rotated.y }
+  return placementPoint(part, instance, absolutePoint)
 }
 
 export function instanceBounds(part: Part, instance: PartInstance): Bounds {
-  const corners = [
-    { x: part.originalBounds.minX, y: part.originalBounds.minY },
-    { x: part.originalBounds.maxX, y: part.originalBounds.minY },
-    { x: part.originalBounds.maxX, y: part.originalBounds.maxY },
-    { x: part.originalBounds.minX, y: part.originalBounds.maxY },
-  ].map((point) => transformLocalPoint(part, instance, point))
-
-  return corners.reduce((bounds, point) => includePoint(bounds, point), emptyBounds())
+  return polygonBounds(instanceFootprint(part, instance))
 }
 
 export function transformPartProgram(part: Part, instance: PartInstance): TransformedProgram {

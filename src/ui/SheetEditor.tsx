@@ -3,7 +3,7 @@ import { partNumberText } from '../labels/partLabels'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
-import { rectsOverlap } from '../models/geometry'
+import { footprintInterior, footprintsOverlap, instanceFootprint } from '../gcode/footprint'
 import { instanceBounds, transformPartProgram } from '../gcode/transform'
 import type { ToolpathSegment } from '../gcode/types'
 import { planScrewPositions } from '../gcode/screwPositions'
@@ -71,12 +71,13 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
         .filter((instance) => instance.sheetIndex === sheetIndex)
         .map((instance) => {
           const part = parts.find((candidate) => candidate.id === instance.partId)
-          return part ? { instance, part, bounds: instanceBounds(part, instance), transformed: transformPartProgram(part, instance) } : undefined
+          return part ? { instance, part, footprint: instanceFootprint(part, instance), bounds: instanceBounds(part, instance), transformed: transformPartProgram(part, instance) } : undefined
         })
         .filter(Boolean) as Array<{
         instance: PartInstance
         part: Part
         bounds: ReturnType<typeof instanceBounds>
+        footprint: ReturnType<typeof instanceFootprint>
         transformed: ReturnType<typeof transformPartProgram>
       }>,
     [parts, sheet.instances, sheetIndex],
@@ -85,7 +86,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
   const collidingIds = new Set<string>()
   for (let a = 0; a < placed.length; a += 1) {
     for (let b = a + 1; b < placed.length; b += 1) {
-      if (rectsOverlap(placed[a].bounds, placed[b].bounds, sheet.spacing)) {
+      if (footprintsOverlap(placed[a].footprint, placed[b].footprint, sheet.spacing)) {
         collidingIds.add(placed[a].instance.id)
         collidingIds.add(placed[b].instance.id)
       }
@@ -170,17 +171,17 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
               <line x1={point.x} y1={point.y - 6} x2={point.x} y2={point.y + 6} />
             </g>
           ))}
-          {placed.map(({ instance, part, bounds }) => {
+          {placed.map(({ instance, part, bounds, footprint }) => {
             const isSelected = selectedId === instance.id
+            const label = partNumberText(instance.partNumber!)
+            const interior = footprintInterior(footprint)
+            const labelSize = Math.max(1, Math.min(24, Math.max(0, interior.radius - 3) * 2 / Math.hypot(label.length * 0.7, 1)))
             const outOfBounds = bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > sheet.width || bounds.maxY > sheet.height
             return (
               <g key={instance.id}>
                 <title>{`${partNumberText(instance.partNumber!)}: ${part.name}`}</title>
-                <rect
-                  x={bounds.minX}
-                  y={bounds.minY}
-                  width={bounds.maxX - bounds.minX}
-                  height={bounds.maxY - bounds.minY}
+                <polygon
+                  points={footprint.map(p => `${p.x},${p.y}`).join(' ')}
                   className={`part-outline ${isSelected ? 'selected' : ''} ${collidingIds.has(instance.id) || outOfBounds ? 'invalid' : ''}`}
                   onPointerDown={(event) => {
                     const svg = event.currentTarget.ownerSVGElement
@@ -190,8 +191,8 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
                     setDragging({ id: instance.id, dx: point.x - instance.x, dy: point.y - instance.y })
                   }}
                 />
-                <text transform={`translate(${bounds.minX + 3} ${bounds.maxY - 3}) scale(1 -1)`} dominantBaseline="hanging" style={{ fontSize: Math.max(1, Math.min(24, (bounds.maxX - bounds.minX - 6) / (partNumberText(instance.partNumber!).length * 0.7), bounds.maxY - bounds.minY - 6)) }} className="part-label">
-                  {partNumberText(instance.partNumber!)}
+                <text transform={`translate(${interior.center.x} ${interior.center.y}) scale(1 -1)`} textAnchor="middle" dominantBaseline="central" style={{ fontSize: labelSize }} className="part-label">
+                  {label}
                 </text>
               </g>
             )

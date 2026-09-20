@@ -36,7 +36,7 @@ describe('Printable tab locations', () => {
     expect(result.tabs.every(tab => tab.inferred && tab.z === -12.4)).toBe(true)
     expect(result.warnings.join()).toContain('inferred')
   })
-  it.each([0, 90, 180, 270] as const)('transforms repeated parts and tabs at %s degrees using the export placement transform', rotation => {
+  it.each([0, 37, 90, 143.125, 180, 270] as const)('transforms repeated parts and tabs at %s degrees using the export placement transform', rotation => {
     const placed = { ...sheet, instances: [sheet.instances[0], { ...sheet.instances[0], id: 'copy-2', partNumber: 23, sheetIndex: 1, x: 350, y: 400, rotation }] }
     const before = exportCombinedGCode([part], placed).gcode
     const result = buildTabMap([part], placed)

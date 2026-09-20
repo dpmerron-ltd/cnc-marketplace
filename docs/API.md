@@ -242,7 +242,7 @@ Set `reviewConfirmed` only after an operator has reviewed the documents, stock, 
 ### Machining Specifics
 
 - Metric, absolute source programs are required. Invalid or oversized components, collisions, unsupported transformations and detected simulation errors prevent publication.
-- Auto nesting may rotate components. The operator must check grain/orientation restrictions; there is no grain-aware nesting in this version.
+- Auto nesting uses conservative convex machining outlines, allowing parts beside diagonal edges even when bounding rectangles overlap. Holes and concavities remain reserved; ambiguous/open geometry falls back to rectangular bounds. It tests edge-aligned straightening and quarter-turns, choosing fitting placements without changing source depths, feeds or tabs. This is heuristic nesting, not a global optimum. Rotations in manifests can be fractional degrees. The operator must check grain/orientation restrictions; there is no grain-aware nesting in this version. Existing queued jobs are immutable and are not re-nested.
 - Cutting depths and feeds come from the source files; no machining overrides are accepted. Above-surface rapid clearance is overridden to the requested safe Z (20 mm by default).
 - The authenticated user's profile supplies the start, spindle-start and end programs. Metric absolute-mode and safe-Z guards are enforced. Verify cutter, spindle speed, parking and DDCS start-up delay against the applied `programSettings`. This API does not infer tool diameter from filenames.
 - A spindle-off maximum X/Y reach check precedes cutting on each sheet. Validation cannot establish physical machine limits or clamp clearance.

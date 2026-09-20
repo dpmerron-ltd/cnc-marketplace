@@ -23,7 +23,7 @@ import type { Part } from './models/Part'
 import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
-import { rectsOverlap } from './models/geometry'
+import { footprintsOverlap, instanceFootprint, polygonBounds } from './gcode/footprint'
 import { autoNest } from './nesting/nestingEngine'
 import { addItemToSheet } from './nesting/addItemToSheet'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
@@ -373,14 +373,14 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
     .map((instance) => {
       const placedPart = parts.find((candidate) => candidate.id === instance.partId)
       if (instance.sheetIndex !== source.sheetIndex) return undefined
-      return placedPart ? instanceBounds(placedPart, instance) : undefined
+      return placedPart ? instanceFootprint(placedPart, instance) : undefined
     })
     .filter((bounds) => bounds !== undefined)
 
   function isValid(candidate: PartInstance): boolean {
     const bounds = instanceBounds(part, candidate)
     if (bounds.minX < 0 || bounds.minY < 0 || bounds.maxX > sheet.width || bounds.maxY > sheet.height) return false
-    return placed.every((placedBounds) => !rectsOverlap(bounds, placedBounds, sheet.spacing))
+    return placed.every(footprint => !footprintsOverlap(instanceFootprint(part, candidate), footprint, sheet.spacing))
   }
 
   const preferred: PartInstance[] = [
@@ -394,7 +394,8 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
   const xs = new Set<number>([sheet.spacing])
   const ys = new Set<number>([sheet.spacing])
-  for (const bounds of placed) {
+  for (const footprint of placed) {
+    const bounds = polygonBounds(footprint)
     xs.add(bounds.maxX + sheet.spacing)
     xs.add(bounds.minX - copySize.width - sheet.spacing)
     ys.add(bounds.maxY + sheet.spacing)

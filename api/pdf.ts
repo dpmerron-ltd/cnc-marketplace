@@ -2,6 +2,7 @@ import { PDFDocument, rgb, type PDFPage, type PDFFont } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import type { generateJob } from '../src/jobs/generateJob'
 import { JobError } from '../src/jobs/generateJob'
+import { footprintInterior, instanceFootprint } from '../src/gcode/footprint'
 
 type Generated = Awaited<ReturnType<typeof generateJob>>
 const mm = 72 / 25.4
@@ -95,7 +96,11 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
     const x = 45, bottom = y - job.sheet.height * scale - 15
     page.drawRectangle({ x, y: bottom, width: job.sheet.width * scale, height: job.sheet.height * scale, borderColor: ink, borderWidth: 0.8 })
     const cuts = manifest.cuts.filter(cut => cut.sheetNumber === sheet.number)
-    for (const cut of cuts) page.drawRectangle({ x: x + cut.bounds.minX * scale, y: bottom + cut.bounds.minY * scale, width: (cut.bounds.maxX - cut.bounds.minX) * scale, height: (cut.bounds.maxY - cut.bounds.minY) * scale, color: rgb(0.93, 0.95, 0.96) })
+    for (const instance of job.sheet.instances.filter(instance => instance.sheetIndex === sheet.number - 1)) {
+      const part = job.parts.find(part => part.id === instance.partId)!
+      const points = instanceFootprint(part, instance)
+      page.drawSvgPath(`${points.map((p, i) => `${i ? 'L' : 'M'} ${p.x * scale} ${-p.y * scale}`).join(' ')} Z`, { x, y: bottom, color: rgb(0.93, 0.95, 0.96) })
+    }
     const drawn = new Set<string>()
     for (const move of job.simulations[sheet.number - 1].moves.filter(move => move.type !== 'rapid')) {
       if (move.start.x === move.end.x && move.start.y === move.end.y && move.end.z < move.start.z) {
@@ -112,9 +117,11 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
       }
     }
     for (const cut of cuts) {
-      const width = (cut.bounds.maxX - cut.bounds.minX) * scale
-      const size = Math.max(2, Math.min(10, width / (cut.partNumber.length * 0.7), (cut.bounds.maxY - cut.bounds.minY) * scale / 2))
-      const tx = x + cut.bounds.minX * scale + 1, ty = bottom + cut.bounds.maxY * scale - size - 1
+      const instance = job.sheet.instances.find(instance => instance.id === cut.instanceId)!
+      const part = job.parts.find(part => part.id === instance.partId)!
+      const interior = footprintInterior(instanceFootprint(part, instance))
+      const size = Math.max(2, Math.min(10, Math.max(0, interior.radius * scale - 2) * 2 / Math.hypot(cut.partNumber.length * 0.7, 1)))
+      const tx = x + interior.center.x * scale - font.widthOfTextAtSize(cut.partNumber, size) / 2 - 1, ty = bottom + interior.center.y * scale - size / 3
       page.drawRectangle({ x: tx, y: ty - 1, width: font.widthOfTextAtSize(cut.partNumber, size) + 2, height: size + 3, color: rgb(1, 1, 1) })
       page.drawText(cut.partNumber, { x: tx + 1, y: ty, font, size, color: ink })
     }

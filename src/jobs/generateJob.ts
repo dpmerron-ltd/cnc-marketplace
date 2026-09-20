@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { autoNest } from '../nesting/nestingEngine'
+import { autoNest, partFitsSheet } from '../nesting/nestingEngine'
 import { buildPartLabels, numberSheetParts } from '../labels/partLabels'
 import { validateSheet } from '../gcode/validator'
 import { exportPhysicalSheetGCodes } from '../gcode/exporter'
@@ -70,8 +70,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   }
   for (const part of parts) {
     if (![part.width, part.height].every(value => Number.isFinite(value) && value > 0)) throw new JobError(`${part.name} has no finite, nestable machining footprint.`)
-    const w = sheet.width - sheet.borderSpacing * 2, h = sheet.height - sheet.borderSpacing * 2
-    if (!((part.width <= w && part.height <= h) || (part.height <= w && part.width <= h))) throw new JobError(`${part.name} cannot fit on the requested sheet in either orientation.`)
+    if (!partFitsSheet(part, sheet)) throw new JobError(`${part.name} cannot fit on the requested sheet in any supported nesting orientation.`)
     for (let copy = 0; copy < counts.get(part.itemId!)!; copy++) sheet.instances.push({ id: crypto.randomUUID(), partId: part.id, sheetIndex: 0, x: settings.borderMm, y: settings.borderMm, rotation: 0, locked: false })
   }
   sheet = numberSheetParts(sheet)

@@ -1,4 +1,4 @@
-export type Rotation = 0 | 90 | 180 | 270
+export type Rotation = number
 
 export interface Point {
   x: number
@@ -43,7 +43,9 @@ export function boundsSize(bounds: Bounds): Size {
 }
 
 export function rotatedSize(size: Size, rotation: Rotation): Size {
-  return rotation === 90 || rotation === 270 ? { width: size.height, height: size.width } : size
+  const x = rotateVector({ x: size.width, y: 0 }, rotation)
+  const y = rotateVector({ x: 0, y: size.height }, rotation)
+  return { width: Math.abs(x.x) + Math.abs(y.x), height: Math.abs(x.y) + Math.abs(y.y) }
 }
 
 export function rotatePointInBounds(point: Point, size: Size, rotation: Rotation): Point {
@@ -56,6 +58,12 @@ export function rotatePointInBounds(point: Point, size: Size, rotation: Rotation
       return { x: size.width - point.x, y: size.height - point.y }
     case 270:
       return { x: point.y, y: size.width - point.x }
+    default: {
+      const rotated = rotateVector(point, rotation)
+      const x = rotateVector({ x: size.width, y: 0 }, rotation)
+      const y = rotateVector({ x: 0, y: size.height }, rotation)
+      return { x: rotated.x - Math.min(0, x.x) - Math.min(0, y.x), y: rotated.y - Math.min(0, x.y) - Math.min(0, y.y) }
+    }
   }
 }
 
@@ -69,6 +77,10 @@ export function rotateVector(point: Point, rotation: Rotation): Point {
       return { x: -point.x, y: -point.y }
     case 270:
       return { x: point.y, y: -point.x }
+    default: {
+      const angle = rotation * Math.PI / 180
+      return { x: point.x * Math.cos(angle) - point.y * Math.sin(angle), y: point.x * Math.sin(angle) + point.y * Math.cos(angle) }
+    }
   }
 }
 

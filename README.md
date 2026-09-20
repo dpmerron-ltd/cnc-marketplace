@@ -2,7 +2,7 @@
 
 Local-first MVP for arranging pre-generated Estlcam CNC G-code files on a sheet and exporting one combined G-code program.
 
-The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. The sheet workflow preserves their existing CAM toolpaths, normalizes the part footprint, transforms XY coordinates for placement and 0/90/180/270 degree rotation, and exports combined programs with safe Z transitions. The separate **Generate** page creates new component G-code from DXF using 12 mm, 15 mm or 18 mm material presets, reviewed operation assignments, cutter compensation, ramps, and holding tabs. See [DXF generator settings and limitations](docs/CAM.md).
+The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable machining assets. The sheet workflow preserves their existing CAM toolpaths, normalizes the part footprint, transforms XY coordinates for placement and rotation (including automatic edge-aligned straightening), and exports combined programs with safe Z transitions. The separate **Generate** page creates new component G-code from DXF using 6 mm, 12 mm, 15 mm or 18 mm material presets, reviewed operation assignments, cutter compensation, ramps, and holding tabs. See [DXF generator settings and limitations](docs/CAM.md).
 
 Each account configures its own start, spindle-start and end programs under **Profile > CNC Program Settings**. Settings are stored in an owner-isolated, MFA-protected table and apply to new browser/API generation. Dan's existing programs are retained only for his account; other users must save their own settings before exporting. Queued job files remain immutable snapshots. See [program settings and validation](docs/API.md#account-program-settings).
 
@@ -60,7 +60,7 @@ The Pages deployment applies `supabase/schema.sql` transactionally before publis
 - Place multiple independent instances of the same part.
 - Drag, select, duplicate, delete, lock, and set exact X/Y/rotation values.
 - Default 1220 x 1220 mm sheet with editable width, height, and spacing.
-- Basic shelf auto-nesting for unlocked parts.
+- Shape-aware auto-nesting with edge-aligned straightening for unlocked parts.
 - SVG preview generated from the same transformed representation used for export.
 - Collision and out-of-sheet validation.
 - Automatic spindle-off maximum X/Y reach check for the parts on each physical sheet.
@@ -75,12 +75,12 @@ The Pages deployment applies `supabase/schema.sql` transactionally before publis
 - `src/gcode/parser.ts`: word-level parser with modal motion tracking for Estlcam-style G-code.
 - `src/gcode/state.ts`: machine state model for G90/G91, units, plane, modal motion, and position.
 - `src/gcode/bounds.ts`: machining-footprint and preview segment extraction.
-- `src/gcode/transform.ts`: normalization, translation, right-angle rotation, and arc I/J vector transformation.
+- `src/gcode/transform.ts`: normalization, translation, rotation, and arc I/J vector transformation.
 - `src/gcode/validator.ts`: sheet bounds, collisions, finite coordinate, and transform safety checks.
 - `src/gcode/exporter.ts`: combined program generation with comments and safe Z transitions.
 - `src/gcode/preparationBounds.ts`: machining extents for reach checks and screw clearance, including drilling and arc extremes.
 - `src/gcode/screwPositions.ts`: sparse screw-mark planning outside complete part bounds.
-- `src/nesting/nestingEngine.ts`: MVP rectangle/shelf nesting abstraction.
+- `src/nesting/nestingEngine.ts`: conservative polygon nesting, spacing, and orientation selection.
 - `src/models`: typed part, instance, sheet, project, and geometry models.
 - `src/ui`: React panels and SVG sheet editor.
 
@@ -110,7 +110,7 @@ The sheet preview shows the same planned mark positions as the exporter. Clearan
 ## Known Limitations
 
 - DXF files are associated but not yet parsed into polygon outlines.
-- Auto nesting uses rectangular bounds, not true polygon nesting.
+- Auto nesting uses conservative convex machining envelopes. Diagonal bounding-box corners can be reused, but holes and concavities remain reserved. Ambiguous/open geometry falls back to rectangular bounds. Straightening tests major outline edges as well as quarter-turns; nesting is heuristic, not globally optimal or grain-aware. Locked placements remain unchanged. Saved source programs and previously queued jobs are not rewritten.
 - Arc preview is currently line-based in SVG; export still preserves transformed arc commands.
 - Start/end section detection is conservative; exported jobs use the saved machine start/end blocks and safe Z.
 - Automatic sheet preparation requires G21/G90 programs and explicit X/Y with I/J arc geometry; radius-only and implicit-endpoint arcs block export.

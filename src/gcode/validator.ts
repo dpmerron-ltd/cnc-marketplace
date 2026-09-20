@@ -1,6 +1,6 @@
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
-import { rectsOverlap } from '../models/geometry'
+import { footprintsOverlap, instanceFootprint } from './footprint'
 import { instanceBounds, transformPartProgram } from './transform'
 
 export interface ValidationIssue {
@@ -15,7 +15,7 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
 
   const placed = sheet.instances.map((instance) => {
     const part = parts.find((candidate) => candidate.id === instance.partId)
-    return { instance, part, bounds: part ? instanceBounds(part, instance) : undefined }
+    return { instance, part, bounds: part ? instanceBounds(part, instance) : undefined, footprint: part ? instanceFootprint(part, instance) : undefined }
   })
 
   let missingPartCount = 0
@@ -42,7 +42,7 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
       const second = placed[b]
       if (!first.bounds || !second.bounds || !first.part || !second.part) continue
       if (first.instance.sheetIndex !== second.instance.sheetIndex) continue
-      if (rectsOverlap(first.bounds, second.bounds, sheet.spacing)) issues.push({ level: 'error', message: `${first.part.name} and ${second.part.name} overlap or violate spacing.` })
+      if (footprintsOverlap(first.footprint!, second.footprint!, sheet.spacing)) issues.push({ level: 'error', message: `${first.part.name} and ${second.part.name} overlap or violate spacing.` })
     }
   }
 

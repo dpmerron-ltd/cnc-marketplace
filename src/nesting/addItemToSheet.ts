@@ -2,14 +2,13 @@ import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { numberSheetParts } from '../labels/partLabels'
-import { autoNest } from './nestingEngine'
+import { autoNest, partFitsSheet } from './nestingEngine'
 
 export function addItemToSheet(item: MarketplaceItem, parts: Part[], sheet: Sheet, ownerId: string, sheetIndex: number): Sheet {
   if (item.ownerId !== ownerId) throw new Error('This item is not in your account.')
   const components = parts.filter(part => part.ownerId === ownerId && part.itemId === item.id)
   if (!components.length) throw new Error('This item has no components.')
-  const width = sheet.width - 2 * sheet.borderSpacing, height = sheet.height - 2 * sheet.borderSpacing
-  const oversized = components.find(part => !((part.width <= width && part.height <= height) || (part.height <= width && part.width <= height)))
+  const oversized = components.find(part => !partFitsSheet(part, sheet))
   if (oversized) throw new Error(`${oversized.name} does not fit this sheet. Increase the sheet size before adding this item.`)
   const additions = components.map(part => ({ id: crypto.randomUUID(), partId: part.id, sheetIndex: 0, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0 as const, locked: false }))
   // Treat existing placements as fixed obstacles. Nest additions from the active sheet onward.
