@@ -24,7 +24,7 @@ import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
 import { footprintsOverlap, instanceFootprint, polygonBounds } from './gcode/footprint'
-import { autoNest } from './nesting/nestingEngine'
+import { AutoNestButton } from './ui/AutoNestButton'
 import { addItemToSheet } from './nesting/addItemToSheet'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
 import { copyProjectToAccount, privateProject } from './storage/accountProject'
@@ -1209,15 +1209,12 @@ function App() {
           </label>
         </div>
         <div className="toolbar-actions">
-          <button
-            type="button"
-            onClick={() => {
-              setSheet({ ...sheet, instances: autoNest(parts, sheet) })
+          <AutoNestButton parts={parts} sheet={sheet} accountId={userId} onStatus={setStatus}
+            onComplete={instances => {
+              setSheet({ ...sheet, instances })
               setActiveSheetIndex(0)
             }}
-          >
-            Auto Nest
-          </button>
+          />
           <button type="button" onClick={clearSheet}>Clear Sheet</button>
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>

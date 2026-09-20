@@ -67,7 +67,7 @@ export function partFootprint(part: Part): Point[] {
     if (motion === 'G00' && xy) { chain = []; seen = new Map() }
     if (arc && (getWord(line, 'R') !== undefined || !xy)) unsupported = true
     if (!motion || !xy || (motion === 'G00' && Math.min(before.position.z, state.position.z) > 0)) continue
-    if (motion !== 'G00') {
+    if (!closed && motion !== 'G00') {
       if (!chain.length) { chain.push(before.position); seen.set(pointKey(before.position), 0) }
       const index = seen.get(pointKey(state.position))
       if (index !== undefined && chain.length - index >= 3 && Math.abs(ClipperLib.Clipper.Area(toPath(chain.slice(index)))) > 1) closed = true
