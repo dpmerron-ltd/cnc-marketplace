@@ -6,9 +6,12 @@ import type { Artifact, JobRepository, StoredJob } from './handler'
 import { normalizePrograms } from '../src/gcode/programSettings'
 import { itemImageSchema } from '../src/models/ItemImage'
 import { materialVariantsSchema } from '../src/cam/materialProfiles'
+import { parseComponent } from './components'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
+    if (/COMPONENT_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Component changed since the expected revision. Nothing was replaced.', 409)
+    if (/COMPONENT_NOT_FOUND/.test(result.error.message)) throw new JobError('Component not found.', 404)
     if (/IDEMPOTENCY_CONFLICT/.test(result.error.message)) throw new JobError('Idempotency-Key was already used with a different request.', 409)
     if (/STATUS_CONFLICT|INVALID_TRANSITION/.test(result.error.message)) throw new JobError('Job status changed or the requested transition is invalid. Refresh and retry.', 409)
     throw new Error('Database operation failed.')
@@ -82,6 +85,20 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       }
       checked(result)
       return { created: true }
+    },
+    async replaceComponent(owner, itemId, id, input) {
+      const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
+      if (!row) throw new JobError('Component not found.', 404)
+      const result = parseComponent({ id, name: row.name, sku: row.sku, filename: row.original_filename, dxf: row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId)
+      const { materialVariants, ...metadata } = result.part.metadata
+      checked(await db.rpc('replace_cnc_component_gcode', {
+        p_owner: owner, p_item: itemId, p_id: id, p_expected_sha: input.expectedSha256,
+        p_expected_variants: input.expectedMaterialVariants, p_expected_dxf: row.dxf,
+        p_gcode: result.part.gcode, p_variants: materialVariants,
+        p_width: result.part.width, p_height: result.part.height,
+        p_bounds: result.part.boundingBox, p_original_bounds: result.part.originalBounds, p_metadata: metadata,
+      }))
+      return result
     },
     async loadComponents(owner, request: JobRequest) {
       const ids = request.items.flatMap(item => item.itemId ? [item.itemId] : [])

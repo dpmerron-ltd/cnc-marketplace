@@ -7,6 +7,9 @@ export function minimumOpeningWidth(points: Point[]): number {
   const hull = convexHull(points)
   if (hull.length < 3) return Infinity
   let width = Infinity, opposite = 1
+  // Start across the first edge, not on a nearly collinear neighbour after rotation.
+  const firstDistance = (p: Point) => Math.abs((hull[1].x - hull[0].x) * (p.y - hull[0].y) - (hull[1].y - hull[0].y) * (p.x - hull[0].x))
+  for (let i = 2; i < hull.length; i++) if (firstDistance(hull[i]) > firstDistance(hull[opposite])) opposite = i
   for (let i = 0; i < hull.length; i++) {
     const a = hull[i], b = hull[(i + 1) % hull.length]
     const dx = b.x - a.x, dy = b.y - a.y
@@ -24,16 +27,54 @@ export interface Rectangle {
   axis: Point
 }
 
+// Recover the straight walls of a rectangular mortise with sampled corner reliefs.
+export function relievedRectangleGeometry(input: Point[], diameter: number): Rectangle | undefined {
+  const plain = rectangleGeometry(input)
+  if (plain) return plain
+  const points = polygonCorners(input)
+  if (points.length < 4) return
+  const walls = points.map((p, i) => {
+    const q = points[(i + 1) % points.length]
+    return { p, q, i, length: Math.hypot(q.x - p.x, q.y - p.y) }
+  }).sort((a, b) => b.length - a.length).slice(0, 4).sort((a, b) => a.i - b.i)
+  if (walls.some(wall => wall.length < diameter / 2)) return
+  const corners: Point[] = []
+  for (let i = 0; i < 4; i++) {
+    const a = walls[i], b = walls[(i + 1) % 4]
+    const u = { x: (a.q.x - a.p.x) / a.length, y: (a.q.y - a.p.y) / a.length }
+    const v = { x: (b.q.x - b.p.x) / b.length, y: (b.q.y - b.p.y) / b.length }
+    if (Math.abs(u.x * v.x + u.y * v.y) > 1e-6) return
+    const cross = u.x * v.y - u.y * v.x
+    const t = ((b.p.x - a.p.x) * v.y - (b.p.y - a.p.y) * v.x) / cross
+    corners.push({ x: a.p.x + t * u.x, y: a.p.y + t * u.y })
+  }
+  const rectangle = rectangleGeometry(corners)
+  if (!rectangle) return
+  const { center, axis, width, length } = rectangle
+  for (const point of points) {
+    const dx = point.x - center.x, dy = point.y - center.y
+    const x = Math.abs(dx * axis.x + dy * axis.y), y = Math.abs(-dx * axis.y + dy * axis.x)
+    const onWall = x <= length / 2 + 1e-5 && y <= width / 2 + 1e-5 && (Math.abs(x - length / 2) < 1e-5 || Math.abs(y - width / 2) < 1e-5)
+    // Only corner-local changes are allowed, not a narrow neck in a larger opening.
+    if (!onWall && Math.hypot(x - length / 2, y - width / 2) > diameter + 1e-5) return
+  }
+  return rectangle
+}
+
 // Work in millimetres and follow the actual edges, not the axis-aligned bounding box.
-export function rectangleGeometry(input: Point[]): Rectangle | undefined {
+function polygonCorners(input: Point[]): Point[] {
   const points = input.filter((p, i) => !i || Math.hypot(p.x - input[i - 1].x, p.y - input[i - 1].y) > 1e-7)
   if (points.length > 1 && Math.hypot(points[0].x - points.at(-1)!.x, points[0].y - points.at(-1)!.y) < 1e-7) points.pop()
-  if (points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return
-  const corners = points.filter((p, i) => {
+  if (points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return []
+  return points.filter((p, i) => {
     const a = points[(i + points.length - 1) % points.length], b = points[(i + 1) % points.length]
     const ux = p.x - a.x, uy = p.y - a.y, vx = b.x - p.x, vy = b.y - p.y
     return ux * vx + uy * vy <= 0 || Math.abs(ux * vy - uy * vx) > 1e-7 * Math.hypot(ux, uy) * Math.hypot(vx, vy)
   })
+}
+
+export function rectangleGeometry(input: Point[]): Rectangle | undefined {
+  const corners = polygonCorners(input)
   if (corners.length !== 4) return
   const edges = corners.map((p, i) => ({ x: corners[(i + 1) % 4].x - p.x, y: corners[(i + 1) % 4].y - p.y }))
   const lengths = edges.map(e => Math.hypot(e.x, e.y))

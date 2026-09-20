@@ -7,6 +7,13 @@ import { materialProfiles, materialVariantsSchema } from '../src/cam/materialPro
 import { materialPreset } from '../src/cam/generate'
 
 export const componentBodyLimit = 12 * 1024 * 1024
+export const replaceComponentSchema = z.strictObject({
+  expectedSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  expectedMaterialVariants: materialVariantsSchema.nullable(),
+  gcode: z.string().min(1).max(2000000),
+  materialVariants: materialVariantsSchema,
+})
+export type ComponentReplacement = z.infer<typeof replaceComponentSchema>
 const schema = z.strictObject({
   id: z.uuid(),
   name: z.string().trim().min(1).max(200),

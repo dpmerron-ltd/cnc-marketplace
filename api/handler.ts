@@ -8,7 +8,7 @@ import { dxfBodyLimit, generateDxfNc } from './dxf'
 import type { ProgramSettings } from '../src/gcode/programSettings'
 import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
 import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
-import { componentBodyLimit, parseComponent } from './components'
+import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement } from './components'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
@@ -23,6 +23,7 @@ export interface JobRepository {
   updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
   ownsItem(owner: string, id: string): Promise<boolean>
   createComponent(owner: string, part: Part): Promise<{ created: boolean }>
+  replaceComponent(owner: string, itemId: string, id: string, input: ComponentReplacement): Promise<{ part: Part; warnings: string[] }>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
   list(owner: string, limit: number, offset: number, status?: JobStatus): Promise<JobSummary[]>
   get(owner: string, id: string): Promise<StoredJob | undefined>
@@ -96,6 +97,15 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array) {
         return json({ id: part.id, itemId: id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, created ? 201 : 200, created ? {} : { 'Idempotent-Replayed': 'true' })
       }
       const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
+      const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([0-9a-f-]{36})\/gcode$/i)
+      if (replacementMatch && replacementMatch.slice(1).every(id => z.uuid().safeParse(id).success) && request.method === 'PATCH') {
+        const [, itemId, id] = replacementMatch
+        if (!await repository.ownsItem(owner, itemId)) throw new JobError('Item not found.', 404)
+        const input = replaceComponentSchema.safeParse(await body(request, componentBodyLimit))
+        if (!input.success) throw new JobError('Supply expectedSha256, expectedMaterialVariants, replacement gcode and materialVariants.', 400)
+        const { part, warnings } = await repository.replaceComponent(owner, itemId, id, input.data)
+        return json({ id, itemId, sha256: await sha256(part.gcode), reviewRequired: true, warnings })
+      }
       if (imageMatch && z.uuid().safeParse(imageMatch[1]).success) {
         const id = imageMatch[1]
         if (request.method === 'GET') {

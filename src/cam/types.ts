@@ -1,7 +1,7 @@
 import type { Point } from '../models/geometry'
 import type { GCodeSimulation } from '../gcode/simulator'
 import type { ProgramSettings } from '../gcode/programSettings'
-import { minimumOpeningWidth, rectangleGeometry } from './rectangle'
+import { minimumOpeningWidth, rectangleGeometry, relievedRectangleGeometry } from './rectangle'
 
 export type OperationKind = 'outside' | 'inside' | 'drill' | 'pocket' | 'ignore' | 'unassigned'
 export interface CamFeature {
@@ -54,6 +54,10 @@ export function cutterWidthOpening(feature: TabFeature, diameter: number = camPr
 // Feature coordinates must be in millimetres, before cutter compensation.
 export function tabFreeOpening(feature: TabFeature): boolean {
   if (feature.kind !== 'inside' || !feature.closed) return false
+  if (!feature.circle) {
+    const slot = relievedRectangleGeometry(feature.points, camPreset.diameter)
+    if (slot && slot.width <= 12.2 + 1e-6) return true
+  }
   const width = feature.circle ? feature.circle.radius * 2 : minimumOpeningWidth(feature.points)
   return width <= 12 + 1e-6
 }

@@ -90,4 +90,32 @@ begin
   begin perform id from public.cnc_jobs; raise exception 'Anonymous job read allowed'; exception when insufficient_privilege then null; end;
   begin perform public.create_cnc_api_key('anon'); raise exception 'Anonymous key creation allowed'; exception when insufficient_privilege then null; end;
 end $$;
+reset role;
+insert into public.marketplace_items(id, owner_id, name) values ('30000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'CAS item');
+insert into public.cnc_components(id, owner_id, item_id, name, sku, original_filename, gcode, dxf, width, height, bounding_box, original_bounds, metadata)
+  values ('cas-part', '00000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000001', 'Original name', 'Original SKU', 'original.nc', 'G21', 'original DXF', 1, 1, '{}', '{}', '{}');
+do $$
+declare a uuid := '00000000-0000-4000-8000-000000000001'; b uuid := '00000000-0000-4000-8000-000000000002'; item uuid := '30000000-0000-4000-8000-000000000001'; sha text := encode(extensions.digest('G21', 'sha256'), 'hex');
+begin
+  begin
+    perform public.replace_cnc_component_gcode(b, item, 'cas-part', sha, null, 'original DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}');
+    raise exception 'Foreign replacement allowed';
+  exception when others then if sqlerrm <> 'COMPONENT_NOT_FOUND' then raise; end if; end;
+  begin
+    perform public.replace_cnc_component_gcode(a, item, 'cas-part', 'wrong', null, 'original DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}');
+    raise exception 'Stale NC replacement allowed';
+  exception when others then if sqlerrm <> 'COMPONENT_REVISION_CONFLICT' then raise; end if; end;
+  begin
+    perform public.replace_cnc_component_gcode(a, item, 'cas-part', sha, '{"changed":true}', 'original DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}');
+    raise exception 'Stale variants replacement allowed';
+  exception when others then if sqlerrm <> 'COMPONENT_REVISION_CONFLICT' then raise; end if; end;
+  begin
+    perform public.replace_cnc_component_gcode(a, item, 'cas-part', sha, null, 'stale DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}');
+    raise exception 'Stale source replacement allowed';
+  exception when others then if sqlerrm <> 'COMPONENT_REVISION_CONFLICT' then raise; end if; end;
+  if not public.replace_cnc_component_gcode(a, item, 'cas-part', sha, null, 'original DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}') then raise exception 'Replacement failed'; end if;
+  if public.replace_cnc_component_gcode(a, item, 'cas-part', sha, null, 'original DXF', 'G21 new', '{}', 2, 3, '{}', '{}', '{}') then raise exception 'Replay was not idempotent'; end if;
+  if not exists(select 1 from public.cnc_components where id = 'cas-part' and item_id = item and owner_id = a and name = 'Original name' and sku = 'Original SKU' and original_filename = 'original.nc' and dxf = 'original DXF' and gcode = 'G21 new' and width = 2 and height = 3) then raise exception 'Identity/source not preserved'; end if;
+  if has_function_privilege('authenticated', 'public.replace_cnc_component_gcode(uuid,uuid,text,text,jsonb,text,text,jsonb,double precision,double precision,jsonb,jsonb,jsonb)', 'execute') or has_function_privilege('anon', 'public.replace_cnc_component_gcode(uuid,uuid,text,text,jsonb,text,text,jsonb,double precision,double precision,jsonb,jsonb,jsonb)', 'execute') then raise exception 'Replacement RPC exposed'; end if;
+end $$;
 rollback;

@@ -8,6 +8,7 @@ import { testItem, testParts, testRequest } from '../src/test/jobFixtures'
 import { defaultProgramSettings } from '../src/gcode/programSettings'
 import { testImage } from '../src/test/imageFixture'
 import { imageBytes } from '../src/models/ItemImage'
+import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
 
 const font = new Uint8Array(await readFile(new URL('./assets/NotoSans-Regular.ttf', import.meta.url)))
 function fixture() {
@@ -22,6 +23,7 @@ function fixture() {
     updateItemImage: vi.fn(async () => false),
     ownsItem: vi.fn(async owner => owner === 'alice'),
     createComponent: vi.fn(async () => ({ created: true })),
+    replaceComponent: vi.fn(async () => ({ part: testParts[0], warnings: [] })),
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
     get: async (owner, id) => jobs.get(id)?.owner === owner ? jobs.get(id) : undefined,
@@ -47,6 +49,20 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('scopes program replacement to owned items and requires an expected revision', async () => {
+    const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
+    const path = `/items/${testItem.id}/components/${id}/gcode`
+    const variants = materialVariantsSchema.parse({ version: 1, primaryProfile: '12', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
+    const input = { expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null, gcode: testParts[0].gcode, materialVariants: variants }
+    expect((await f.call(path, 'PATCH', input, 'bob')).status).toBe(404)
+    expect(f.repo.replaceComponent).not.toHaveBeenCalled()
+    expect((await f.call(path, 'PATCH', { ...input, expectedSha256: undefined })).status).toBe(400)
+    expect((await f.call(path, 'PATCH', { ...input, ownerId: 'bob' })).status).toBe(400)
+    expect((await f.call(path, 'PATCH', input)).status).toBe(200)
+    expect(f.repo.replaceComponent).toHaveBeenCalledWith('alice', testItem.id, id, input)
+    f.repo.replaceComponent = vi.fn(async () => { throw new JobError('Changed', 409) })
+    expect((await f.call(path, 'PATCH', input)).status).toBe(409)
+  })
   it('uploads validated components to owned items, supports stable retries and rejects foreign parents', async () => {
     const f = fixture()
     const path = `/items/${testItem.id}/components`

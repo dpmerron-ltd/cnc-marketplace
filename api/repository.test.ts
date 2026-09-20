@@ -5,6 +5,7 @@ import { supabaseRepository } from './repository'
 import { sha256 } from '../src/jobs/generateJob'
 import { testImage } from '../src/test/imageFixture'
 import { testItem, testParts } from '../src/test/jobFixtures'
+import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
 
 function fixture() {
   const query = { select: vi.fn(), eq: vi.fn(), is: vi.fn(), gt: vi.fn(), maybeSingle: vi.fn(async () => ({ data: { id: 'key-id', owner_id: 'alice' }, error: null })) }
@@ -13,6 +14,30 @@ function fixture() {
   return { query, db, repo: supabaseRepository(db as unknown as SupabaseClient) }
 }
 describe('API credential verification', () => {
+  it('validates replacements before an owner-scoped compare-and-swap, preserving source and identity', async () => {
+    const id = '20000000-0000-4000-8000-000000000001'
+    const row = { id, name: 'Side', sku: 'SIDE', original_filename: 'side.nc', dxf: 'original DXF' }
+    let found = true
+    const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: found ? row : null, error: null })) }
+    query.select.mockReturnValue(query); query.eq.mockReturnValue(query)
+    const rpc = vi.fn(async (_name: string, _args: unknown): Promise<{ data: boolean | null; error: { message: string } | null }> => ({ data: true, error: null }))
+    const repo = supabaseRepository({ from: () => query, rpc } as unknown as SupabaseClient)
+    const gcode = testParts[0].gcode
+    const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode, errors: [], warnings: [] }])) })
+    const input = { gcode, materialVariants, expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null }
+    const result = await repo.replaceComponent('alice', testItem.id, id, input)
+    expect(result.part).toMatchObject({ id, name: row.name, sku: row.sku, dxf: row.dxf, originalFilename: row.original_filename, ownerId: 'alice', itemId: testItem.id })
+    for (const pair of [['owner_id', 'alice'], ['item_id', testItem.id], ['id', id]]) expect(query.eq).toHaveBeenCalledWith(...pair)
+    expect(rpc).toHaveBeenCalledWith('replace_cnc_component_gcode', expect.objectContaining({ p_owner: 'alice', p_item: testItem.id, p_id: id, p_expected_sha: input.expectedSha256, p_expected_variants: null, p_expected_dxf: row.dxf, p_gcode: gcode, p_variants: materialVariants, p_width: result.part.width }))
+    rpc.mockClear()
+    await expect(repo.replaceComponent('alice', testItem.id, id, { ...input, gcode: 'G20\nG91\n' })).rejects.toThrow()
+    expect(rpc).not.toHaveBeenCalled()
+    rpc.mockResolvedValue({ data: null, error: { message: 'COMPONENT_REVISION_CONFLICT' } })
+    await expect(repo.replaceComponent('alice', testItem.id, id, input)).rejects.toMatchObject({ status: 409 })
+    found = false; rpc.mockClear()
+    await expect(repo.replaceComponent('bob', testItem.id, id, input)).rejects.toMatchObject({ status: 404 })
+    expect(rpc).not.toHaveBeenCalled()
+  })
   it('inserts only owned components and only replays identical owned uploads', async () => {
     const part = { ...testParts[0], ownerId: 'alice', itemId: testItem.id }
     let parentExists = true, duplicate = false, storedOwner = 'alice', changed = false

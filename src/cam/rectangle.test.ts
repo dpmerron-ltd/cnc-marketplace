@@ -21,7 +21,8 @@ describe('Cutter-width rectangular holes', () => {
   it('preserves wider hole and outer profile defaults, including doors', () => {
     expect(defaultTabCount(rectangle(6.351))).toBe(0)
     expect(defaultTabCount(rectangle(12))).toBe(0)
-    expect(defaultTabCount(rectangle(12.001))).toBe(4)
+    expect(defaultTabCount(rectangle(12.2))).toBe(0)
+    expect(defaultTabCount(rectangle(12.201))).toBe(4)
     expect(defaultTabCount({ ...rectangle(6.35), kind: 'outside' })).toBe(4)
     expect(requiresHoldingTabs({ ...rectangle(6.35), kind: 'outside' })).toBe(true)
     expect(requiresHoldingTabs({ ...rectangle(100, 300), door: true })).toBe(true)
@@ -38,7 +39,7 @@ describe('Cutter-width rectangular holes', () => {
     feature.points.splice(1, 1)
     expect(minimumOpeningWidth(feature.points)).toBeLessThanOrEqual(12.000001)
     expect(defaultTabCount(feature)).toBe(0)
-    expect(defaultTabCount(rectangle(12.001, 200, degrees))).toBe(4)
+    expect(defaultTabCount(rectangle(12.201, 200, degrees))).toBe(4)
   })
   it('accepts reversed winding, repeated closing vertices and collinear DXF edges', () => {
     const feature = rectangle(6.35)
