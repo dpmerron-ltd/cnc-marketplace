@@ -28,13 +28,17 @@ export function privateProject(project: Project, userId: string): Project {
 export function copyProjectToAccount(project: Project, userId: string): Project {
   const itemIds = new Map((project.items ?? []).map((item) => [item.id, crypto.randomUUID()]))
   const partIds = new Map(project.parts.map((part) => [part.id, crypto.randomUUID()]))
-  const copySheet = (sheet: Sheet): Sheet => ({
-    ...sheet,
-    instances: sheet.instances.filter((instance) => partIds.has(instance.partId)).map((instance) => ({
-      ...instance, id: crypto.randomUUID(), partId: partIds.get(instance.partId)!,
-    })),
-    gcodePresets: sheet.gcodePresets?.map((preset) => ({ ...preset, id: crypto.randomUUID(), ownerId: userId, uploadedBy: undefined })),
-  })
+  const copySheet = (sheet: Sheet): Sheet => {
+    const instanceIds = new Map(sheet.instances.filter(instance => partIds.has(instance.partId)).map(instance => [instance.id, crypto.randomUUID()]))
+    return {
+      ...sheet,
+      instances: sheet.instances.filter(instance => instanceIds.has(instance.id)).map(instance => ({
+        ...instance, id: instanceIds.get(instance.id)!, partId: partIds.get(instance.partId)!,
+      })),
+      orderImports: sheet.orderImports?.map(entry => ({ ...entry, instanceIds: entry.instanceIds.flatMap(id => instanceIds.has(id) ? [instanceIds.get(id)!] : []) })),
+      gcodePresets: sheet.gcodePresets?.map((preset) => ({ ...preset, id: crypto.randomUUID(), ownerId: userId, uploadedBy: undefined })),
+    }
+  }
   return {
     ...project,
     items: project.items?.map((item) => ({ ...item, id: itemIds.get(item.id)!, ownerId: userId, uploadedBy: undefined,

@@ -12,4 +12,20 @@
 .orders-lines td { overflow-wrap: anywhere; max-width: 360px; }
 .orders-lines code { white-space: normal; }
 .orders-detail-error { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.order-add-button { white-space: nowrap; }
+.order-sheet-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 20px; border: 1px solid #b7c3cc; border-radius: 8px; background: #fff; color: #18242c; }
+.order-sheet-dialog::backdrop { background: #0007; }
+.order-sheet-dialog h3 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.order-sheet-line { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid #dae0e5; overflow-wrap: anywhere; }
+.order-sheet-line label { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
+.order-sheet-line select { width: 100%; min-width: 0; min-height: 36px; }
+.order-sheet-actions { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; font-size: 13px; }
 @media (max-width: 600px) { .orders-search { flex-basis: 150px; } .orders-filters select { width: 100%; } }
+@media (max-width: 600px) {
+  .orders-table, .orders-table tbody { display: block; }
+  .orders-table thead { display: none; }
+  .orders-table tr { display: grid; grid-template-columns: 96px minmax(0, 1fr); border-bottom: 1px solid #d8dfe5; }
+  .orders-table td { border-bottom: 0; }
+  .orders-table td:first-child { min-width: 0; max-width: none; grid-row: 1 / span 2; }
+  .orders-table td:nth-child(n+2) { grid-column: 2; }
+}

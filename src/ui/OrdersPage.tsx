@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ExternalLink, Layers, RefreshCw, Search, X } from 'lucide-react'
 import { jobApiRequest } from '../storage/jobsApi'
 import type { ShopifyConnection, ShopifyOrder, ShopifyOrderDetail, ShopifyOrders } from '../orders/types'
+import { OrderSheetDialog, type OrderSheetProps } from './OrderSheetDialog'
 import './OrdersPage.css'
 
 const orderId = (order: ShopifyOrder) => order.id.split('/').at(-1)!
 
-export function OrdersPage({ userId }: { userId: string }) {
+export function OrdersPage({ userId, sheetTarget }: { userId: string; sheetTarget?: OrderSheetProps }) {
+  const [addingOrder, setAddingOrder] = useState('')
   const [connection, setConnection] = useState<ShopifyConnection>()
   const [data, setData] = useState<ShopifyOrders>()
   const [status, setStatus] = useState('open')
@@ -77,9 +79,10 @@ export function OrdersPage({ userId }: { userId: string }) {
       </form>
       <div className="orders-summary" role="status">{loading ? 'Loading orders...' : data ? `${data.orders.length} orders / Updated ${new Date(data.fetchedAt).toLocaleTimeString()}` : ''}</div>
       {!loading && data && <>
-        <div className="queue-table-scroll"><table className="queue-table"><thead><tr><th>Order</th><th>Items ordered</th></tr></thead><tbody>{data.orders.map(order => <tr key={order.id} className={orderId(order) === selected ? 'selected-job' : ''}>
+        <div className="queue-table-scroll"><table className="queue-table orders-table"><thead><tr><th>Order</th><th>Items ordered</th>{sheetTarget && <th>Sheet</th>}</tr></thead><tbody>{data.orders.map(order => <tr key={order.id} className={orderId(order) === selected ? 'selected-job' : ''}>
           <td><button type="button" onClick={() => { closeDetail(); setSelected(orderId(order)); setDetailRetry(v => v + 1) }}>{order.name}</button></td>
           <td><ul className="orders-item-list">{order.lineItems.nodes.map(line => <li key={line.id}><strong>{line.quantity} x</strong> {line.title}{line.variantTitle && line.variantTitle !== 'Default Title' ? ` / ${line.variantTitle}` : ''}{line.sku && <span className="queue-order">{line.sku}</span>}{line.currentQuantity !== line.quantity && <span className="queue-order">Current quantity: {line.currentQuantity}</span>}</li>)}</ul>{order.lineItems.pageInfo.hasNextPage && <button type="button" onClick={() => { closeDetail(); setSelected(orderId(order)); setDetailRetry(v => v + 1) }}>All items</button>}</td>
+          {sheetTarget && <td><button type="button" className="icon-text-button order-add-button" aria-label={`Add ${order.name} to sheet`} onClick={() => setAddingOrder(orderId(order))}><Layers size={16} /> Add to sheet</button></td>}
         </tr>)}</tbody></table></div>
         {!data.orders.length && <p>No matching orders within the Shopify app's accessible history.</p>}
         <div className="label-pagination"><button type="button" className="icon-button" title="Previous orders" aria-label="Previous orders" disabled={!cursors.length} onClick={() => { closeDetail(); setCursors(c => c.slice(0, -1)) }}><ChevronLeft size={18} /></button><span>Page {cursors.length + 1}</span><button type="button" className="icon-button" title="Next orders" aria-label="Next orders" disabled={!data.pageInfo.hasNextPage || !data.pageInfo.endCursor} onClick={() => { closeDetail(); setCursors(c => [...c, data.pageInfo.endCursor!]) }}><ChevronRight size={18} /></button></div>
@@ -94,5 +97,6 @@ export function OrdersPage({ userId }: { userId: string }) {
         </>}
       </section>}
     </>}
+    {addingOrder && sheetTarget && <OrderSheetDialog key={`${userId}:${addingOrder}`} {...sheetTarget} userId={userId} orderId={addingOrder} onClose={() => setAddingOrder('')} />}
   </main>
 }

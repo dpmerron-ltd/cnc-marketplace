@@ -19,6 +19,7 @@ export interface GCodePreset {
 export interface Sheet {
   name: string
   orderNumber?: string
+  orderImports?: { key: string; name: string; instanceIds: string[] }[]
   material?: string
   materialProfile?: MaterialProfileId
   nextPartNumber?: number

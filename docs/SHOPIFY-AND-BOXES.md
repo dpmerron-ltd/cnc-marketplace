@@ -8,6 +8,23 @@ from Shopify or returned to the browser. Orders are fetched on page opening or
 refresh, not copied into the CNC database. There are no Shopify mutations,
 webhooks, automatic CNC jobs or stock deductions.
 
+Each order has an **Add to sheet** action. It fetches every line-item page, matches
+SKUs against the current user's catalogue (trimmed and case-insensitive), and asks
+the operator to confirm the item selection. Missing or duplicate SKUs require an
+explicit selection; nothing is written back to Shopify. Each current order unit
+adds one copy of every component in the chosen catalogue item. Removed/refunded
+quantities are excluded; fulfilled units still count if present in the current
+order quantity. No line is silently skipped for a missing match or empty item.
+
+The current sheet's dimensions, spacing and material profile apply. Existing
+placements are preserved; additions nest from the active sheet onward, spilling
+onto further sheets as necessary. Nesting runs in a cancellable worker with a
+30-second timeout and a 500-new-component limit. Errors, missing thickness
+variants, cancellation or account/catalogue/sheet changes leave the sheet unchanged.
+The order number is appended to the sheet for labels. Saved order/instance references
+prevent adding the same order twice to that project while its components remain.
+This is not a global fulfilment lock: a separate project can contain the same order.
+
 Account API keys and MFA sessions can use:
 
 - `GET /v1/shopify/connection`: current account ID, configured connection status,

@@ -9,6 +9,7 @@ import { PartLabelsDialog } from './ui/PartLabelsDialog'
 import { TabMapDownload } from './ui/TabMapDownload'
 import { QueuePage } from './ui/QueuePage'
 import { OrdersPage } from './ui/OrdersPage'
+import { nestOrder, prepareOrderSheet, type AddOrderRequest, type NestProgress } from './orders/addOrderToSheet'
 import { BoxStockPage } from './ui/BoxStockPage'
 import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
@@ -442,6 +443,8 @@ function App() {
   const importProjectRef = useRef<HTMLInputElement>(null)
   const remoteHydratedRef = useRef(false)
   const accountRef = useRef<string | undefined>(undefined)
+  const orderSheetInputs = useRef({ sheet, parts, items })
+  orderSheetInputs.current = { sheet, parts, items }
   const [loadedAccountId, setLoadedAccountId] = useState<string>()
   const [programState, setProgramState] = useState<{ ownerId?: string; programs?: ProgramSettings; loading: boolean; error?: string }>({ loading: true })
   const [programReload, setProgramReload] = useState(0)
@@ -882,6 +885,22 @@ function App() {
     return count
   }
 
+  async function addOrderToSheet(request: AddOrderRequest, signal: AbortSignal, onProgress: (progress: NestProgress) => void) {
+    if (!userId || accountRef.current !== userId || loadedAccountId !== userId) throw new Error('Wait for your account catalogue to finish loading.')
+    const snapshot = orderSheetInputs.current
+    const prepared = prepareOrderSheet(request, snapshot.items, snapshot.parts, snapshot.sheet, userId, currentSheetIndex)
+    const instances = await nestOrder(prepared.parts, prepared.sheet, signal, onProgress)
+    const latest = orderSheetInputs.current
+    if (signal.aborted || accountRef.current !== userId || latest.sheet !== snapshot.sheet || latest.parts !== snapshot.parts || latest.items !== snapshot.items) throw new Error('Your sheet or catalogue changed. No order components were added; try again.')
+    setSheet(prepared.finish(instances))
+    setSelectedInstanceId(undefined)
+    setPreview(undefined)
+    setPreviewSimulation(undefined)
+    setPendingExport(undefined)
+    setPage('sheet')
+    setStatus(`Added ${prepared.count} components for order ${request.order.name}. Review the sheet before cutting.`)
+  }
+
   function updateInstance(instanceId: string, patch: Partial<PartInstance>) {
     setSheet((current) => ({
       ...current,
@@ -1259,7 +1278,7 @@ function App() {
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={parts} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={parts} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
