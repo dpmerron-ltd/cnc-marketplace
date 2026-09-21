@@ -1,3 +1,5 @@
+// Load with the app so an open tab can still print after deployment removes old chunks.
+import { jsPDF } from 'jspdf'
 import { labelPageLayout, type LabelLayout, type PartLabel } from './partLabels'
 
 // Render at 300 dpi using browser fonts, including Unicode component and job names.
@@ -39,7 +41,6 @@ export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout:
 export async function createLabelPdf(labels: PartLabel[], layout: LabelLayout): Promise<Blob> {
   if (!labels.length) throw new Error('No parts on the selected sheet.')
   const page = labelPageLayout(layout)
-  const { jsPDF } = await import('jspdf')
   const pdf = new jsPDF({ orientation: page.pageWidth > page.pageHeight ? 'landscape' : 'portrait', unit: 'mm', format: [page.pageWidth, page.pageHeight], compress: true })
   pdf.setProperties({ title: `${labels[0].job} - Part labels` })
   const canvas = document.createElement('canvas')
