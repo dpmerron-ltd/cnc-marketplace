@@ -43,6 +43,9 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/schema.sql
           psql --set ON_ERROR_STOP=on --file supabase/api.sql
           psql --set ON_ERROR_STOP=on --file supabase/api.sql
+          psql --set ON_ERROR_STOP=on --file supabase/orders.sql
+          psql --set ON_ERROR_STOP=on --file supabase/orders.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/order-assignment-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/account-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/api-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/program-settings-isolation.sql

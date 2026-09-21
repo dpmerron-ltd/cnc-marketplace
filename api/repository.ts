@@ -11,6 +11,10 @@ import { boxStockSchema } from '../src/packing/boxStock'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
+    if (/ORDER_FORBIDDEN/.test(result.error.message)) throw new JobError('Only the order administrator can manage assignments.', 403)
+    if (/ORDER_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Assignment or payment changed. Reload the order before saving again.', 409)
+    if (/ORDER_USER_NOT_FOUND/.test(result.error.message)) throw new JobError('Selected user no longer exists.', 404)
+    if (/ORDER_INVALID/.test(result.error.message)) throw new JobError('Invalid order assignment.', 400)
     if (/BOX_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Box stock changed. Refresh before updating the count.', 409)
     if (/BOX_NOT_FOUND/.test(result.error.message)) throw new JobError('Box not found.', 404)
     if (/COMPONENT_REVISION_CONFLICT/.test(result.error.message)) throw new JobError('Component changed since the expected revision. Nothing was replaced.', 409)
@@ -25,6 +29,18 @@ function checked<T>(result: { data: T; error: { message: string } | null }): T {
 export function supabaseRepository(db: SupabaseClient): JobRepository {
   const get = async (owner: string, id: string) => checked(await db.from('cnc_jobs').select('*').eq('owner_id', owner).eq('id', id).maybeSingle()) as StoredJob | undefined
   return {
+    async orderAdmin() {
+      return checked(await db.from('cnc_order_admin').select('user_id').eq('singleton', true).maybeSingle())?.user_id ?? null
+    },
+    async orderUsers(owner, offset) {
+      return checked(await db.rpc('cnc_order_users', { p_actor: owner, p_offset: offset })) ?? []
+    },
+    async orderAssignments(owner, shop, ids, offset = 0, search = '') {
+      return checked(await db.rpc('read_cnc_order_assignments', { p_actor: owner, p_shop: shop, p_ids: ids ?? null, p_offset: offset, p_search: search })) ?? []
+    },
+    async assignOrder(owner, shop, id, name, input) {
+      checked(await db.rpc('assign_cnc_order', { p_actor: owner, p_shop: shop, p_order_id: id, p_order_name: name, p_assignee: input.assigneeId, p_payment_pence: input.paymentPence, p_expected_version: input.expectedVersion }))
+    },
     async boxes(_owner) {
       return boxStockSchema.array().parse(checked(await db.from('box_stock').select('id,name,length_mm,width_mm,height_mm,quantity,details,version,updated_at').order('length_mm').order('id')) ?? [])
     },

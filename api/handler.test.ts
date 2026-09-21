@@ -15,6 +15,10 @@ const font = new Uint8Array(await readFile(new URL('./assets/NotoSans-Regular.tt
 function fixture() {
   const jobs = new Map<string, StoredJob & { owner: string; key: string; artifacts: Artifact[] }>()
   const repo: JobRepository = {
+    orderAdmin: vi.fn(async () => 'alice'),
+    orderUsers: vi.fn(async () => []),
+    orderAssignments: vi.fn(async () => []),
+    assignOrder: vi.fn(async () => {}),
     boxes: vi.fn(async () => []),
     createBox: vi.fn(async (_owner, input) => ({ ...input, version: 1, updated_at: '2026-09-21' })),
     countBox: vi.fn(async () => { throw new JobError('Not found', 404) }),
@@ -58,11 +62,15 @@ describe('jobs HTTP API', () => {
     const invoke = (path: string, token = 'alice', method = 'GET') => api(new Request(`http://localhost/v1${path}`, { method, headers: { Authorization: `Bearer ${token}` } }))
     expect((await invoke('/shopify/connection', 'invalid')).status).toBe(401)
     const response = await invoke('/shopify/connection')
-    expect(await response.json()).toEqual({ accountId: 'alice', connected: false })
+    expect(await response.json()).toEqual({ accountId: 'alice', connected: false, isOrderAdmin: true })
     expect(response.headers.get('Cache-Control')).toContain('no-store')
     expect((await invoke('/shopify/orders')).status).toBe(404)
     expect((await invoke('/shopify/orders/123')).status).toBe(404)
     expect((await invoke('/shopify/orders/123', 'alice', 'PATCH')).status).toBe(404)
+    expect((await invoke('/shopify/users', 'bob')).status).toBe(403)
+    const denied = await api(new Request('http://localhost/v1/shopify/orders/123/assignment', { method: 'PATCH', headers: { Authorization: 'Bearer bob', 'Content-Type': 'application/json' }, body: '{}' }))
+    expect(denied.status).toBe(403)
+    expect(f.repo.assignOrder).not.toHaveBeenCalled()
   })
   it('validates authenticated shared box reads, creation and revision-checked counts', async () => {
     const f = fixture(), id = crypto.randomUUID()

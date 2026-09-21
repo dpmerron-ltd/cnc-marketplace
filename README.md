@@ -36,7 +36,7 @@ npm run build
 Sign-in and MFA use Supabase. Each account has its own private item library and browser backup.
 
 1. Open Supabase SQL Editor.
-2. Run `supabase/schema.sql`.
+2. Run `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql`, in that order.
 3. Restart the app.
 
 For local development, copy `.env.example` to `.env.local` and set:
@@ -50,7 +50,7 @@ The current MVP stores G-code and optional DXF text in Postgres rows. Row-level 
 
 Browser backups are keyed by account ID. The old shared browser cache is never automatically loaded. Explicit project-file imports create independent copies with new IDs in the importing account. Saved placements referencing another account's components are removed when loaded.
 
-The Pages deployment applies `supabase/schema.sql` transactionally before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
+The Pages deployment applies `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql` transactionally before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
 
 ## MVP Features
 

@@ -13,6 +13,19 @@ function fixture() {
   return { fetcher, clock, reader: shopifyReader(JSON.stringify(config), fetcher, () => clock.now) }
 }
 describe('Shopify order access', () => {
+  it('batches only explicit assigned IDs and rejects unexpected IDs without exposing private fields', async () => {
+    const { reader, fetcher } = fixture()
+    fetcher.mockResolvedValueOnce(response({ access_token: 'token', expires_in: 86400, scope: 'read_orders' }))
+      .mockResolvedValueOnce(response({ data: { nodes: [{ ...order, totalPrice: 'secret', customer: { email: 'private' } }, null] } }))
+    expect(await reader.ordersByIds(alice, ['123', '456'])).toEqual([order])
+    const sent = JSON.parse(String(fetcher.mock.calls[1][1]?.body))
+    expect(sent.variables).toEqual({ ids: ['gid://shopify/Order/123', 'gid://shopify/Order/456'] })
+    expect(sent.query).not.toMatch(/price|total|money|customer|email|address|mutation/i)
+    fetcher.mockResolvedValueOnce(response({ data: { nodes: [{ ...order, id: 'gid://shopify/Order/999' }] } }))
+    await expect(reader.ordersByIds(alice, ['123'])).rejects.toMatchObject({ status: 502 })
+    for (const ids of [[], ['bad'], Array(26).fill('123')]) await expect(reader.ordersByIds(alice, ids)).rejects.toMatchObject({ status: 400 })
+    await expect(reader.ordersByIds(bob, ['123'])).rejects.toMatchObject({ status: 404 })
+  })
   it('never contacts Shopify for another account or exposes its credentials/store', async () => {
     const { reader, fetcher } = fixture()
     expect(reader.connection(bob)).toEqual({ accountId: bob, connected: false })

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { JobError } from '../src/jobs/generateJob'
-import type { ShopifyConnection, ShopifyOrderDetail, ShopifyOrders } from '../src/orders/types'
+import type { ShopifyConnection, ShopifyOrder, ShopifyOrderDetail, ShopifyOrders } from '../src/orders/types'
 
 const connectionSchema = z.strictObject({
   ownerId: z.uuid(), shop: z.string().regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/),
@@ -23,6 +23,7 @@ export interface ShopifyReader {
   connection(owner: string): ShopifyConnection
   orders(owner: string, params: URLSearchParams): Promise<ShopifyOrders>
   order(owner: string, id: string, params: URLSearchParams): Promise<ShopifyOrderDetail>
+  ordersByIds(owner: string, ids: string[]): Promise<ShopifyOrder[]>
 }
 
 export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = Date.now): ShopifyReader {
@@ -86,6 +87,15 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
   }
   return {
     connection(owner) { const c = connections.get(owner); return { accountId: owner, connected: Boolean(c), ...(c ? { shop: c.shop } : {}) } },
+    async ordersByIds(owner, ids) {
+      const c = get(owner)
+      if (!ids.length || ids.length > 25 || ids.some(id => !/^\d{1,30}$/.test(id))) throw new JobError('Invalid assigned order IDs.', 400)
+      const gids = ids.map(id => `gid://shopify/Order/${id}`)
+      const query = `query CncAssignedOrders($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id name lineItems(first: 5) { ${itemFields} } } } }`
+      const result = z.object({ nodes: z.array(order.nullable()) }).safeParse(await graphql(c, query, { ids: gids }))
+      if (!result.success || result.data.nodes.some(o => o && !gids.includes(o.id))) throw new JobError('Shopify returned unexpected assigned orders.', 502)
+      return result.data.nodes.flatMap(o => o ? [o] : [])
+    },
     async orders(owner, values) {
       const c = get(owner), input = params(listParams, values)
       const query = [filters[input.status], input.search.trim() ? `name:"${input.search.trim()}"` : ''].filter(Boolean).join(' ')

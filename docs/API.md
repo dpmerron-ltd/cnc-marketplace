@@ -6,7 +6,7 @@ Creates immutable, private cutting jobs from the authenticated account's item li
 
 It also converts uploaded DXF text into new component NC through `POST /dxf-to-nc`, using the same generator as the site's **Generate** page.
 
-Read-only Shopify orders and shared workshop box inventory are also available. See [Shopify and shared boxes](SHOPIFY-AND-BOXES.md) for routes, server-side connection setup and packing assumptions. Shopify orders remain account-private and contain no prices/customer details. Box stock is deliberately shared by all authenticated users; changing a count requires its current revision.
+Shopify orders and shared workshop box inventory are also available. See [Shopify and shared boxes](SHOPIFY-AND-BOXES.md) for routes, assignment permissions, server-side connection setup and packing assumptions. Dan sees all orders and assigns users with a fixed GBP cutting fee (record only); other users see only assigned orders. Shopify prices/customer details remain hidden. Box stock is deliberately shared by all authenticated users; changing a count requires its current revision.
 
 ## Authentication
 
@@ -276,7 +276,7 @@ Errors are JSON with `error`, optional `details`, and a `requestId`. `400` inval
 
 ## Deployment and Development
 
-The API is a Supabase Edge Function. The site's GitHub Pages deployment applies `supabase/schema.sql` and `supabase/api.sql` after tests. Backend credentials remain in Supabase; no service-role key belongs in a Vite environment variable.
+The API is a Supabase Edge Function. The site's GitHub Pages deployment applies `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql` after tests. Backend credentials remain in Supabase; no service-role key belongs in a Vite environment variable.
 
 ```bash
 npm ci

@@ -11,11 +11,12 @@ import { createItemSchema, updateImageSchema, type CreateItemInput } from './ite
 import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement } from './components'
 import { shopifyReader, type ShopifyReader } from './shopify'
 import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
+import { orderService, type OrderRepository } from './orderAssignments'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
 export interface StoredJob extends CuttingJob { request_hash: string }
-export interface JobRepository {
+export interface JobRepository extends OrderRepository {
   boxes(owner: string): Promise<BoxStock[]>
   createBox(owner: string, input: BoxInput): Promise<BoxStock>
   countBox(owner: string, id: string, input: BoxCount): Promise<BoxStock>
@@ -87,10 +88,15 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         if (!input.success) throw new JobError('Supply quantity and expectedVersion.', 400)
         return json(await repository.countBox(owner, boxMatch[1], input.data))
       }
-      if (path === '/v1/shopify/connection' && request.method === 'GET') return json(getShopify().connection(owner))
-      if (path === '/v1/shopify/orders' && request.method === 'GET') return json(await getShopify().orders(owner, url.searchParams))
-      const shopifyOrder = path.match(/^\/v1\/shopify\/orders\/(\d{1,30})$/)
-      if (shopifyOrder && request.method === 'GET') return json(await getShopify().order(owner, shopifyOrder[1], url.searchParams))
+      if (path.startsWith('/v1/shopify/')) {
+        const orders = await orderService(repository, getShopify(), owner)
+        if (path === '/v1/shopify/connection' && request.method === 'GET') return json(orders.connection)
+        if (path === '/v1/shopify/users' && request.method === 'GET') return json(await orders.users(url.searchParams))
+        if (path === '/v1/shopify/orders' && request.method === 'GET') return json(await orders.orders(url.searchParams))
+        const match = path.match(/^\/v1\/shopify\/orders\/(\d{1,30})(\/assignment)?$/)
+        if (match && !match[2] && request.method === 'GET') return json(await orders.order(match[1], url.searchParams))
+        if (match?.[2] && request.method === 'PATCH') return json(await orders.assign(match[1], await body(request)))
+      }
       const programsForOwner = async () => {
         const programs = await repository.programSettings(owner)
         if (!programs) throw new JobError('Configure CNC program settings in your User Profile before generating G-code.', 422)

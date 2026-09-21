@@ -1,8 +1,19 @@
-export interface ShopifyConnection { accountId: string; connected: boolean; shop?: string }
+export interface ShopifyConnection { accountId: string; connected: boolean; shop?: string; isOrderAdmin?: boolean }
+export interface OrderUser { id: string; email: string }
+export interface OrderAssignment {
+  order_id: string
+  assignee_id: string | null
+  assignee_email: string | null
+  payment_pence: number | null
+  currency: 'GBP'
+  version: number
+  updated_at: string
+}
 export interface OrderPageInfo { hasNextPage: boolean; endCursor: string | null }
 export interface ShopifyOrder {
   id: string
   name: string
+  assignment?: OrderAssignment | null
   lineItems: { nodes: ShopifyLineItem[]; pageInfo: OrderPageInfo }
 }
 export interface ShopifyLineItem {

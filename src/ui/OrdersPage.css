@@ -1,4 +1,13 @@
 .orders-store { color: #52616b; font-size: 13px; overflow-wrap: anywhere; }
+.order-assignment { padding-bottom: 16px; border-bottom: 1px solid #dae0e5; margin-bottom: 16px; }
+.order-assignment h4 { margin: 16px 0 0; font-size: 15px; }
+.order-assignment .orders-filters { margin-top: 12px; }
+.order-assignment label { max-width: 100%; }
+.order-assignment select { width: 300px; }
+.order-assignment input { width: 220px; }
+.order-assignee { overflow-wrap: anywhere; max-width: 240px; }
+.order-assign-button { display: block; margin-top: 8px; }
+.order-payment-label { display: none; }
 .orders-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 20px 0 12px; }
 .orders-filters label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; min-width: 0; }
 .orders-filters input, .orders-filters select { min-height: 36px; max-width: 100%; box-sizing: border-box; }
@@ -10,6 +19,7 @@
 .orders-detail h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
 .orders-admin { display: inline-flex; align-items: center; gap: 6px; }
 .orders-lines td { overflow-wrap: anywhere; max-width: 360px; }
+.orders-lines { min-width: 600px; }
 .orders-lines code { white-space: normal; }
 .orders-detail-error { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .order-add-button { white-space: nowrap; }
@@ -22,6 +32,7 @@
 .order-sheet-actions { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; font-size: 13px; }
 @media (max-width: 600px) { .orders-search { flex-basis: 150px; } .orders-filters select { width: 100%; } }
 @media (max-width: 600px) {
+  .order-payment-label { display: inline; }
   .orders-table, .orders-table tbody { display: block; }
   .orders-table thead { display: none; }
   .orders-table tr { display: grid; grid-template-columns: 96px minmax(0, 1fr); border-bottom: 1px solid #d8dfe5; }

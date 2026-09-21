@@ -14,6 +14,19 @@ function fixture() {
   return { query, db, repo: supabaseRepository(db as unknown as SupabaseClient) }
 }
 describe('API credential verification', () => {
+  it('passes authenticated identity into scoped order RPCs and reports assignment conflicts', async () => {
+    const rpc = vi.fn(async (_name: string, _args: unknown): Promise<{ data: unknown; error: { message: string } | null }> => ({ data: [], error: null }))
+    const repo = supabaseRepository({ rpc } as unknown as SupabaseClient)
+    await repo.orderUsers('dan', 100)
+    expect(rpc).toHaveBeenLastCalledWith('cnc_order_users', { p_actor: 'dan', p_offset: 100 })
+    await repo.orderAssignments('bob', 'test.myshopify.com', ['123'])
+    expect(rpc).toHaveBeenLastCalledWith('read_cnc_order_assignments', { p_actor: 'bob', p_shop: 'test.myshopify.com', p_ids: ['123'], p_offset: 0, p_search: '' })
+    const input = { assigneeId: 'bob', paymentPence: 4500, expectedVersion: 2 }
+    await repo.assignOrder('dan', 'test.myshopify.com', '123', '#1007', input)
+    expect(rpc).toHaveBeenLastCalledWith('assign_cnc_order', { p_actor: 'dan', p_shop: 'test.myshopify.com', p_order_id: '123', p_order_name: '#1007', p_assignee: 'bob', p_payment_pence: 4500, p_expected_version: 2 })
+    rpc.mockResolvedValue({ data: null, error: { message: 'ORDER_REVISION_CONFLICT' } })
+    await expect(repo.assignOrder('dan', 'test.myshopify.com', '123', '#1007', input)).rejects.toMatchObject({ status: 409 })
+  })
   it('shares inventory while recording the acting account and mapping revision conflicts', async () => {
     const row = { id: crypto.randomUUID(), name: 'Box', length_mm: 1050, width_mm: 350, height_mm: 400, quantity: 10, version: 1, updated_at: '2026-09-21', details: '' }
     const calls: { method: string; args: unknown[] }[] = []
