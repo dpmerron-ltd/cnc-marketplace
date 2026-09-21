@@ -5,6 +5,7 @@ import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/t
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
 import { generateMaterialVariants } from '../src/cam/materialVariants'
+import { materialProfileId, materialProfileSchema } from '../src/cam/materialProfiles'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -19,11 +20,12 @@ const schema = z.strictObject({
   thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]),
   profilePasses: z.union([z.literal(1), z.literal(2)]).optional(),
   drillDepthMm: z.literal(9).optional(),
+  variantProfiles: z.array(materialProfileSchema).min(1).max(6).refine(value => new Set(value).size === value.length, 'Use each profile once.').optional(),
   filename: z.string().max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*\.dxf$/i, 'Use a DXF filename without a directory.').default('component.dxf'),
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,
   operations: overrides,
-}).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || value.thicknessMm === 18, { path: ['drillDepthMm'], message: 'The 9 mm drilling profile requires 18 mm stock.' })
+}).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || value.thicknessMm === 18, { path: ['drillDepthMm'], message: 'The 9 mm drilling profile requires 18 mm stock.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
 
 export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
@@ -58,7 +60,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 20000 || bytes > 2000000) throw new JobError('Generated NC exceeds 20,000 lines or 2 MB. Split the drawing.', 422)
   const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm)
-  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs }, result)
+  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs }, result, input.variantProfiles)
   return {
     filename: input.filename.replace(/\.dxf$/i, input.drillDepthMm === 9 ? '-18mm-9mm-holes.nc' : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,

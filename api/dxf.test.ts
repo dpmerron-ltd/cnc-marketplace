@@ -203,3 +203,15 @@ it.each(['CUT_DOOR_SHARED_ON_LINE', 'RELEASE_TOOL_CENTRE_6_35'])('preserves expl
   expect(result.gcode).toContain('Shared release: tool centre follows source contour')
   await expect(generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f1: { tabs: 0 } } })).rejects.toMatchObject({ status: 422 })
 })
+
+it('limits optional variant generation without changing the primary program or fabricating alternatives', async () => {
+  const all = await generateDxfNc({ dxf: drawing, thicknessMm: 12 })
+  const selected = await generateDxfNc({ dxf: drawing, thicknessMm: 12, variantProfiles: ['12'] })
+  expect(selected.gcode).toBe(all.gcode)
+  expect(selected.materialVariants.profiles['12']).toEqual(all.materialVariants.profiles['12'])
+  for (const [id, variant] of Object.entries(selected.materialVariants.profiles)) {
+    if (id !== '12') expect(variant).toMatchObject({ gcode: '', errors: [expect.stringContaining('Not generated')] })
+  }
+  expect(() => parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Dense panel', sku: 'DENSE', filename: selected.filename, gcode: selected.gcode, dxf: drawing, materialVariants: selected.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')).not.toThrow()
+  for (const variantProfiles of [[], ['18'], ['12', '12'], ['unknown']]) await expect(generateDxfNc({ dxf: drawing, thicknessMm: 12, variantProfiles })).rejects.toMatchObject({ status: 400 })
+})

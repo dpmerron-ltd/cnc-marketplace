@@ -313,3 +313,9 @@ DXF layers named exactly `CUT_DOOR_SHARED_ON_LINE` and
 operations on these layers follow the original contour without compensation or
 additional corner relief, with holding tabs retained. Ordinary inside and door
 boundaries retain their existing inward compensation.
+
+For dense panels near the serverless CPU budget, request only required stock
+profiles, e.g. `thicknessMm: 12, variantProfiles: ["12"]`. The list must be unique
+and include the primary profile. The exact primary program is unchanged. Omitted
+profiles contain an explicit not-generated error and no NC, so they cannot be
+selected accidentally. Omitting this option retains generation of all profiles.
