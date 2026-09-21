@@ -15,6 +15,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      schema: ${{ steps.changed.outputs.schema }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check schema changes
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "push" ] || [ -z "$BEFORE_SHA" ] || [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+            echo "schema=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- supabase/schema.sql supabase/api.sql supabase/orders.sql; then
+            echo "schema=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "schema=true" >> "$GITHUB_OUTPUT"
+          fi
+
   database-tests:
     runs-on: ubuntu-latest
     services:
@@ -85,16 +108,18 @@ jobs:
           path: dist
 
   schema:
-    needs: [build, database-tests]
+    needs: [build, database-tests, changes]
+    if: needs.changes.outputs.schema == 'true'
     uses: ./.github/workflows/apply-supabase-schema.yml
     secrets: inherit
 
   deploy:
+    if: always() && needs.build.result == 'success' && needs.database-tests.result == 'success' && needs.changes.result == 'success' && (needs.schema.result == 'success' || needs.schema.result == 'skipped')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    needs: [build, schema]
+    needs: [build, database-tests, changes, schema]
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
