@@ -47,6 +47,7 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/tests/api-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/program-settings-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/box-stock-isolation.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/component-program-protection.sql
 
   build:
     runs-on: ubuntu-latest

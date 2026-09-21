@@ -67,6 +67,13 @@ Returns `201` with `id`, `itemId`, `name`, `sku`, `filename`, `widthMm`, `height
 
 To create an item from DXFs: create the item once; call `/dxf-to-nc` for each DXF; review its warnings/operations; upload its exact returned NC plus source DXF through this route. Keep original source distinctions such as screw-mark depth, pre-existing corner reliefs and required tooling: do not silently substitute incompatible preset operations. No upload creates a sheet, approves a cutting job, or operates the machine. Reload the site to see API-created components. Job-generation limits (including 5,000 total source lines) still apply separately.
 
+Browser sheet autosaves insert new components only; they never replace existing programs.
+A database trigger also rejects machining-program, variant, source or geometry changes
+from older browser upserts, so a stale open tab cannot undo an API correction. Use the
+revision-checked replacement endpoint above for intentional program changes. After a
+correction, back up any unsaved layout, reload the catalogue and re-export; existing
+downloads and job artifacts are not rewritten.
+
 ## Generate NC from DXF
 
 ### Account Program Settings

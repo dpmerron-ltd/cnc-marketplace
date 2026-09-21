@@ -31,10 +31,9 @@ begin
   exception when check_violation then null;
   end;
 end $$;
-insert into public.cnc_components (id, owner_id, item_id, name, original_filename, gcode, width, height, bounding_box, original_bounds, metadata)
-  values ('account-a-part', auth.uid(), '10000000-0000-4000-8000-000000000001', 'Part A', 'a.nc', 'G21', 1, 1, '{}', '{}', '{}');
+insert into public.cnc_components (id, owner_id, item_id, name, original_filename, gcode, width, height, bounding_box, original_bounds, metadata, material_variants)
+  values ('account-a-part', auth.uid(), '10000000-0000-4000-8000-000000000001', 'Part A', 'a.nc', 'G21', 1, 1, '{}', '{}', '{}', '{"version":1,"profiles":{"6":{"gcode":"G21"}}}');
 insert into public.sheet_projects (id, owner_id, sheet) values ('account-a-sheet', auth.uid(), '{}');
-update public.cnc_components set material_variants = '{"version":1,"profiles":{"6":{"gcode":"G21"}}}' where id = 'account-a-part';
 -- Older clients write metadata without knowing about the separate variants column.
 update public.cnc_components set metadata = '{"warnings":[]}' where id = 'account-a-part';
 insert into public.sheet_history (id, owner_id, name, sheet) values ('account-a-history', auth.uid(), 'A', '{}');

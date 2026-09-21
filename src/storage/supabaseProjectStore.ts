@@ -232,11 +232,13 @@ export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[],
     }
   }
 
-  // Keep bulk row keys uniform: a missing field in a mixed upsert can become NULL.
+  // Sheet autosaves may carry stale programs from before an API correction.
+  // Insert new imports only; existing programs are changed through revision-checked API writes.
   for (const group of [saveableParts.filter(part => !part.metadata.materialVariants), saveableParts.filter(part => part.metadata.materialVariants)]) {
     if (!group.length) continue
     const componentsResult = await supabase.from('cnc_components').upsert(
       group.map(componentRow),
+      { onConflict: 'id', ignoreDuplicates: true },
     )
     if (componentsResult.error) {
       console.warn('Supabase component save failed.', componentsResult.error)

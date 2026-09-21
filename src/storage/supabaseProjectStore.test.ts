@@ -62,7 +62,7 @@ describe('cloud account boundaries', () => {
     expect(mock.queries.at(-1)?.write).toEqual({ image: null, updated_at: expect.any(String) })
   })
 
-  it('separates legacy and variant component bulk writes to preserve omitted columns', async () => {
+  it('inserts new imports without overwriting existing programs during sheet autosave', async () => {
     const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
     const legacy = { ...testParts[0], ownerId: 'alice' }
     const generated = { ...legacy, id: 'generated', metadata: { ...legacy.metadata, materialVariants } }
@@ -72,6 +72,10 @@ describe('cloud account boundaries', () => {
     expect(writes).toEqual([
       [expect.not.objectContaining({ material_variants: expect.anything() })],
       [expect.objectContaining({ material_variants: materialVariants })],
+    ])
+    expect(mock.queries.filter(query => query.table === 'cnc_components').map(query => query.options)).toEqual([
+      { onConflict: 'id', ignoreDuplicates: true },
+      { onConflict: 'id', ignoreDuplicates: true },
     ])
   })
 

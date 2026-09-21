@@ -69,6 +69,25 @@ alter table public.cnc_components
 alter table public.cnc_components
   add column if not exists material_variants jsonb;
 
+-- Old open tabs still send whole-catalogue upserts. Protect corrected programs
+-- server-side as well as in the new client; API replacements use a guarded RPC.
+create or replace function public.protect_component_program()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if current_user in ('authenticated', 'anon') and
+    row(new.gcode, new.dxf, new.material_variants, new.width, new.height, new.bounding_box, new.original_bounds)
+    is distinct from
+    row(old.gcode, old.dxf, old.material_variants, old.width, old.height, old.bounding_box, old.original_bounds)
+  then
+    raise exception 'Component program conflict: an existing machining program cannot be overwritten by browser autosave. Export Project to back up your layout, then reload to use the current components.' using errcode = '40001';
+  end if;
+  return new;
+end $$;
+revoke all on function public.protect_component_program() from public, anon, authenticated;
+drop trigger if exists protect_component_program on public.cnc_components;
+create trigger protect_component_program before update on public.cnc_components
+  for each row execute function public.protect_component_program();
+
 update public.cnc_components component
 set sku = item.sku || '-C' || upper(right(regexp_replace(component.id, '[^a-zA-Z0-9]+', '', 'g'), 6))
 from public.marketplace_items item
