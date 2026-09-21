@@ -26,9 +26,9 @@ export const jobRequestSchema = z.strictObject({
   jobName: text(160), orderNumber: text(100), notes: z.string().trim().max(2000).default(''),
   items: z.array(z.strictObject({ itemId: z.uuid().optional(), sku: text(100).optional(), quantity: z.number().int().min(1).max(20) }).refine(value => Boolean(value.itemId) !== Boolean(value.sku), 'Supply either itemId or sku, not both.')).min(1).max(20),
   sheet: z.strictObject({
-    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2)]).optional(),
+    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2)]).optional(), drillDepthMm: z.literal(9).optional(),
     spacingMm: z.number().min(0).max(100).default(30), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(true),
-  }).refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => value.profilePasses === undefined || value.thicknessMm === 12, 'Profile pass selection requires 12 mm stock.'),
+  }).refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => value.profilePasses === undefined || value.thicknessMm === 12, 'Profile pass selection requires 12 mm stock.').refine(value => value.drillDepthMm === undefined || value.thicknessMm === 18, 'The 9 mm drilling profile requires 18 mm stock.'),
   labels: z.strictObject({ widthMm: z.number().min(40).max(190).default(50), heightMm: z.number().min(20).max(277).default(25) }).default({ widthMm: 50, heightMm: 25 }),
 })
 
@@ -53,7 +53,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   }
   const items = catalog.filter(item => counts.has(item.id))
   const sourceParts = components.filter(part => counts.has(part.itemId ?? '')).sort((a, b) => a.id.localeCompare(b.id))
-  const materialProfile = request.sheet.thicknessMm === undefined ? undefined : materialProfileId(request.sheet.thicknessMm, request.sheet.profilePasses)
+  const materialProfile = request.sheet.thicknessMm === undefined ? undefined : materialProfileId(request.sheet.thicknessMm, request.sheet.profilePasses, request.sheet.drillDepthMm)
   const selection = selectMaterialParts(sourceParts, { materialProfile, instances: sourceParts.map(part => ({ partId: part.id })) })
   if (selection.errors.length) throw new JobError('The selected sheet thickness is unavailable for one or more components.', 422, selection.errors)
   const parts = selection.parts

@@ -38,10 +38,10 @@ export function parseComponent(value: unknown, ownerId: string, itemId: string) 
   if (errors.length) throw new JobError('Component failed machining validation and was not saved.', 422, errors)
   if (simulation.deepestCutMm <= 0) throw new JobError('Component contains no below-surface cutting moves.', 422)
   if (input.materialVariants) {
-    if (input.materialVariants.profiles[input.materialVariants.primaryProfile].gcode !== input.gcode) throw new JobError('Primary material variant must match the uploaded G-code exactly.', 422)
+    if (input.materialVariants.profiles[input.materialVariants.primaryProfile]?.gcode !== input.gcode) throw new JobError('Primary material variant must match the uploaded G-code exactly.', 422)
     for (const profile of materialProfiles) {
       const variant = input.materialVariants.profiles[profile.id]
-      if (!variant.gcode) continue
+      if (!variant?.gcode) continue
       parseComponent({ ...input, materialVariants: undefined, gcode: variant.gcode }, ownerId, itemId)
       if (simulateGCode(variant.gcode).deepestCutMm > materialPreset(profile.thickness, profile.thickness === 12 ? profile.profilePasses : undefined).depth + 0.001) throw new JobError(`${profile.label} variant cuts deeper than its material preset.`, 422)
     }

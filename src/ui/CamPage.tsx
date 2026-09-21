@@ -39,7 +39,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const [itemId, setItemId] = useState(items[0]?.id ?? '')
   const [saved, setSaved] = useState(false)
   const [view, setView] = useState<'preview' | 'code'>('preview')
-  const material = materialPreset(settings.thickness, settings.profilePasses)
+  const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
   useEffect(() => {
     if (!source) return
     let active = true
@@ -114,7 +114,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const layers = [...new Set(features.map(f => f.layer))]
   const problems = [error, ...(result?.errors ?? [])].filter(Boolean)
   const ready = Boolean(result?.gcode) && !busy && !saving && !problems.length && reviewed
-  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.profilePasses === 2 ? '-2pass' : ''}.nc`
+  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.drillDepthMm === 9 ? '-9mm-holes' : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
   const batch = queue.length > 1
   const currentFile = queue[fileIndex]
   const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')
@@ -144,7 +144,10 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
       <details><summary>{complete ? 'Processed files' : 'Queued files'}</summary><ol>{queue.map((entry, index) => <li key={index} aria-current={index === fileIndex && entry.status === 'pending' ? 'step' : undefined}><span>{index + 1}. {entry.file.name}</span><span>{entry.status === 'confirmed' ? <><Check size={14} />Confirmed</> : entry.status === 'skipped' ? 'Skipped' : index === fileIndex ? 'In review' : 'Waiting'}</span></li>)}</ol></details>
     </section>}
     <div className="cam-settings">
-      <label>Material thickness<select value={settings.profilePasses === 2 ? '12-2pass' : settings.thickness} onChange={e => update(e.target.value === '12-2pass' ? { thickness: 12, profilePasses: 2 } : { thickness: Number(e.target.value) as CamSettings['thickness'], profilePasses: undefined })}><option value="18">18 mm</option><option value="15">15 mm</option><option value="12">12 mm (1 pass)</option><option value="12-2pass">12 mm (2 passes)</option><option value="6">6 mm (1 pass)</option></select></label>
+      <label>Material thickness<select value={settings.drillDepthMm === 9 ? '18-9mm' : settings.profilePasses === 2 ? '12-2pass' : settings.thickness} onChange={e => {
+        const profile = materialProfiles.find(profile => profile.id === e.target.value)!
+        update({ thickness: profile.thickness, profilePasses: profile.thickness === 12 && profile.profilePasses === 2 ? 2 : undefined, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined })
+      }}>{[...materialProfiles].reverse().map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label>
       <label>DXF units<select value={settings.units} onChange={e => update({ units: e.target.value as CamSettings['units'] })}><option value="auto">From DXF{result ? ` (${result.drawing.units})` : ''}</option><option value="mm">Millimetres</option><option value="inches">Inches</option></select></label>
       <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{programs.spindleStartGcode.trim() ? `${spindleRpm(programs).toLocaleString()} rpm` : 'Manual control'}</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {material.passes[0]} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>3 deg / 600 mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
     </div>
@@ -182,7 +185,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
         {result && <div className="cam-extents"><span>Extent X {result.simulation.bounds.maxX.toFixed(2)} / Y {result.simulation.bounds.maxY.toFixed(2)} mm</span><span>DXF shift X {result.shift.x.toFixed(2)} / Y {result.shift.y.toFixed(2)} mm</span><span>Tabs 10 mm wide / 6 mm above final depth</span></div>}
         {problems.length > 0 && <section className="cam-problems" role="alert"><h3><CircleAlert size={16} aria-hidden="true" />Export blocked ({problems.length})</h3><ul>{problems.map((message, i) => <li key={i}>{message}</li>)}</ul></section>}
         {!!result?.warnings.length && <details className="cam-warnings"><summary><TriangleAlert size={15} aria-hidden="true" />Review notices ({result.warnings.length})</summary><ul>{result.warnings.map((message, i) => <li key={i}>{message}</li>)}</ul></details>}
-        {!busy && materialVariants && <details className="cam-warnings"><summary>Material variants</summary><ul>{materialProfiles.map(profile => <li key={profile.id}>{profile.label}: {materialVariants.profiles[profile.id].errors.length ? `Unavailable: ${materialVariants.profiles[profile.id].errors.join(' ')}` : 'Generated'}</li>)}</ul></details>}
+        {!busy && materialVariants && <details className="cam-warnings"><summary>Material variants</summary><ul>{materialProfiles.map(profile => <li key={profile.id}>{profile.label}: {!materialVariants.profiles[profile.id] ? 'Unavailable: regenerate this component' : materialVariants.profiles[profile.id]!.errors.length ? `Unavailable: ${materialVariants.profiles[profile.id]!.errors.join(' ')}` : 'Generated'}</li>)}</ul></details>}
       </section>
     </div>
     <footer className="cam-export">

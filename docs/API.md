@@ -293,3 +293,23 @@ For automatic backend deployment after successful site/schema deployments, add `
 Local backend: after `npm run build:api`, run `npx supabase functions serve cnc-api` against a local Supabase instance with the schemas applied and local auth/catalog fixtures. Never use production service credentials for an unauthenticated local test fixture. The function validates its own account key or MFA JWT on every non-OPTIONS request; platform JWT verification is disabled specifically to support account API keys.
 
 The bundled Noto Sans font is licensed under the SIL Open Font License in `api/assets/OFL.txt`. Source: https://github.com/notofonts/noto-fonts/tree/main/hinted/ttf/NotoSans.
+
+
+### 18 mm stock with 9 mm fixing holes
+
+DXF conversion accepts `thicknessMm: 18, drillDepthMm: 9` to select the opt-in
+`18-9mm` profile. The 6.35 mm cutter, 9.2 / 18.4 mm through passes and separate
+pocket depths are unchanged; only drilling stops at exactly 9 mm. Omitting
+`drillDepthMm` retains every existing preset. Other drilling depths or stock
+combinations are rejected. The same `sheet.drillDepthMm: 9` selector is available
+for 18 mm API jobs. The browser offers **18 mm (9 mm holes)** for CAM and sheets.
+
+New material bundles include `18-9mm`. Existing five-profile bundles remain valid
+and are not modified. Selecting the new profile for an old component without that
+program blocks export until the component is regenerated.
+
+DXF layers named exactly `CUT_DOOR_SHARED_ON_LINE` and
+`RELEASE_TOOL_CENTRE_6_35` are explicit shared-release tool centrelines. Inside
+operations on these layers follow the original contour without compensation or
+additional corner relief, with holding tabs retained. Ordinary inside and door
+boundaries retain their existing inward compensation.

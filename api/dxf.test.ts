@@ -20,8 +20,8 @@ describe('DXF API generation', () => {
     expect(result.materialVariants.primaryProfile).toBe('6')
     expect(result.materialVariants.profiles['6'].gcode).toBe(result.gcode)
     for (const profile of materialProfiles) {
-      expect(result.materialVariants.profiles[profile.id].errors).toEqual([])
-      expect(result.materialVariants.profiles[profile.id].gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
+      expect(result.materialVariants.profiles[profile.id]!.errors).toEqual([])
+      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
     }
     const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: 'panel.nc', dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
     expect(uploaded.part.metadata.materialVariants).toEqual(result.materialVariants)
@@ -158,4 +158,48 @@ describe('DXF API generation', () => {
     await expect(generateDxfNc({ dxf: '\u00e9'.repeat(1000001), thicknessMm: 18 })).rejects.toMatchObject({ status: 413 })
     await expect(generateDxfNc({ dxf: dxf(Array.from({ length: 101 }, (_, i) => circle('DRILL', i * 10))), thicknessMm: 18 })).rejects.toMatchObject({ status: 422, message: expect.stringContaining('100 features') })
   })
+})
+
+describe('18 mm profile with 9 mm holes', () => {
+  it('keeps drilling at 9 mm with unchanged cutter, profiles, hinges and legacy variants', async () => {
+    const result = await generateDxfNc({ dxf: drawing, thicknessMm: 18, drillDepthMm: 9, filename: 'panel.dxf' })
+    expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, drillDepthMm: 9, passDepthsMm: [9.2, 18.4], cutDepthMm: 18.4 })
+    expect(result.operations.find(op => op.kind === 'drill')?.depthMm).toBe(9)
+    expect(result.gcode).toContain('G01 Z-9 F600\nG00 Z20')
+    expect(result.filename).toBe('panel-18mm-9mm-holes.nc')
+    expect(result.materialVariants.primaryProfile).toBe('18-9mm')
+    expect(result.materialVariants.profiles['18-9mm']?.gcode).toBe(result.gcode)
+    expect(result.materialVariants.profiles['18'].gcode).toBe((await generateDxfNc({ dxf: drawing, thicknessMm: 18 })).gcode)
+    const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: result.filename, dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
+    expect(uploaded.part.metadata.materialVariants?.primaryProfile).toBe('18-9mm')
+    const hinge = await generateDxfNc({ dxf: dxf([profile, [0, 'CIRCLE', 8, 'HINGE', 10, 50, 20, 50, 40, 17.5]]), thicknessMm: 18, drillDepthMm: 9, layerOperations: { HINGE: { kind: 'pocket', depthMm: 12 } } })
+    expect(hinge.operations.find(op => op.kind === 'pocket')?.depthMm).toBe(12)
+  })
+  it.each([{ thicknessMm: 12, drillDepthMm: 9 }, { thicknessMm: 15, drillDepthMm: 9 }, { thicknessMm: 18, drillDepthMm: 8 }, { thicknessMm: 18, drillDepthMm: 9.2 }])('rejects unsupported profile combinations %j', async patch => {
+    await expect(generateDxfNc({ dxf: drawing, ...patch })).rejects.toMatchObject({ status: 400 })
+  })
+  it('accepts original five-profile bundles without fabricating the new profile', async () => {
+    const result = await generateDxfNc({ dxf: drawing, thicknessMm: 18 })
+    delete result.materialVariants.profiles['18-9mm']
+    const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Legacy', sku: 'LEGACY', filename: 'legacy.nc', gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
+    expect(uploaded.part.metadata.materialVariants?.profiles['18-9mm']).toBeUndefined()
+    await expect(generateDxfNc({ dxf: drawing, thicknessMm: 18 })).resolves.toBeDefined()
+    expect(() => parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Bad', sku: 'BAD', filename: 'bad.nc', gcode: result.gcode, materialVariants: { ...result.materialVariants, primaryProfile: '18-9mm' } }, 'alice', '10000000-0000-4000-8000-000000000001')).toThrow('Invalid component')
+  })
+})
+
+it.each(['CUT_DOOR_SHARED_ON_LINE', 'RELEASE_TOOL_CENTRE_6_35'])('preserves explicit shared-release centreline on %s with holding tabs', async layer => {
+  const release = [0, 'LWPOLYLINE', 8, layer, 90, 4, 70, 1, 10, 50, 20, 50, 10, 150, 20, 50, 10, 150, 20, 150, 10, 50, 20, 150]
+  const source = dxf([profile, release])
+  const drawing = readDxf(source)
+  expect(drawing.features[1]).toMatchObject({ kind: 'inside', door: true, toolCentreline: true })
+  const result = generateCam(drawing, { thickness: 18, drillDepthMm: 9, units: 'mm', operations: {} })
+  expect(result.errors).toEqual([])
+  const operation = result.operations.find(op => op.featureId === 'f1')!
+  const xs = operation.path.map(p => p.x), ys = operation.path.map(p => p.y)
+  expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(100)
+  expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(100)
+  expect(operation.tabs).toHaveLength(4)
+  expect(result.gcode).toContain('Shared release: tool centre follows source contour')
+  await expect(generateDxfNc({ dxf: source, thicknessMm: 18, operations: { f1: { tabs: 0 } } })).rejects.toMatchObject({ status: 422 })
 })

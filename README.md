@@ -120,3 +120,7 @@ The sheet preview shows the same planned mark positions as the exporter. Clearan
 The account-scoped jobs API accepts item quantities, auto-nests their components, and queues an immutable job for operator review. It generates a sheet-plan/cutting-list PDF, custom-size labels (50 x 25 mm by default), a JSON manifest, and per-sheet G-code. Manage account API keys and review jobs in **Queue**.
 
 See [API reference and deployment instructions](docs/API.md) for authentication, request examples, retry rules, limits, files, and queue transitions.
+
+The optional **18 mm (9 mm holes)** cutting profile uses the 6.35 mm cutter and
+exactly 9 mm-deep fixing holes, while retaining the normal 18 mm through cuts.
+See [API instructions](docs/API.md) for the `drillDepthMm: 9` selector.

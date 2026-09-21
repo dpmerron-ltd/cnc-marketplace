@@ -111,7 +111,8 @@ export function readDxf(source: string, selectedUnits: 'auto' | 'mm' | 'inches' 
     if (f.kind === 'drill') continue
     if (!f.closed) { warnings.push(`${f.name} is open and needs to be closed or explicitly excluded.`); continue }
     const layer = f.layer.toUpperCase()
-    if (/POCKET|HINGE/.test(layer)) { f.kind = 'inside'; f.depthMm = Number(layer.match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)?.[1]) || undefined }
+    if (layer === 'CUT_DOOR_SHARED_ON_LINE' || layer === 'RELEASE_TOOL_CENTRE_6_35') { f.kind = 'inside'; f.door = true; f.toolCentreline = true }
+    else if (/POCKET|HINGE/.test(layer)) { f.kind = 'inside'; f.depthMm = Number(layer.match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)?.[1]) || undefined }
     else if (f.circle && /DRILL|BORE/.test(layer)) f.kind = 'drill'
     else if (/DOOR|INNER|INSIDE/.test(layer)) f.kind = 'inside'
     else if (/OUTER|PROFILE|OUTSIDE/.test(layer)) f.kind = 'outside'

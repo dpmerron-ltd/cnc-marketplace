@@ -18,11 +18,12 @@ const schema = z.strictObject({
   dxf: z.string().min(1).max(2000000),
   thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]),
   profilePasses: z.union([z.literal(1), z.literal(2)]).optional(),
+  drillDepthMm: z.literal(9).optional(),
   filename: z.string().max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*\.dxf$/i, 'Use a DXF filename without a directory.').default('component.dxf'),
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,
   operations: overrides,
-}).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' })
+}).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || value.thicknessMm === 18, { path: ['drillDepthMm'], message: 'The 9 mm drilling profile requires 18 mm stock.' })
 
 export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
@@ -52,14 +53,14 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
     if (operations[feature.id].tabs !== undefined && !['inside', 'outside'].includes(effective.kind)) throw new JobError(`${feature.id}: tabs are only supported for inside/outside contours.`, 400)
     if (operations[feature.id].cornerOvercuts !== undefined && (!['inside', 'pocket'].includes(effective.kind) || effective.circle)) throw new JobError(`${feature.id}: cornerOvercuts is only supported for non-circular pockets and inside contours.`, 400)
   }
-  const result = generateCam(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, units: input.units, operations, programs })
+  const result = generateCam(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs })
   if (result.errors.length) throw new JobError('DXF machining validation failed.', 422, result.errors)
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 10000 || bytes > 2000000) throw new JobError('Generated NC exceeds 10,000 lines or 2 MB. Split the drawing.', 422)
-  const material = materialPreset(input.thicknessMm, input.profilePasses)
-  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, units: input.units, operations, programs }, result)
+  const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm)
+  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs }, result)
   return {
-    filename: input.filename.replace(/\.dxf$/i, input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
+    filename: input.filename.replace(/\.dxf$/i, input.drillDepthMm === 9 ? '-18mm-9mm-holes.nc' : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true, materialVariants,
     programSettings: { ...programs },
@@ -72,7 +73,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
       reachCheck: false, screwMarking: false,
     },
     drawingShiftMm: result.shift,
-    features: result.drawing.features.map(feature => ({ id: feature.id, name: feature.name, layer: feature.layer, kind: feature.kind, hinge: Boolean(feature.hinge), door: Boolean(feature.door) })),
+    features: result.drawing.features.map(feature => ({ id: feature.id, name: feature.name, layer: feature.layer, kind: feature.kind, hinge: Boolean(feature.hinge), door: Boolean(feature.door), toolCentreline: Boolean(feature.toolCentreline) })),
     operations: result.operations.map(operation => ({ featureId: operation.featureId, name: operation.name, kind: operation.kind, depthMm: operation.depthMm, tabCount: operation.tabs.length, firstLine: operation.firstLine, lastLine: operation.lastLine })),
     summary: { bounds: result.simulation.bounds, deepestCutMm: result.simulation.deepestCutMm, operationCount: result.operations.length },
   }

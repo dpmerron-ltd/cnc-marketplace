@@ -6,17 +6,20 @@ export const materialProfiles = [
   { id: '12-2pass', label: '12 mm (2 passes)', thickness: 12, profilePasses: 2 },
   { id: '15', label: '15 mm', thickness: 15, profilePasses: 2 },
   { id: '18', label: '18 mm', thickness: 18, profilePasses: 2 },
+  { id: '18-9mm', label: '18 mm (9 mm holes)', thickness: 18, profilePasses: 2 },
 ] as const
 export type MaterialProfileId = typeof materialProfiles[number]['id']
-export const materialProfileSchema = z.enum(['6', '12', '12-2pass', '15', '18'])
+export const materialProfileSchema = z.enum(['6', '12', '12-2pass', '15', '18', '18-9mm'])
 const variantSchema = z.strictObject({
   gcode: z.string().max(2000000), warnings: z.array(z.string()), errors: z.array(z.string()),
 }).refine(value => value.errors.length ? !value.gcode : Boolean(value.gcode), 'A variant must contain either valid G-code or blocking errors.')
 export const materialVariantsSchema = z.strictObject({
   version: z.literal(1), primaryProfile: materialProfileSchema,
-  profiles: z.record(materialProfileSchema, variantSchema),
-})
+  // Existing five-profile bundles remain valid; new profiles are never fabricated.
+  profiles: z.strictObject({ '6': variantSchema, '12': variantSchema, '12-2pass': variantSchema, '15': variantSchema, '18': variantSchema, '18-9mm': variantSchema.optional() }),
+}).refine(value => Boolean(value.profiles[value.primaryProfile]), 'Primary material profile must be present.')
 export type MaterialVariants = z.infer<typeof materialVariantsSchema>
-export function materialProfileId(thickness: number, profilePasses?: number): MaterialProfileId | undefined {
+export function materialProfileId(thickness: number, profilePasses?: number, drillDepthMm?: number): MaterialProfileId | undefined {
+  if (drillDepthMm !== undefined) return thickness === 18 && drillDepthMm === 9 ? '18-9mm' : undefined
   return materialProfiles.find(profile => profile.thickness === thickness && (thickness !== 12 || profile.profilePasses === (profilePasses ?? 1)))?.id
 }

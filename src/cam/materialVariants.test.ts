@@ -28,12 +28,12 @@ const sheet: Sheet = { name: 'Thickness test', width: 500, height: 400, spacing:
 
 describe('material variants', () => {
   it.each(materialProfiles)('generates $label with the same operations, tabs and account programs', profile => {
-    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
-    const variant = bundle.profiles[profile.id]
+    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
+    const variant = bundle.profiles[profile.id]!
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)
     expect(expected.operations.find(operation => operation.kind === 'outside')?.tabs).toHaveLength(2)
-    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness).drill)
+    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, undefined, profile.id === '18-9mm' ? 9 : undefined).drill)
     expect(simulateGCode(variant.gcode).deepestCutMm).toBe(materialPreset(profile.thickness).depth)
   })
 
@@ -41,7 +41,7 @@ describe('material variants', () => {
     const selectedSheet = { ...sheet, materialProfile: profile.id }
     const selection = selectMaterialParts([part], selectedSheet)
     expect(selection.errors).toEqual([])
-    expect(selection.parts[0].gcode).toBe(bundle.profiles[profile.id].gcode)
+    expect(selection.parts[0].gcode).toBe(bundle.profiles[profile.id]!.gcode)
     expect(selection.parts[0]).toMatchObject({ id: part.id, ownerId: 'alice', itemId: testItem.id, name: 'Panel', sku: 'PANEL' })
     expect(selectMaterialParts([part], selectedSheet).parts[0]).toBe(selection.parts[0])
     expect(validateSheet([part], selectedSheet).filter(issue => issue.level === 'error')).toEqual([])
@@ -90,4 +90,18 @@ describe('material variants', () => {
     const legacy = { ...part, metadata: { ...part.metadata, materialVariants: undefined } }
     await expect(generateJob(job.manifest.request, [testItem], [legacy])).rejects.toThrow('thickness is unavailable')
   })
+})
+
+it('preserves 9 mm holes when selecting the new profile for a complete API job', async () => {
+  const request = parseJobRequest({ jobName: '9 mm holes', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: 18, drillDepthMm: 9, screwMarks: false } })
+  const job = await generateJob(request, [testItem], [part])
+  expect(job.sheet.materialProfile).toBe('18-9mm')
+  expect(job.parts[0].gcode).toBe(bundle.profiles['18-9mm']?.gcode)
+  expect(job.exported[0].gcode).toContain('Z-9 F600')
+  expect(job.simulations[0].deepestCutMm).toBe(18.4)
+  const oldBundle = structuredClone(bundle)
+  delete oldBundle.profiles['18-9mm']
+  const legacy = { ...part, metadata: { ...part.metadata, materialVariants: oldBundle } }
+  await expect(generateJob(request, [testItem], [legacy])).rejects.toThrow('unavailable')
+  expect(() => parseJobRequest({ ...request, sheet: { ...request.sheet, thicknessMm: 12 } })).toThrow()
 })
