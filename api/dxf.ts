@@ -56,7 +56,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const result = generateCam(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs })
   if (result.errors.length) throw new JobError('DXF machining validation failed.', 422, result.errors)
   const bytes = new TextEncoder().encode(result.gcode).length
-  if (result.gcode.split('\n').length > 10000 || bytes > 2000000) throw new JobError('Generated NC exceeds 10,000 lines or 2 MB. Split the drawing.', 422)
+  if (result.gcode.split('\n').length > 20000 || bytes > 2000000) throw new JobError('Generated NC exceeds 20,000 lines or 2 MB. Split the drawing.', 422)
   const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm)
   const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs }, result)
   return {

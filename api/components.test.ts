@@ -25,9 +25,18 @@ describe('component uploads', () => {
   })
   it('rejects invalid identities, excessive payloads and unsupported or malformed machining', () => {
     for (const patch of [{ id: 'part' }, { filename: '../side.nc' }, { ownerId: 'bob' }]) expect(() => parseComponent({ ...input, ...patch }, 'alice', testItem.id)).toThrow('Invalid component')
-    expect(() => parseComponent({ ...input, gcode: 'x\n'.repeat(10001) }, 'alice', testItem.id)).toThrow('Component limit')
+    expect(() => parseComponent({ ...input, gcode: 'x\n'.repeat(20001) }, 'alice', testItem.id)).toThrow('Component limit')
     expect(() => parseComponent({ ...input, gcode: input.gcode.replace('G21', 'G20') }, 'alice', testItem.id)).toThrow('metric and absolute')
     expect(() => parseComponent({ ...input, gcode: input.gcode.replace('G90', 'G91') }, 'alice', testItem.id)).toThrow('metric and absolute')
     expect(() => parseComponent({ ...input, gcode: 'G21\nG90\nG00 Z20\nG00 X0 Y0\nG01 Z-2 F600\nG02 X20 Y20\nG00 Z20\nM30' }, 'alice', testItem.id)).toThrow('failed machining validation')
   })
+})
+
+it('retains large bounded panel programs without dropping movements or validation', () => {
+  const moves = Array.from({ length: 12000 }, (_, index) => `G01 X${index % 2 ? 20 : 10} Y10 Z-2 F600`).join('\n')
+  const gcode = `G21\nG90\nG00 Z20\nG00 X10 Y10\nG01 Z-2 F600\n${moves}\nG00 Z20\nM30`
+  const part = parseComponent({ ...input, gcode }, 'alice', testItem.id).part
+  expect(part.gcode).toBe(gcode)
+  expect(() => parseComponent({ ...input, gcode: gcode.replace('G21', 'G20') }, 'alice', testItem.id)).toThrow('metric and absolute')
+  expect(() => parseComponent({ ...input, gcode: gcode + '\n'.repeat(20000) }, 'alice', testItem.id)).toThrow('Component limit')
 })

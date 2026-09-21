@@ -11,7 +11,7 @@ export function generateMaterialVariants(drawing: CamDrawing, settings: CamSetti
         ...settings, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined, thickness: profile.thickness, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined,
       })
       const errors = [...result.errors]
-      if (result.gcode.split('\n').length > 10000 || new TextEncoder().encode(result.gcode).length > 2000000) errors.push('Generated NC exceeds 10,000 lines or 2 MB. Split the drawing.')
+      if (result.gcode.split('\n').length > 20000 || new TextEncoder().encode(result.gcode).length > 2000000) errors.push('Generated NC exceeds 20,000 lines or 2 MB. Split the drawing.')
       profiles[profile.id] = { gcode: errors.length ? '' : result.gcode, errors, warnings: result.warnings }
     } catch (error) {
       profiles[profile.id] = { gcode: '', errors: [error instanceof Error ? error.message : 'Generation failed.'], warnings: [] }
