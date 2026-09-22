@@ -88,10 +88,10 @@ begin
   end;
   begin
     perform public.replace_cnc_component_source(
-      '00000000-0000-4000-8000-000000000072', '10000000-0000-4000-8000-000000000071', 'protected-part',
+      '00000000-0000-4000-8000-000000000071', '10000000-0000-4000-8000-000000000099', 'protected-part',
       encode(sha256('G21 G90 G17'::bytea), 'hex'), '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 'DXF corrected', 'WRONG',
       'G21 G90 G17', '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 11, 21, '{}', '{}', '{}');
-    raise exception 'Cross-owner source update accepted';
+    raise exception 'Wrong-item source update accepted';
   exception when raise_exception then
     if sqlerrm <> 'COMPONENT_NOT_FOUND' then raise; end if;
   end;

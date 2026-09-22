@@ -20,11 +20,11 @@ Other users see only orders assigned to their authenticated account and their
 agreed fee. They cannot list users, change fees or fetch another order by ID.
 The API checks assignments before details and again after Shopify responds.
 Reassignment/unassignment revokes access on subsequent reads; it cannot retract
-data already downloaded. Catalogue items, components, sheets and jobs remain
-private: assignment does not copy Dan's components into the cutter's catalogue.
+data already downloaded. Catalogue items and components are shared by all signed-in users. Sheets and
+jobs remain account-private; assignment does not create copies of catalogue items.
 
 Each order has an **Add to sheet** action. It fetches every line-item page, matches
-SKUs against the current user's catalogue (trimmed and case-insensitive), and asks
+SKUs against the shared catalogue (trimmed and case-insensitive), and asks
 the operator to confirm the item selection. Missing or duplicate SKUs require an
 explicit selection; nothing is written back to Shopify. Each current order unit
 adds one copy of every component in the chosen catalogue item. Removed/refunded
@@ -98,7 +98,7 @@ and [order access](https://shopify.dev/docs/api/admin-graphql/latest/objects/Ord
 ## Shared Inventory
 
 Box stock is one **shared workshop inventory for all authenticated CNC users**.
-Catalogue components, sheets and jobs remain account-private. Order visibility
+Catalogue components are shared too; sheets and jobs remain account-private. Order visibility
 is controlled separately by administrator/assignment, not by box access.
 Initial shared stock is ten each of 1050 x 350 x 400 mm and 1200 x 350 x 400 mm,
 internal dimensions, 0201 single-wall plain brown kraft without hand holes.

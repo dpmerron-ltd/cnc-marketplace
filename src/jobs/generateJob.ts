@@ -48,7 +48,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   const counts = new Map<string, number>()
   for (const line of request.items) {
     const matches = catalog.filter(item => line.itemId ? item.id === line.itemId : item.sku === line.sku)
-    if (matches.length !== 1) throw new JobError(`Item ${line.itemId ?? line.sku} is missing or its SKU is ambiguous in your account.`)
+    if (matches.length !== 1) throw new JobError(`Item ${line.itemId ?? line.sku} is missing or its SKU is ambiguous in the shared catalogue.`)
     counts.set(matches[0].id, (counts.get(matches[0].id) ?? 0) + line.quantity)
   }
   const items = catalog.filter(item => counts.has(item.id))

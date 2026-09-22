@@ -2,10 +2,10 @@ import type { Project } from '../models/Project'
 import type { Sheet } from '../models/Sheet'
 
 export function privateProject(project: Project, userId: string): Project {
-  const items = (project.items ?? []).filter((item) => item.ownerId === userId)
+  const items = project.items ?? []
   const itemIds = new Set(items.map((item) => item.id))
-  const parts = project.parts.filter((part) => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
-  const componentIndex = project.componentIndex?.filter(part => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
+  const parts = project.parts.filter((part) => itemIds.has(part.itemId ?? ''))
+  const componentIndex = project.componentIndex?.filter(part => itemIds.has(part.itemId ?? ''))
   const partIds = new Set([...parts, ...(componentIndex ?? [])].map((part) => part.id))
   const cleanSheet = (sheet: Sheet): Sheet => ({
     ...sheet,

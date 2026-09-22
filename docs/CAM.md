@@ -8,7 +8,7 @@ On Sheet, **Thickness** selects the program for every placed component across th
 
 Variants retain their own material depths/passes, blind-drill depths, ramps and tabs. Unsupported combinations are recorded as unavailable, never replaced by another thickness or stripped of geometry. For example, hinge pockets remain available only for 15/18 mm stock. Selecting an unavailable variant blocks export.
 
-**Original NC** preserves the existing workflow for old components without variants. Selecting a thickness requires a variant for every placed component; old NC-only components must be regenerated from DXF first. Existing files, queued jobs and saved sheet settings are not retroactively rewritten. Variants are stored in the owned component's separate `material_variants` field and included in project exports/backups. Apply the additive schema update before publishing this version.
+**Original NC** preserves the existing workflow for old components without variants. Selecting a thickness requires a variant for every placed component; old NC-only components must be regenerated from DXF first. Existing files, queued jobs and saved sheet settings are not retroactively rewritten. Variants are stored in the shared component's separate `material_variants` field and included in project exports/backups. Apply the additive schema update before publishing this version.
 
 Open **Generate** while signed in. Upload an ASCII DXF, select 6 mm, 12 mm, 15 mm or 18 mm stock, review operations and the toolpath preview, then download a component program or add it to an item in your own account. The drawing stays in the browser until you explicitly add the generated component to an item. Switching accounts unmounts the generator and clears its draft.
 

@@ -168,7 +168,7 @@ drop policy if exists "owner gcode preset delete" on public.gcode_presets;
 
 create policy "authenticated marketplace item read"
   on public.marketplace_items for select
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
 create policy "authenticated marketplace item insert"
   on public.marketplace_items for insert
@@ -176,16 +176,16 @@ create policy "authenticated marketplace item insert"
 
 create policy "owner marketplace item update"
   on public.marketplace_items for update
-  using (auth.uid() = owner_id)
-  with check (auth.uid() = owner_id);
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
 
 create policy "owner marketplace item delete"
   on public.marketplace_items for delete
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
 create policy "authenticated component read"
   on public.cnc_components for select
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
 create policy "authenticated component insert"
   on public.cnc_components for insert
@@ -193,12 +193,12 @@ create policy "authenticated component insert"
 
 create policy "owner component update"
   on public.cnc_components for update
-  using (auth.uid() = owner_id)
-  with check (auth.uid() = owner_id);
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
 
 create policy "owner component delete"
   on public.cnc_components for delete
-  using (auth.uid() = owner_id);
+  using (auth.uid() is not null);
 
 create policy "owner sheet read"
   on public.sheet_projects for select
@@ -239,18 +239,54 @@ create policy "owner gcode preset delete"
 do $$
 declare table_name text;
 begin
-  foreach table_name in array array['marketplace_items', 'cnc_components', 'sheet_projects', 'sheet_history', 'gcode_presets']
+  foreach table_name in array array['sheet_projects', 'sheet_history', 'gcode_presets']
   loop
     execute format('drop policy if exists "account isolation" on public.%I', table_name);
     execute format('create policy "account isolation" on public.%I as restrictive for all using (owner_id = auth.uid()) with check (owner_id = auth.uid())', table_name);
   end loop;
 end $$;
 
+-- Shared catalogue; restrictive guards defeat old public permissive policies.
+drop policy if exists "account isolation" on public.marketplace_items;
+drop policy if exists "account isolation" on public.cnc_components;
 drop policy if exists "component item ownership" on public.cnc_components;
-create policy "component item ownership"
-  on public.cnc_components as restrictive for all
-  using (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()))
-  with check (exists (select 1 from public.marketplace_items item where item.id = item_id and item.owner_id = auth.uid()));
+drop policy if exists "catalogue authentication" on public.marketplace_items;
+drop policy if exists "catalogue authentication" on public.cnc_components;
+create policy "catalogue authentication" on public.marketplace_items as restrictive for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+create policy "catalogue authentication" on public.cnc_components as restrictive for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+
+-- owner_id is creator attribution, never reassigned when a colleague edits.
+create or replace function public.preserve_catalogue_creator()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.owner_id is distinct from old.owner_id then
+    raise exception 'Catalogue creator cannot be changed' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+revoke all on function public.preserve_catalogue_creator() from public, anon, authenticated;
+drop trigger if exists preserve_catalogue_creator on public.marketplace_items;
+create trigger preserve_catalogue_creator before update on public.marketplace_items
+  for each row execute function public.preserve_catalogue_creator();
+drop trigger if exists preserve_catalogue_creator on public.cnc_components;
+create trigger preserve_catalogue_creator before update on public.cnc_components
+  for each row execute function public.preserve_catalogue_creator();
+
+-- JSON bodies avoid URL-size limits for long descriptions / packing settings.
+-- Security-invoker preserves authenticated RLS and keeps creator/image/programs intact.
+create or replace function public.update_shared_item_metadata(p_id uuid, p_expected jsonb, p_next jsonb)
+returns boolean language plpgsql set search_path = '' as $$
+begin
+  update public.marketplace_items
+    set name = p_next->>'name', sku = p_next->>'sku', description = p_next->>'description',
+      packing = p_next->'packing', updated_at = now()
+    where id = p_id and jsonb_build_object('name', name, 'sku', sku, 'description', description, 'packing', packing) = p_expected;
+  return found;
+end $$;
+revoke all on function public.update_shared_item_metadata(uuid, jsonb, jsonb) from public, anon;
+grant execute on function public.update_shared_item_metadata(uuid, jsonb, jsonb) to authenticated;
 
 create table if not exists public.user_program_settings (
   owner_id uuid primary key references auth.users(id) on delete cascade,

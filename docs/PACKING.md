@@ -25,4 +25,4 @@ Loose hardware, carton strength, product weight, compression and courier limits 
 
 ## Storage
 
-Per-item allowances and component dimension overrides are saved in `marketplace_items.packing` (JSONB) under existing owner-only RLS, and in the private account browser backup. Derived layouts are recalculated from current components and settings, never stored as permanent approval. Existing items receive an empty settings object and use the stated defaults; no components are modified or removed by the schema addition. Account-to-account project imports remap component IDs inside packing overrides to the new copied components.
+Per-item allowances and component dimension overrides are saved in `marketplace_items.packing` (JSONB) under authenticated shared-catalogue RLS, and in the private account browser backup. Derived layouts are recalculated from current components and settings, never stored as permanent approval. Existing items receive an empty settings object and use the stated defaults; no components are modified or removed by the schema addition. Account-to-account project imports remap component IDs inside packing overrides to the new copied components.

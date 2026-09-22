@@ -8,7 +8,7 @@ Each account configures its own start, spindle-start and end programs under **Pr
 
 ## Run
 
-The **Items** page is a private grid library with item photos (or toolpath thumbnails), name/SKU/component search, sorting, and empty-item filtering. New and existing items support image upload, replacement and removal. Open an item to edit its details, upload or remove components, and add individual components or **Add all to sheet**. Adding a complete item nests one of each component without moving existing placements, with overflow on additional sheets. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library. The [API](docs/API.md#items-and-images) can create items with an image and retrieve, replace or remove private item images.
+The **Items** page is a shared grid library for all signed-in users with item photos (or toolpath thumbnails), name/SKU/component search, sorting, and empty-item filtering. New and existing items support image upload, replacement and removal. Open an item to edit its details, upload or remove components, and add individual components or **Add all to sheet**. Adding a complete item nests one of each component without moving existing placements, with overflow on additional sheets. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library. The [API](docs/API.md#items-and-images) can create items with an image and retrieve, replace or remove shared item images.
 
 Each item also has a [stacked flat-pack estimate](docs/PACKING.md), capped at five components per box and 120 cm outside, with overflow boxes, internal size ranges, stack layouts and editable packing measurements.
 
@@ -33,7 +33,7 @@ npm run build
 
 ## Supabase Setup
 
-Sign-in and MFA use Supabase. Each account has its own private item library and browser backup.
+Sign-in and MFA use Supabase. All signed-in accounts use the same item catalogue. Browser backups and cutting sheets remain account-specific.
 
 1. Open Supabase SQL Editor.
 2. Run `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql`, in that order.
@@ -46,11 +46,11 @@ VITE_SUPABASE_URL=https://bsnndtwbvgrthddmbhoa.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
-The current MVP stores G-code and optional DXF text in Postgres rows. Row-level security restricts items, components, sheet projects, history, and presets to their owner. Components must also belong to an item owned by that account. Existing data stays with its recorded owner; unowned legacy records are not automatically assigned or exposed.
+The current MVP stores G-code and optional DXF text in Postgres rows. Row-level security shares items, components, images and machining profiles between authenticated users; anonymous access remains blocked. Creator IDs are retained as attribution, not access boundaries. New components can be added to any shared item. Sheet projects, history, presets, jobs, API keys and CNC program settings remain private to their accounts. Catalogue metadata saves send only locally changed items and compare the previous metadata before writing; stale edits report a conflict instead of overwriting another user’s work.
 
-Browser backups are keyed by account ID. The old shared browser cache is never automatically loaded. Explicit project-file imports create independent copies with new IDs in the importing account. Saved placements referencing another account's components are removed when loaded.
+Browser backups are keyed by account ID. The old shared browser cache is never automatically loaded. Explicit project-file imports create independent copies with new IDs in the importing account. Saved placements can reference any shared component; only missing component references are removed.
 
-The item grid loads a lightweight, owner-scoped component index, not NC/DXF files
+The item grid loads a lightweight, shared component index, not NC/DXF files
 or full material variants. Opening an item loads and caches its programs for the
 current account session. Saved sheets and order additions fetch the components
 they need on demand. Counts, search and packing estimates use the index; unloaded

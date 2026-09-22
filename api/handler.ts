@@ -28,7 +28,7 @@ export interface JobRepository extends OrderRepository {
   updateItemDescription(owner: string, id: string, expected: string | null, description: string): Promise<boolean>
   itemImage(owner: string, id: string): Promise<ItemImage | undefined>
   updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
-  ownsItem(owner: string, id: string): Promise<boolean>
+  itemExists(owner: string, id: string): Promise<boolean>
   createComponent(owner: string, part: Part): Promise<{ created: boolean }>
   componentSource(owner: string, itemId: string, id: string): Promise<ComponentSource | undefined>
   replaceComponent(owner: string, itemId: string, id: string, input: ComponentReplacement): Promise<{ part: Part; warnings: string[] }>
@@ -122,14 +122,14 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         const id = descriptionMatch[1]
         const input = updateDescriptionSchema.safeParse(await body(request))
         if (!input.success) throw new JobError('Supply expectedDescription and description.', 400)
-        if (!await repository.ownsItem(owner, id)) throw new JobError('Item not found.', 404)
+        if (!await repository.itemExists(owner, id)) throw new JobError('Item not found.', 404)
         if (!await repository.updateItemDescription(owner, id, input.data.expectedDescription, input.data.description)) throw new JobError('Item description changed; reload before replacing it.', 409)
         return json({ id, description: input.data.description })
       }
       const componentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components$/i)
       if (componentMatch && z.uuid().safeParse(componentMatch[1]).success && request.method === 'POST') {
         const id = componentMatch[1]
-        if (!await repository.ownsItem(owner, id)) throw new JobError('Item not found.', 404)
+        if (!await repository.itemExists(owner, id)) throw new JobError('Item not found.', 404)
         const { part, warnings } = parseComponent(await body(request, componentBodyLimit), owner, id)
         const { created } = await repository.createComponent(owner, part)
         return json({ id: part.id, itemId: id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, created ? 201 : 200, created ? {} : { 'Idempotent-Replayed': 'true' })
@@ -138,7 +138,7 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([0-9a-f-]{36})\/gcode$/i)
       if (replacementMatch && replacementMatch.slice(1).every(id => z.uuid().safeParse(id).success) && ['GET', 'PATCH'].includes(request.method)) {
         const [, itemId, id] = replacementMatch
-        if (!await repository.ownsItem(owner, itemId)) throw new JobError('Item not found.', 404)
+        if (!await repository.itemExists(owner, itemId)) throw new JobError('Item not found.', 404)
         if (request.method === 'GET') {
           const source = await repository.componentSource(owner, itemId, id)
           if (!source) throw new JobError('Component not found.', 404)

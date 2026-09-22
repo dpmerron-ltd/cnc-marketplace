@@ -27,13 +27,13 @@ function fixture(): Project {
 describe('account-local projects', () => {
   beforeEach(() => localStorage.clear())
 
-  it('retains unloaded owned placements and history but never preserves foreign index references', () => {
+  it('retains unloaded owned placements and history but preserves shared index references', () => {
     const original = fixture()
     const project = { ...original, parts: [], componentIndex: original.parts.map(summarizePart), sheetHistory: [{ id: 'history', name: '', savedAt: '', sheet: original.sheet, itemCount: 2, componentCount: 2, placedCount: 2 }] }
     const own = privateProject(project, 'alice')
     expect(own.parts).toEqual([])
-    expect(own.componentIndex?.map(part => part.id)).toEqual(['alice-part'])
-    expect(own.sheet.instances.map(instance => instance.partId)).toEqual(['alice-part'])
+    expect(own.componentIndex?.map(part => part.id)).toEqual(['alice-part', 'bob-part'])
+    expect(own.sheet.instances.map(instance => instance.partId)).toEqual(['alice-part', 'bob-part'])
     expect(own.sheetHistory?.[0].sheet.instances).toEqual(own.sheet.instances)
     expect(() => copyProjectToAccount(project, 'bob')).toThrow('incomplete')
   })
@@ -54,9 +54,9 @@ describe('account-local projects', () => {
     expect(saveProject(project, undefined)).toBe(false)
     expect(saveProject(project, 'alice')).toBe(true)
     expect(loadProject('bob')).toBeUndefined()
-    expect(loadProject('alice')?.items?.map((item) => item.ownerId)).toEqual(['alice'])
+    expect(loadProject('alice')?.items?.map((item) => item.ownerId)).toEqual(['alice', 'bob'])
     saveProject(project, 'bob')
-    expect(loadProject('bob')?.parts.map((part) => part.ownerId)).toEqual(['bob'])
+    expect(loadProject('bob')?.parts.map((part) => part.ownerId)).toEqual(['alice', 'bob'])
     expect(loadProject('alice')?.items?.[0].ownerId).toBe('alice')
   })
 
@@ -69,15 +69,15 @@ describe('account-local projects', () => {
     expect(loadProject('alice')).toEqual(previous)
   })
 
-  it('removes foreign components, foreign parents, and placements from current and saved sheets', () => {
+  it('removes orphaned components and placements, preserving shared components', () => {
     const project = fixture()
-    project.parts.push({ ...project.parts[0], id: 'wrong-parent', itemId: 'bob-item' })
+    project.parts.push({ ...project.parts[0], id: 'wrong-parent', itemId: 'missing-item' })
     project.sheetHistory = [{ id: 'history', name: '', savedAt: '', sheet: project.sheet, selectedItemId: 'bob-item', itemCount: 2, componentCount: 2, placedCount: 2 }]
     const own = privateProject(project, 'alice')
-    expect(own.parts.map((part) => part.id)).toEqual(['alice-part'])
-    expect(own.sheet.instances.map((instance) => instance.partId)).toEqual(['alice-part'])
+    expect(own.parts.map((part) => part.id)).toEqual(['alice-part', 'bob-part'])
+    expect(own.sheet.instances.map((instance) => instance.partId)).toEqual(['alice-part', 'bob-part'])
     expect(own.sheetHistory?.[0].sheet.instances).toEqual(own.sheet.instances)
-    expect(own.sheetHistory?.[0].selectedItemId).toBeUndefined()
+    expect(own.sheetHistory?.[0].selectedItemId).toBe('bob-item')
   })
 
   it('imports independent account-owned copies with remapped references', () => {

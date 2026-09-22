@@ -71,6 +71,26 @@ async function openSheet() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('opens and edits a shared item and adds its components to another user’s sheet', async () => {
+    mock.userId = 'bob'
+    const { remote, components } = lazyLibrary()
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByRole('heading', { name: 'Panel 0' })
+    expect(mock.loadItem).toHaveBeenCalledWith(remote.items[0], 'bob')
+    fireEvent.change(screen.getByLabelText('Item name'), { target: { value: 'Shared cabinet' } })
+    expect(screen.getByLabelText('Item name')).toHaveValue('Shared cabinet')
+    fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
+    await screen.findByText('1 components from Shared cabinet added to the sheet.')
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ ownerId: 'alice', name: 'Shared cabinet' })]),
+      expect.anything(), expect.objectContaining({ instances: [expect.objectContaining({ partId: 'panel-0' })] }),
+      expect.anything(), 'bob',
+    ))
+  })
+
   it('loads programs only for an opened item, shows progress and caches repeat opens', async () => {
     const { remote, components } = lazyLibrary()
     mock.load.mockResolvedValue(remote)

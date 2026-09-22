@@ -35,12 +35,12 @@ describe('order sheet confirmation', () => {
     expect(request.mock.calls[1][0]).toBe('/shopify/orders/7?after=next')
     expect(screen.getByRole('status')).toHaveTextContent('8 components')
   })
-  it('requires explicit selection for ambiguous SKUs and excludes other accounts', async () => {
+  it('requires explicit selection for ambiguous SKUs and includes other creators', async () => {
     const p = props(); p.items.push({ ...item, id: 'duplicate', name: 'Fresh rack' }, { ...item, ownerId: 'bob', id: 'foreign', name: 'Private item' })
     render(<OrderSheetDialog {...p} />)
     const select = await screen.findByRole('combobox')
     expect(select).toHaveValue('')
-    expect(screen.queryByRole('option', { name: /Private item/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Private item/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add components' })).toBeDisabled()
     fireEvent.change(select, { target: { value: item.id } })
     expect(screen.getByRole('button', { name: 'Add components' })).toBeEnabled()

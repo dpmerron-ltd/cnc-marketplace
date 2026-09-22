@@ -25,16 +25,16 @@ function fixture() {
     authenticate: async token => ['alice', 'bob'].includes(token) ? { ownerId: token, actor: `api_key:${token}` } : undefined,
     allowRequest: async () => true,
     programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
-    catalog: async owner => owner === 'alice' ? [testItem] : [],
+    catalog: async () => [testItem],
     createItem: vi.fn(async (_owner, input) => ({ ...input, id: input.id ?? crypto.randomUUID() })),
     itemImage: vi.fn(async () => undefined),
     updateItemImage: vi.fn(async () => false),
-    ownsItem: vi.fn(async owner => owner === 'alice'),
+    itemExists: vi.fn(async (_owner, id) => id === testItem.id),
     createComponent: vi.fn(async () => ({ created: true })),
     componentSource: vi.fn(async () => undefined),
     updateItemDescription: vi.fn(async () => true),
     replaceComponent: vi.fn(async () => ({ part: testParts[0], warnings: [] })),
-    loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
+    loadComponents: vi.fn(async () => ({ items: [testItem], parts: testParts })),
     list: async () => [],
     get: async (owner, id) => jobs.get(id)?.owner === owner ? jobs.get(id) : undefined,
     findKey: async (owner, key) => [...jobs.values()].find(job => job.owner === owner && job.key === key),
@@ -59,7 +59,18 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
-  it('requires a source revision for DXF corrections and restricts description edits to the owner', async () => {
+  it('lets both users list and cut the same catalogue, with private job records', async () => {
+    const f = fixture()
+    expect(await (await f.call('/items', 'GET', undefined, 'bob')).json()).toEqual(await (await f.call('/items')).json())
+    const response = await f.call('/jobs', 'POST', testRequest, 'bob')
+    expect(response.status).toBe(201)
+    const job = await response.json()
+    expect((await f.call(`/jobs/${job.id}`, 'GET', undefined, 'alice')).status).toBe(404)
+    expect((await f.call(`/jobs/${job.id}`, 'GET', undefined, 'bob')).status).toBe(200)
+    expect((await f.call('/items', 'GET', undefined, 'anonymous')).status).toBe(401)
+  })
+
+  it('requires a source revision for DXF corrections and shares description edits with revision checks', async () => {
     const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
     const path = `/items/${testItem.id}/components/${id}/gcode`
     const variants = materialVariantsSchema.parse({ version: 1, primaryProfile: '12', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
@@ -69,8 +80,8 @@ describe('jobs HTTP API', () => {
     expect((await f.call(path, 'PATCH', { ...input, expectedDxf: null })).status).toBe(200)
     expect(f.repo.replaceComponent).toHaveBeenCalledWith('alice', testItem.id, id, { ...input, expectedDxf: null })
     const description = `/items/${testItem.id}/description`
-    expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' }, 'bob')).status).toBe(404)
-    expect(f.repo.updateItemDescription).not.toHaveBeenCalled()
+    expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' }, 'bob')).status).toBe(200)
+    expect(f.repo.updateItemDescription).toHaveBeenCalledWith('bob', testItem.id, 'Rev B', 'Rev C')
     expect((await f.call(description, 'PATCH', { description: 'Rev C' })).status).toBe(400)
     expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(200)
     expect(f.repo.updateItemDescription).toHaveBeenCalledWith('alice', testItem.id, 'Rev B', 'Rev C')
@@ -78,7 +89,7 @@ describe('jobs HTTP API', () => {
     expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(409)
   })
 
-  it('reads an owned component revision for repairs without writes or program generation', async () => {
+  it('reads a shared component revision for repairs without writes or program generation', async () => {
     const f = fixture()
     const id = '20000000-0000-4000-8000-000000000001'
     const path = `/items/${testItem.id}/components/${id}/gcode`
@@ -92,8 +103,8 @@ describe('jobs HTTP API', () => {
     expect(f.repo.replaceComponent).not.toHaveBeenCalled()
     expect(f.repo.programSettings).not.toHaveBeenCalled()
     vi.mocked(f.repo.componentSource).mockClear()
-    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(404)
-    expect(f.repo.componentSource).not.toHaveBeenCalled()
+    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(200)
+    expect(f.repo.componentSource).toHaveBeenCalledWith('bob', testItem.id, id)
     f.repo.componentSource = vi.fn(async () => undefined)
     expect((await f.call(path, 'GET')).status).toBe(404)
     expect((await f.call(path.replace(id, 'invalid'), 'GET')).status).toBe(404)
@@ -128,13 +139,13 @@ describe('jobs HTTP API', () => {
     expect(f.repo.countBox).toHaveBeenCalledWith('bob', id, { quantity: 9, expectedVersion: 1 })
     expect((await f.call('/boxes', 'GET', undefined, 'invalid')).status).toBe(401)
   })
-  it('scopes program replacement to owned items and requires an expected revision', async () => {
+  it('supports shared program replacement and requires an expected revision', async () => {
     const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
     const path = `/items/${testItem.id}/components/${id}/gcode`
     const variants = materialVariantsSchema.parse({ version: 1, primaryProfile: '12', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
     const input = { expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null, gcode: testParts[0].gcode, materialVariants: variants }
-    expect((await f.call(path, 'PATCH', input, 'bob')).status).toBe(404)
-    expect(f.repo.replaceComponent).not.toHaveBeenCalled()
+    expect((await f.call(path, 'PATCH', input, 'bob')).status).toBe(200)
+    expect(f.repo.replaceComponent).toHaveBeenCalledWith('bob', testItem.id, id, input)
     expect((await f.call(path, 'PATCH', { ...input, expectedSha256: undefined })).status).toBe(400)
     expect((await f.call(path, 'PATCH', { ...input, ownerId: 'bob' })).status).toBe(400)
     expect((await f.call(path, 'PATCH', input)).status).toBe(200)
@@ -142,7 +153,7 @@ describe('jobs HTTP API', () => {
     f.repo.replaceComponent = vi.fn(async () => { throw new JobError('Changed', 409) })
     expect((await f.call(path, 'PATCH', input)).status).toBe(409)
   })
-  it('uploads validated components to owned items, supports stable retries and rejects foreign parents', async () => {
+  it('uploads validated components to shared items and supports stable retries', async () => {
     const f = fixture()
     const path = `/items/${testItem.id}/components`
     const input = { id: '20000000-0000-4000-8000-000000000001', name: 'Left side', sku: 'LEFT', filename: 'left.nc', gcode: testParts[0].gcode, dxf: 'source drawing' }
@@ -156,27 +167,27 @@ describe('jobs HTTP API', () => {
     expect(replay.status).toBe(200)
     expect(replay.headers.get('Idempotent-Replayed')).toBe('true')
     expect((await replay.json()).sha256).toBe(saved.sha256)
-    expect((await f.call(path, 'POST', input, 'bob')).status).toBe(404)
+    expect((await f.call(path, 'POST', input, 'bob')).status).toBe(200)
     expect((await f.call(path, 'POST', { ...input, ownerId: 'bob' })).status).toBe(400)
     expect((await f.call(path, 'POST', { ...input, gcode: 'G21\nG90\nM30' })).status).toBe(422)
     expect((await f.call(path, 'POST', { ...input, gcode: 'x\n'.repeat(20001) })).status).toBe(413)
-    expect(f.repo.createComponent).toHaveBeenCalledTimes(1)
+    expect(f.repo.createComponent).toHaveBeenCalledTimes(2)
   })
-  it('creates private items with optional images and routes image reads, replacements and removal to the owner', async () => {
+  it('creates shared items with optional images accessible to other authenticated users', async () => {
     const f = fixture()
     const input = { id: testItem.id, name: 'Cabinet', sku: 'CAB-1', image: testImage }
     const response = await f.call('/items', 'POST', input)
     expect(response.status).toBe(201)
     expect(f.repo.createItem).toHaveBeenCalledWith('alice', { ...input, description: '' }, 'api_key:alice')
-    f.repo.itemImage = vi.fn(async owner => owner === 'alice' ? testImage : undefined)
-    f.repo.updateItemImage = vi.fn(async owner => owner === 'alice')
+    f.repo.itemImage = vi.fn(async () => testImage)
+    f.repo.updateItemImage = vi.fn(async () => true)
     const path = `/items/${testItem.id}/image`
     const image = await f.call(path)
     expect(image.headers.get('Content-Type')).toBe('image/png')
     expect(image.headers.get('Cache-Control')).toBe('private, no-store')
     expect(new Uint8Array(await image.arrayBuffer())).toEqual(imageBytes(testImage))
-    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(404)
-    expect((await f.call(path, 'PATCH', { image: testImage }, 'bob')).status).toBe(404)
+    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(200)
+    expect((await f.call(path, 'PATCH', { image: testImage }, 'bob')).status).toBe(200)
     expect((await f.call(path, 'PATCH', { image: testImage })).status).toBe(200)
     expect(f.repo.updateItemImage).toHaveBeenLastCalledWith('alice', testItem.id, testImage)
     expect((await f.call(path, 'PATCH', { image: null })).status).toBe(200)
@@ -300,8 +311,9 @@ describe('jobs HTTP API', () => {
     expect((await f.call(`/jobs/${job.id}`, 'PATCH', approval)).status).toBe(409)
     expect((await f.call(`/jobs/${job.id}`, 'PATCH', { status: 'completed', expectedStatus: 'ready' })).status).toBe(409)
   })
-  it('publishes nothing for foreign items, invalid payloads or failed persistence', async () => {
+  it('publishes nothing for missing items, invalid payloads or failed persistence', async () => {
     const f = fixture()
+    f.repo.loadComponents = vi.fn(async () => ({ items: [], parts: [] }))
     expect((await f.call('/jobs', 'POST', testRequest, 'bob')).status).toBe(422)
     expect((await f.call('/jobs', 'POST', { ...testRequest, ownerId: 'bob' })).status).toBe(400)
     expect((await f.call('/jobs', 'POST', testRequest, 'alice', '')).status).toBe(400)

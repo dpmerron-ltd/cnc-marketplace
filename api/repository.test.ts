@@ -14,14 +14,14 @@ function fixture() {
   return { query, db, repo: supabaseRepository(db as unknown as SupabaseClient) }
 }
 describe('API credential verification', () => {
-  it('returns exact source and revision only through owner, item and component filters', async () => {
+  it('returns exact source and revision through item and component filters for any authenticated user', async () => {
     const row = { id: 'part', item_id: 'item', name: 'Panel', sku: 'P1', original_filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'original DXF', material_variants: null }
     let data: typeof row | null = row
     const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data, error: null })) }
     query.select.mockReturnValue(query); query.eq.mockReturnValue(query)
     const repo = supabaseRepository({ from: () => query } as unknown as SupabaseClient)
     expect(await repo.componentSource('alice', 'item', 'part')).toEqual({ id: 'part', itemId: 'item', name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: row.gcode, dxf: row.dxf, materialVariants: null, sha256: await sha256(row.gcode) })
-    for (const pair of [['owner_id', 'alice'], ['item_id', 'item'], ['id', 'part']]) expect(query.eq).toHaveBeenCalledWith(...pair)
+    for (const pair of [['item_id', 'item'], ['id', 'part']]) expect(query.eq).toHaveBeenCalledWith(...pair)
     data = null
     expect(await repo.componentSource('alice', 'item', 'missing')).toBeUndefined()
   })
@@ -56,7 +56,7 @@ describe('API credential verification', () => {
     await expect(repo.countBox('bob', row.id, { quantity: 9, expectedVersion: 1 })).rejects.toMatchObject({ status: 409 })
     expect(rpc).toHaveBeenCalledWith('count_cnc_boxes', { p_actor: 'bob', p_id: row.id, p_quantity: 9, p_expected_version: 1 })
   })
-  it('validates replacements before an owner-scoped compare-and-swap, preserving source and identity', async () => {
+  it('validates replacements before a shared compare-and-swap, preserving source and identity', async () => {
     const id = '20000000-0000-4000-8000-000000000001'
     const row = { id, name: 'Side', sku: 'SIDE', original_filename: 'side.nc', dxf: 'original DXF' }
     let found = true
@@ -69,7 +69,7 @@ describe('API credential verification', () => {
     const input = { gcode, materialVariants, expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null }
     const result = await repo.replaceComponent('alice', testItem.id, id, input)
     expect(result.part).toMatchObject({ id, name: row.name, sku: row.sku, dxf: row.dxf, originalFilename: row.original_filename, ownerId: 'alice', itemId: testItem.id })
-    for (const pair of [['owner_id', 'alice'], ['item_id', testItem.id], ['id', id]]) expect(query.eq).toHaveBeenCalledWith(...pair)
+    for (const pair of [['item_id', testItem.id], ['id', id]]) expect(query.eq).toHaveBeenCalledWith(...pair)
     expect(rpc).toHaveBeenCalledWith('replace_cnc_component_gcode', expect.objectContaining({ p_owner: 'alice', p_item: testItem.id, p_id: id, p_expected_sha: input.expectedSha256, p_expected_variants: null, p_expected_dxf: row.dxf, p_gcode: gcode, p_variants: materialVariants, p_width: result.part.width }))
     rpc.mockClear()
     const corrected = await repo.replaceComponent('alice', testItem.id, id, { ...input, dxf: 'corrected source DXF', expectedDxf: row.dxf })
@@ -87,36 +87,36 @@ describe('API credential verification', () => {
     await expect(repo.replaceComponent('bob', testItem.id, id, input)).rejects.toMatchObject({ status: 404 })
     expect(rpc).not.toHaveBeenCalled()
   })
-  it('inserts only owned components and only replays identical owned uploads', async () => {
+  it('attributes new components to the caller and replays identical shared uploads', async () => {
     const part = { ...testParts[0], ownerId: 'alice', itemId: testItem.id }
-    let parentExists = true, duplicate = false, storedOwner = 'alice', changed = false
+    let parentExists = true, duplicate = false, changed = false
     const inserts: unknown[] = [], filters: [string, unknown][] = []
     const db = { from(table: string) {
       const query = {
         select: () => query,
         eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
         insert: async (value: unknown) => { inserts.push(value); return { data: null, error: duplicate ? { code: '23505', message: 'Duplicate' } : null } },
-        maybeSingle: async () => ({ error: null, data: table === 'marketplace_items' ? parentExists ? { id: part.itemId } : null : storedOwner === 'alice' ? { item_id: part.itemId, name: part.name, sku: part.sku, original_filename: part.originalFilename, gcode: changed ? 'changed' : part.gcode, dxf: null } : null }),
+        maybeSingle: async () => ({ error: null, data: table === 'marketplace_items' ? parentExists ? { id: part.itemId } : null : { item_id: part.itemId, name: part.name, sku: part.sku, original_filename: part.originalFilename, gcode: changed ? 'changed' : part.gcode, dxf: null } }),
       }
       return query
     } }
     const repo = supabaseRepository(db as unknown as SupabaseClient)
-    expect(await repo.ownsItem('alice', part.itemId!)).toBe(true)
+    expect(await repo.itemExists('alice', part.itemId!)).toBe(true)
     expect(await repo.createComponent('alice', part)).toEqual({ created: true })
     expect(inserts[0]).toEqual(expect.objectContaining({ owner_id: 'alice', item_id: part.itemId, id: part.id, gcode: part.gcode, width: part.width }))
-    expect(filters).toContainEqual(['owner_id', 'alice'])
+    expect(filters.some(([key]) => key === 'owner_id')).toBe(false)
     duplicate = true
     expect(await repo.createComponent('alice', part)).toEqual({ created: false })
     changed = true
     await expect(repo.createComponent('alice', part)).rejects.toMatchObject({ status: 409 })
-    changed = false; storedOwner = 'bob'
-    await expect(repo.createComponent('alice', part)).rejects.toMatchObject({ status: 409 })
+    changed = false
+    expect(await repo.createComponent('bob', { ...part, ownerId: 'bob' })).toEqual({ created: false })
     parentExists = false; inserts.length = 0
     await expect(repo.createComponent('alice', part)).rejects.toMatchObject({ status: 404 })
     await expect(repo.createComponent('bob', part)).rejects.toMatchObject({ status: 404 })
     expect(inserts).toEqual([])
   })
-  it('creates items atomically and scopes image reads/updates by owner even with a service client', async () => {
+  it('creates items atomically and shares image reads/updates even with a service client', async () => {
     const calls: { method: string; args: unknown[] }[] = []
     let data: unknown = { id: 'item', name: 'Cabinet', sku: 'CAB', description: '' }
     let error: { code: string; message: string } | null = null
@@ -131,17 +131,17 @@ describe('API credential verification', () => {
     await expect(repo.createItem('bob', input, 'api_key:bob')).rejects.toMatchObject({ status: 409 })
     error = null; data = { image: testImage }; calls.length = 0
     expect(await repo.itemImage('alice', 'item')).toEqual(testImage)
-    expect(calls).toContainEqual({ method: 'eq', args: ['owner_id', 'alice'] })
+    expect(calls).not.toContainEqual({ method: 'eq', args: ['owner_id', 'alice'] })
     expect(calls).toContainEqual({ method: 'eq', args: ['id', 'item'] })
     calls.length = 0; data = { id: 'item' }
     expect(await repo.updateItemDescription('alice', 'item', 'Revision B', 'Revision C')).toBe(true)
-    expect(calls).toContainEqual({ method: 'eq', args: ['owner_id', 'alice'] })
+    expect(calls).not.toContainEqual({ method: 'eq', args: ['owner_id', 'alice'] })
     expect(calls).toContainEqual({ method: 'eq', args: ['id', 'item'] })
     expect(calls).toContainEqual({ method: 'eq', args: ['description', 'Revision B'] })
     expect(calls.find(c => c.method === 'update')?.args[0]).toEqual({ description: 'Revision C', updated_at: expect.any(String) })
     calls.length = 0; data = null
     expect(await repo.updateItemImage('bob', 'item', null)).toBe(false)
-    expect(calls).toContainEqual({ method: 'eq', args: ['owner_id', 'bob'] })
+    expect(calls).not.toContainEqual({ method: 'eq', args: ['owner_id', 'bob'] })
     expect(calls).toContainEqual({ method: 'eq', args: ['id', 'item'] })
     expect(calls.find(c => c.method === 'update')?.args[0]).toEqual({ image: null, updated_at: expect.any(String) })
   })

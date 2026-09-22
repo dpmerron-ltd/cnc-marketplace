@@ -5,10 +5,15 @@ import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, failOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; columns?: string; filters: [string, string][]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', conflict: false, error: null as null | { message: string }, failOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; columns?: string; filters: [string, string][]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
+    rpc: async (name: string, input: { p_id: string; p_expected: Record<string, string>; p_next: unknown }) => {
+      expect(name).toBe('update_shared_item_metadata')
+      mock.queries.push({ table: 'marketplace_items', write: input.p_next, filters: [['id', input.p_id], ...Object.entries(input.p_expected)] })
+      return { data: !mock.conflict, error: mock.error }
+    },
     auth: { getUser: async () => ({ data: { user: { id: mock.userId } } }) },
     from: (table: string) => {
       const query = { table, columns: undefined as string | undefined, filters: [] as [string, string][], write: undefined as unknown, options: undefined as unknown, range: undefined as [number, number] | undefined }
@@ -24,7 +29,7 @@ vi.mock('./supabaseClient', () => ({
         upsert: (value: unknown, options?: unknown) => { query.write = value; query.options = options; return builder },
         then: (resolve: (value: unknown) => unknown) => {
           const rows = table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : table === 'cnc_components' ? mock.components.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value)) : []
-          const data = query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
+          const data = query.write ? mock.conflict ? [] : (Array.isArray(query.write) ? query.write : [query.write]) : query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
           const error = table === 'cnc_components' && query.range?.[0] === mock.failOffset && mock.failOffset !== undefined ? { message: 'Response too large' } : mock.error
           return Promise.resolve({ data, error }).then(resolve)
         },
@@ -37,26 +42,24 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null; mock.rows = []; mock.components = []; mock.failOffset = undefined })
+  beforeEach(async () => { mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.failOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
 
-  it('loads only the requested owned item through bounded program pages', async () => {
-    const item = { id: 'target', ownerId: 'alice', sku: 'T', name: 'Target', description: '', createdAt: '', updatedAt: '' }
+  it('loads a shared item and components from different creators through bounded program pages', async () => {
+    const item = { id: 'target', ownerId: 'bob', sku: 'T', name: 'Target', description: '', createdAt: '', updatedAt: '' }
     mock.components = Array.from({ length: 61 }, (_, index) => ({ id: `p-${index}`, owner_id: 'alice', item_id: 'target', sku: `T-${index}`, name: `Panel ${index}`, original_filename: 'panel.nc', gcode: testParts[0].gcode }))
-    mock.components.push({ id: 'foreign', owner_id: 'bob', item_id: 'target' }, { id: 'other', owner_id: 'alice', item_id: 'other' })
+    mock.components.push({ ...(mock.components[0] as object), id: 'foreign', owner_id: 'bob', item_id: 'target' }, { id: 'other', owner_id: 'alice', item_id: 'other' })
     const result = await loadRemoteItemComponents(item, 'alice')
-    expect(result).toHaveLength(61)
-    expect(result.every(part => part.gcode === testParts[0].gcode && part.ownerId === 'alice' && part.itemId === 'target')).toBe(true)
-    expect(mock.queries.every(query => query.filters.some(([key, value]) => key === 'item_id' && value === 'target') && query.filters.some(([key, value]) => key === 'owner_id' && value === 'alice'))).toBe(true)
+    expect(result).toHaveLength(62)
+    expect(result.every(part => part.gcode === testParts[0].gcode && part.itemId === 'target')).toBe(true)
+    expect(mock.queries.every(query => query.filters.some(([key, value]) => key === 'item_id' && value === 'target') && !query.filters.some(([key]) => key === 'owner_id'))).toBe(true)
     expect(mock.queries.every(query => query.range![1] - query.range![0] === 24)).toBe(true)
     mock.queries = []
-    await expect(loadRemoteItemComponents({ ...item, ownerId: 'bob' }, 'alice')).rejects.toThrow('account changed')
-    expect(mock.queries).toEqual([])
     mock.userId = 'bob'
     await expect(loadRemoteItemComponents(item, 'alice')).rejects.toThrow('account changed')
     expect(mock.queries).toEqual([])
   })
 
-  it('loads a large catalogue completely through bounded owner-filtered pages', async () => {
+  it('loads a large catalogue completely through bounded shared pages', async () => {
     mock.rows = Array.from({ length: 88 }, (_, index) => ({ id: `item-${index}`, owner_id: 'alice', name: `Item ${index}`, sku: `I${index}` }))
     mock.components = Array.from({ length: 1078 }, (_, index) => ({ id: `part-${index}`, owner_id: 'alice', item_id: `item-${index % 88}`, name: `Panel ${index}`, sku: `P${index}`, original_filename: 'panel.nc', gcode: testParts[0].gcode }))
     const progress = vi.fn()
@@ -68,7 +71,7 @@ describe('cloud account boundaries', () => {
     expect(result?.componentIndex?.at(-1)).not.toHaveProperty('gcode')
     const pages = mock.queries.filter(query => query.range)
     expect(pages.every(query => query.range![1] - query.range![0] === (query.table === 'cnc_components' ? 499 : 24))).toBe(true)
-    expect(pages.every(query => query.filters.some(([key, value]) => key === 'owner_id' && value === 'alice'))).toBe(true)
+    expect(pages.every(query => !query.filters.some(([key]) => key === 'owner_id'))).toBe(true)
     expect(pages.filter(query => query.table === 'cnc_components')).toHaveLength(3)
     expect(pages.filter(query => query.table === 'cnc_components').every(query => !query.columns?.split(',').some(field => ['*', 'gcode', 'dxf', 'material_variants'].includes(field)))).toBe(true)
   })
@@ -109,10 +112,10 @@ describe('cloud account boundaries', () => {
     await saveRemoteItemImage(item, testImage, 'alice')
     expect(mock.queries[0].options).toEqual({ onConflict: 'id', ignoreDuplicates: true })
     expect(mock.queries[1].write).toEqual({ image: testImage, updated_at: expect.any(String) })
-    expect(mock.queries[1].filters).toEqual([['id', 'item'], ['owner_id', 'alice']])
+    expect(mock.queries[1].filters).toEqual([['id', 'item']])
     mock.queries = []
     await saveRemoteProject([item], [], sheet, item.id, 'alice')
-    expect(mock.queries[0].write).toEqual([expect.not.objectContaining({ image: expect.anything() })])
+    expect(mock.queries.some(query => query.table === 'marketplace_items')).toBe(false)
     await saveRemoteItemImage(item, null, 'alice')
     expect(mock.queries.at(-1)?.write).toEqual({ image: null, updated_at: expect.any(String) })
   })
@@ -134,17 +137,16 @@ describe('cloud account boundaries', () => {
     ])
   })
 
-  it('loads only validated owner images and rejects foreign image writes and failed saves', async () => {
+  it('loads validated shared images and rejects stale sessions and failed saves', async () => {
     const row = { id: 'item', owner_id: 'alice', name: 'Cabinet', sku: 'CAB', image: testImage }
     mock.rows = [row, { ...row, id: 'foreign', owner_id: 'bob' }, { ...row, id: 'invalid', image: { contentType: 'image/svg+xml', dataBase64: 'abcd' } }]
     const result = await loadRemoteProject('alice')
-    expect(result?.items.map(item => item.id)).toEqual(['item', 'invalid'])
+    expect(result?.items.map(item => item.id)).toEqual(['item', 'foreign', 'invalid'])
     expect(result?.items[0].image).toEqual(testImage)
-    expect(result?.items[1].image).toBeUndefined()
+    expect(result?.items[2].image).toBeUndefined()
     mock.queries = []
     const item = result!.items[0]
     await expect(saveRemoteItemImage(item, testImage, 'bob')).rejects.toThrow('signed-in account')
-    await expect(saveRemoteItemImage({ ...item, ownerId: 'bob' }, testImage, 'alice')).rejects.toThrow('signed-in account')
     expect(mock.queries).toEqual([])
     mock.error = { message: 'Network failure' }
     await expect(saveRemoteItemImage(item, testImage, 'alice')).rejects.toThrow('Network failure')
@@ -169,11 +171,14 @@ describe('cloud account boundaries', () => {
     expect(mock.queries).toEqual([])
   })
 
-  it('filters every cloud read by the authenticated owner, including empty accounts', async () => {
+  it('shares catalogue reads while filtering personal cloud data by owner', async () => {
     const result = await loadRemoteProject('alice')
     expect(result?.items).toEqual([])
     expect(mock.queries).toHaveLength(9)
-    for (const query of mock.queries) expect(query.filters).toContainEqual(['owner_id', 'alice'])
+    for (const query of mock.queries) {
+      if (['marketplace_items', 'cnc_components'].includes(query.table)) expect(query.filters).not.toContainEqual(['owner_id', 'alice'])
+      else expect(query.filters).toContainEqual(['owner_id', 'alice'])
+    }
   })
 
   it('does not read or save a snapshot after the session switches accounts', async () => {
@@ -184,12 +189,36 @@ describe('cloud account boundaries', () => {
     expect(mock.queries).toEqual([])
   })
 
-  it('rejects foreign and unowned items rather than transferring ownership', async () => {
+  it('does not create unknown items under another creator', async () => {
     for (const ownerId of ['bob', undefined]) {
       const item = { id: 'item', ownerId, name: '', sku: '', description: '', createdAt: '', updatedAt: '' }
       expect((await saveRemoteProject([item], [], sheet, undefined, 'alice')).ok).toBe(false)
     }
     expect(mock.queries).toEqual([])
+  })
+  it('edits shared metadata without reassigning its creator or rewriting stale unchanged items', async () => {
+    mock.rows = [{ id: 'shared', owner_id: 'bob', name: 'Shared', sku: 'SHARED', description: '', packing: {}, created_at: '', updated_at: '' }]
+    const loaded = await loadRemoteProject('alice')
+    const item = loaded!.items[0]
+    mock.queries = []
+    expect((await saveRemoteProject([item], [], sheet, item.id, 'alice')).ok).toBe(true)
+    expect(mock.queries.some(q => q.table === 'marketplace_items')).toBe(false)
+    expect((await saveRemoteProject([{ ...item, name: 'Updated' }], [], sheet, item.id, 'alice')).ok).toBe(true)
+    const write = mock.queries.find(q => q.table === 'marketplace_items')!
+    expect(write.write).toMatchObject({ name: 'Updated' })
+    expect(write.write).not.toHaveProperty('owner_id')
+    expect(write.filters).toContainEqual(['name', 'Shared'])
+    mock.conflict = true
+    expect((await saveRemoteProject([{ ...item, name: 'Conflicting edit' }], [], sheet, item.id, 'alice')).error).toContain('shared item changed')
+  })
+  it('updates images on another creator’s shared item', async () => {
+    mock.rows = [{ id: 'shared', owner_id: 'bob', name: 'Shared', sku: 'SHARED' }]
+    const loaded = await loadRemoteProject('alice')
+    mock.queries = []
+    await saveRemoteItemImage(loaded!.items[0], testImage, 'alice')
+    expect(mock.queries).toHaveLength(1)
+    expect(mock.queries[0].write).toEqual({ image: testImage, updated_at: expect.any(String) })
+    expect(mock.queries[0].filters).toEqual([['id', 'shared']])
   })
   it('persists packing measurements on the owner item without changing components', async () => {
     const packing = { paddingMm: 20, separatorMm: 3, components: { panel: { thicknessMm: 12 } } }

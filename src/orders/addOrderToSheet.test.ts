@@ -15,8 +15,9 @@ const request = { order, shop: 'test.myshopify.com', matches: { line1: item.id }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('add Shopify order to sheet', () => {
-  it('matches unique SKUs in the current account, never guesses missing or duplicate SKUs', () => {
-    expect(matchOrderItems(order, [item, { ...item, id: 'foreign', ownerId: 'bob' }], 'alice')).toEqual({ line1: item.id })
+  it('matches unique SKUs in the shared catalogue, never guesses missing or duplicate SKUs', () => {
+    expect(matchOrderItems(order, [item, { ...item, id: 'foreign', ownerId: 'bob' }], 'alice')).toEqual({ line1: '' })
+    expect(matchOrderItems(order, [item], 'bob')).toEqual({ line1: item.id })
     expect(matchOrderItems(order, [item, { ...item, id: 'duplicate' }], 'alice')).toEqual({ line1: '' })
     expect(matchOrderItems({ ...order, lineItems: { ...order.lineItems, nodes: [{ ...line, sku: null }] } }, [item], 'alice')).toEqual({ line1: '' })
   })
@@ -37,16 +38,16 @@ describe('add Shopify order to sheet', () => {
     expect(() => prepareOrderSheet(request, [item], parts, result, 'alice', 0)).toThrow('already on this sheet')
     expect(() => prepareOrderSheet(request, [item], parts, { ...result, instances: [] }, 'alice', 0)).not.toThrow()
   })
-  it('includes multiple line items and repeated SKUs, skips removed quantities and excludes foreign components', () => {
+  it('includes multiple line items and repeated SKUs, skips removed quantities and includes components from other creators', () => {
     const multiple = { ...request, order: { ...order, lineItems: { ...order.lineItems, nodes: [line, { ...line, id: 'line2', currentQuantity: 1 }, { ...line, id: 'removed', currentQuantity: 0 }] } }, matches: { line1: item.id, line2: item.id } }
     const prepared = prepareOrderSheet(multiple, [item], [...parts, { ...parts[0], id: 'foreign', ownerId: 'bob' }], sheet, 'alice', 0)
-    expect(prepared.count).toBe(6)
-    expect(prepared.sheet.instances.some(instance => instance.partId === 'foreign')).toBe(false)
+    expect(prepared.count).toBe(9)
+    expect(prepared.sheet.instances.some(instance => instance.partId === 'foreign')).toBe(true)
   })
-  it('rejects incomplete orders, unmapped items, foreign items, empty components and invalid quantities atomically', () => {
+  it('rejects incomplete orders, unmapped items, signed-out requests, empty components and invalid quantities atomically', () => {
     expect(() => prepareOrderSheet({ ...request, order: { ...order, lineItems: { ...order.lineItems, pageInfo: { hasNextPage: true, endCursor: 'next' } } } }, [item], parts, sheet, 'alice', 0)).toThrow('Load all')
     expect(() => prepareOrderSheet({ ...request, matches: {} }, [item], parts, sheet, 'alice', 0)).toThrow('select an item')
-    expect(() => prepareOrderSheet(request, [item], parts, sheet, 'bob', 0)).toThrow('select an item')
+    expect(() => prepareOrderSheet(request, [item], parts, sheet, '', 0)).toThrow('Sign in')
     expect(() => prepareOrderSheet(request, [item], [], sheet, 'alice', 0)).toThrow('no components')
     for (const quantity of [-1, 0.5, NaN, 100000]) {
       expect(() => prepareOrderSheet({ ...request, order: { ...order, lineItems: { ...order.lineItems, nodes: [{ ...line, currentQuantity: quantity }] } } }, [item], parts, sheet, 'alice', 0)).toThrow()

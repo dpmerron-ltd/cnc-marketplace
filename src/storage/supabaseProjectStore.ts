@@ -79,9 +79,9 @@ export async function saveRemoteComponent(part: Part, expectedUserId: string): P
   if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
   if (!userId || userId !== expectedUserId || part.ownerId !== userId || !part.itemId) {
-    return { ok: false, error: 'The component must belong to an item in your signed-in account.' }
+    return { ok: false, error: 'New components must be attributed to your current session and linked to a shared item.' }
   }
-  // The item's ownership is also enforced by the database's component RLS policy.
+  // New components are attributed to their creator; the parent item is shared.
   const result = await supabase.from('cnc_components').upsert([componentRow(part)])
   return result.error ? { ok: false, error: result.error.message } : { ok: true }
 }
@@ -90,16 +90,12 @@ export async function saveRemoteItemImage(item: MarketplaceItem, image: ItemImag
   if (!supabase) throw new Error('Supabase is not configured.')
   if (image) itemImageSchema.parse(image)
   const userId = await getUserId()
-  if (!userId || userId !== expectedUserId || item.ownerId !== userId) throw new Error('The item must belong to your signed-in account.')
-  // New items may not have reached the debounced autosave yet. Never overwrite an existing row here.
-  const created = await supabase.from('marketplace_items').upsert({
-    id: item.id, owner_id: userId, uploaded_by: item.uploadedBy ?? '', sku: item.sku,
-    name: item.name, description: item.description, created_at: item.createdAt, updated_at: item.updatedAt,
-    packing: item.packing ?? {},
-  }, { onConflict: 'id', ignoreDuplicates: true })
-  if (created.error) throw new Error(created.error.message)
+  if (!userId || userId !== expectedUserId) throw new Error('The signed-in account changed. Please reload.')
+  // Save new item metadata first, without ever reassigning an existing creator.
+  const saved = await saveCatalogueItem(item, userId)
+  if (!saved.ok) throw new Error(saved.error)
   if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
-  const result = await supabase.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('id', item.id).eq('owner_id', userId).select('id').single()
+  const result = await supabase.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('id', item.id).select('id').single()
   if (result.error) throw new Error(result.error.message)
 }
 
@@ -150,8 +146,8 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 
   const client = supabase
   const [itemRows, componentRows, projectResult, historyResult, presetsResult] = await Promise.all([
-    readLibraryPages((from, to) => client.from('marketplace_items').select('*').eq('owner_id', userId).order('created_at').order('id').range(from, to), 'items', onProgress),
-    readLibraryPages((from, to) => client.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,width,height,material_profile:material_variants->>primaryProfile').eq('owner_id', userId).order('id').range(from, to), 'component index', onProgress, 500),
+    readLibraryPages((from, to) => client.from('marketplace_items').select('*').order('created_at').order('id').range(from, to), 'items', onProgress),
+    readLibraryPages((from, to) => client.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,width,height,material_profile:material_variants->>primaryProfile').order('id').range(from, to), 'component index', onProgress, 500),
     supabase.from('sheet_projects').select('*').eq('owner_id', userId).eq('id', userId).maybeSingle<ProjectRow>(),
     supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
     supabase.from('gcode_presets').select('*').eq('owner_id', userId).order('name'),
@@ -160,7 +156,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const stateError = presetsResult.error ?? projectResult.error ?? historyResult.error
   if (stateError) throw new Error(`Could not load your saved library settings: ${stateError.message}`)
 
-  const items: MarketplaceItem[] = itemRows.filter((row) => row.owner_id === userId).map((row) => ({
+  const items: MarketplaceItem[] = itemRows.map((row) => ({
     id: row.id,
     ownerId: row.owner_id,
     uploadedBy: row.uploaded_by ?? undefined,
@@ -173,8 +169,11 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     image: itemImageSchema.safeParse(row.image).success ? row.image : undefined,
   }))
 
+  if (await getUserId() !== expectedUserId) return undefined
+  catalogueSnapshots.set(userId, new Map(items.map(item => [item.id, structuredClone(item)])))
+
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
-  const componentIndex: ComponentSummary[] = componentRows.filter(row => row.owner_id === userId && itemSkuById.has(row.item_id)).map(row => ({
+  const componentIndex: ComponentSummary[] = componentRows.filter(row => itemSkuById.has(row.item_id)).map(row => ({
     id: row.id, ownerId: row.owner_id, itemId: row.item_id,
     sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
     originalFilename: row.original_filename, width: row.width, height: row.height,
@@ -214,15 +213,15 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 }
 
 export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUserId: string): Promise<Part[]> {
-  if (!supabase || item.ownerId !== expectedUserId || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
+  if (!supabase || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const client = supabase
   const rows = await readLibraryPages<ComponentRow>((from, to) => client.from('cnc_components')
     .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants')
-    .eq('owner_id', expectedUserId).eq('item_id', item.id).order('date_imported').order('id').range(from, to), 'item components')
+    .eq('item_id', item.id).order('date_imported').order('id').range(from, to), 'item components')
   if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const parts: Part[] = []
   for (const [index, row] of rows.entries()) {
-    if (row.owner_id !== expectedUserId || row.item_id !== item.id) continue
+    if (row.item_id !== item.id) continue
     if (index % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0))
     const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, item.id)
     if (row.material_variants != null) {
@@ -235,35 +234,70 @@ export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUs
   return parts
 }
 
-export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string): Promise<RemoteSaveResult> {
+// Snapshots are per login; only changed metadata is written. Sheet autosaves
+// must not replace another user's newer catalogue edits with their cached copy.
+const catalogueSnapshots = new Map<string, Map<string, MarketplaceItem>>()
+function editableMetadata(item: MarketplaceItem) {
+  return { sku: item.sku, name: item.name, description: item.description, packing: item.packing ?? {} }
+}
+let catalogueWriteQueue: Promise<RemoteSaveResult> = Promise.resolve({ ok: true })
+function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
+  const next = catalogueWriteQueue.then(() => persistCatalogueItem(item, userId))
+  catalogueWriteQueue = next.catch(error => ({ ok: false, error: String(error) }))
+  return next
+}
+async function persistCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
+  if (await getUserId() !== userId) return { ok: false, error: 'The signed-in account changed. Please reload.' }
+
+  const snapshots = catalogueSnapshots.get(userId) ?? new Map<string, MarketplaceItem>()
+  catalogueSnapshots.set(userId, snapshots)
+  const previous = snapshots.get(item.id)
+  if (!previous) {
+    if (item.ownerId !== userId) return { ok: false, error: 'Reload the shared catalogue before editing this item.' }
+    const result = await supabase!.from('marketplace_items').upsert([{
+      id: item.id, owner_id: userId, uploaded_by: item.uploadedBy ?? '',
+      ...editableMetadata(item), created_at: item.createdAt, updated_at: item.updatedAt,
+    }], { onConflict: 'id', ignoreDuplicates: true }).select('id')
+    if (result.error) return { ok: false, error: result.error.message }
+    // Ignore-duplicates protects existing IDs (including items deleted/recreated
+    // in another session). Never treat a collided ID as a successful insertion.
+    if (!result.data?.length) return { ok: false, error: 'Item already exists. Reload the shared catalogue before editing it.' }
+  } else {
+    if (JSON.stringify(editableMetadata(previous)) === JSON.stringify(editableMetadata(item))) return { ok: true }
+    const result = await supabase!.rpc('update_shared_item_metadata', {
+      p_id: item.id, p_expected: editableMetadata(previous), p_next: editableMetadata(item),
+    })
+    if (result.error) return { ok: false, error: result.error.message }
+    if (!result.data) return { ok: false, error: 'This shared item changed. Reload the catalogue before saving your edits.' }
+  }
+  snapshots.set(item.id, structuredClone(item))
+  return { ok: true }
+}
+
+let projectSaveQueue: Promise<RemoteSaveResult> = Promise.resolve({ ok: true })
+export function saveRemoteProject(...args: Parameters<typeof persistRemoteProject>): Promise<RemoteSaveResult> {
+  const next = projectSaveQueue.then(() => persistRemoteProject(...args))
+  projectSaveQueue = next.catch(error => ({ ok: false, error: String(error) }))
+  return next
+}
+
+async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string): Promise<RemoteSaveResult> {
   if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
   if (!userId || userId !== expectedUserId) return { ok: false, error: 'The signed-in account changed. Please reload.' }
 
-  const saveableItems = items.filter((item) => item.ownerId === userId)
-  const itemIds = new Set(saveableItems.map((item) => item.id))
-  const saveableParts = parts.filter((part) => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
-  if (saveableItems.length !== items.length || saveableParts.length !== parts.length) {
-    return { ok: false, error: 'Cannot save items or components belonging to another account.' }
-  }
-  if (saveableItems.length > 0) {
-    const itemsResult = await supabase.from('marketplace_items').upsert(
-      saveableItems.map((item) => ({
-        id: item.id,
-        owner_id: userId,
-        uploaded_by: item.uploadedBy ?? '',
-        sku: item.sku,
-        name: item.name,
-        description: item.description,
-        created_at: item.createdAt,
-        updated_at: item.updatedAt,
-        packing: item.packing ?? {},
-      })),
-    )
-    if (itemsResult.error) {
-      console.warn('Supabase item save failed.', itemsResult.error)
-      return { ok: false, error: itemsResult.error.message }
-    }
+  const itemIds = new Set(items.map(item => item.id))
+  if (parts.some(part => !itemIds.has(part.itemId ?? ''))) return { ok: false, error: 'A component is missing its catalogue item.' }
+  // Existing shared programs are never rewritten by sheet autosave.
+  const saveableParts = parts.filter(part => part.ownerId === userId)
+  const snapshots = catalogueSnapshots.get(userId)
+  const changedItems = items.filter(item => {
+    const previous = snapshots?.get(item.id)
+    return !previous || JSON.stringify(editableMetadata(previous)) !== JSON.stringify(editableMetadata(item))
+  })
+  for (const item of changedItems) {
+    const result = await saveCatalogueItem(item, userId)
+    if (!result.ok) return result
   }
 
   // Sheet autosaves may carry stale programs from before an API correction.
@@ -300,7 +334,7 @@ export async function deleteRemoteComponent(partId: string): Promise<void> {
   if (!supabase) return
   const userId = await getUserId()
   if (!userId) return
-  const result = await supabase.from('cnc_components').delete().eq('id', partId).eq('owner_id', userId)
+  const result = await supabase.from('cnc_components').delete().eq('id', partId)
   if (result.error) console.warn('Supabase component delete failed.', result.error)
 }
 

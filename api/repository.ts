@@ -70,8 +70,8 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       const row = checked(await db.from('user_program_settings').select('start_gcode,spindle_start_gcode,end_gcode').eq('owner_id', owner).maybeSingle())
       return row ? normalizePrograms({ startGcode: row.start_gcode, spindleStartGcode: row.spindle_start_gcode, endGcode: row.end_gcode }) : undefined
     },
-    async catalog(owner, limit, offset) {
-      return checked(await db.from('marketplace_items').select('id,sku,name,description,imageContentType:image->>contentType,cnc_components(id,sku,name,width,height)').eq('owner_id', owner).eq('cnc_components.owner_id', owner).order('id').range(offset, offset + limit - 1)) ?? []
+    async catalog(_owner, limit, offset) {
+      return checked(await db.from('marketplace_items').select('id,sku,name,description,imageContentType:image->>contentType,cnc_components(id,sku,name,width,height)').order('id').range(offset, offset + limit - 1)) ?? []
     },
     async createItem(owner, input, actor) {
       const result = await db.from('marketplace_items').insert({
@@ -83,26 +83,26 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       if (!row) throw new Error('Item was not created.')
       return row
     },
-    async updateItemDescription(owner, id, expected, description) {
-      let query = db.from('marketplace_items').update({ description, updated_at: new Date().toISOString() }).eq('owner_id', owner).eq('id', id)
+    async updateItemDescription(_owner, id, expected, description) {
+      let query = db.from('marketplace_items').update({ description, updated_at: new Date().toISOString() }).eq('id', id)
       query = expected === null ? query.is('description', null) : query.eq('description', expected)
       return Boolean(checked(await query.select('id').maybeSingle()))
     },
-    async itemImage(owner, id) {
-      const row = checked(await db.from('marketplace_items').select('image').eq('owner_id', owner).eq('id', id).maybeSingle())
+    async itemImage(_owner, id) {
+      const row = checked(await db.from('marketplace_items').select('image').eq('id', id).maybeSingle())
       const parsed = itemImageSchema.safeParse(row?.image)
       return parsed.success ? parsed.data : undefined
     },
-    async updateItemImage(owner, id, image) {
-      const row = checked(await db.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('owner_id', owner).eq('id', id).select('id').maybeSingle())
+    async updateItemImage(_owner, id, image) {
+      const row = checked(await db.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('id', id).select('id').maybeSingle())
       return Boolean(row)
     },
-    async ownsItem(owner, id) {
-      return Boolean(checked(await db.from('marketplace_items').select('id').eq('owner_id', owner).eq('id', id).maybeSingle()))
+    async itemExists(_owner, id) {
+      return Boolean(checked(await db.from('marketplace_items').select('id').eq('id', id).maybeSingle()))
     },
     async createComponent(owner, part) {
       if (part.ownerId !== owner || !part.itemId) throw new JobError('Item not found.', 404)
-      const parent = checked(await db.from('marketplace_items').select('id').eq('owner_id', owner).eq('id', part.itemId).maybeSingle())
+      const parent = checked(await db.from('marketplace_items').select('id').eq('id', part.itemId).maybeSingle())
       if (!parent) throw new JobError('Item not found.', 404)
       const { materialVariants, ...metadata } = part.metadata
       const row = {
@@ -114,15 +114,15 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       }
       const result = await db.from('cnc_components').insert(row)
       if (result.error?.code === '23505') {
-        const previous = checked(await db.from('cnc_components').select('item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('owner_id', owner).eq('id', part.id).maybeSingle())
+        const previous = checked(await db.from('cnc_components').select('item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('id', part.id).maybeSingle())
         if (previous && previous.item_id === row.item_id && previous.name === row.name && previous.sku === row.sku && previous.original_filename === row.original_filename && previous.gcode === row.gcode && previous.dxf === row.dxf && JSON.stringify(materialVariantsSchema.optional().parse(previous.material_variants ?? undefined)) === JSON.stringify(materialVariantsSchema.optional().parse(part.metadata.materialVariants))) return { created: false }
-        throw new JobError('Component ID already exists with different content or ownership. Existing components were not changed.', 409)
+        throw new JobError('Component ID already exists with different content or parent item. Existing components were not changed.', 409)
       }
       checked(result)
       return { created: true }
     },
-    async componentSource(owner, itemId, id) {
-      const row = checked(await db.from('cnc_components').select('id,item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
+    async componentSource(_owner, itemId, id) {
+      const row = checked(await db.from('cnc_components').select('id,item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) return undefined
       return {
         id: row.id, itemId: row.item_id, name: row.name, sku: row.sku,
@@ -132,7 +132,7 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       }
     },
     async replaceComponent(owner, itemId, id, input) {
-      const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
+      const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf').eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) throw new JobError('Component not found.', 404)
       if (input.dxf !== undefined && row.dxf !== input.expectedDxf) throw new JobError('Component source changed; reload before replacing it.', 409)
       const result = parseComponent({ id, name: row.name, sku: row.sku, filename: row.original_filename, dxf: input.dxf ?? row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId)
@@ -147,16 +147,16 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       }))
       return result
     },
-    async loadComponents(owner, request: JobRequest) {
+    async loadComponents(_owner, request: JobRequest) {
       const ids = request.items.flatMap(item => item.itemId ? [item.itemId] : [])
       const skus = request.items.flatMap(item => item.sku ? [item.sku] : [])
       const select = 'id,owner_id,sku,name,description,created_at,updated_at'
-      const byId = ids.length ? checked(await db.from('marketplace_items').select(select).eq('owner_id', owner).in('id', ids).limit(21)) ?? [] : []
-      const bySku = skus.length ? checked(await db.from('marketplace_items').select(select).eq('owner_id', owner).in('sku', skus).limit(21)) ?? [] : []
+      const byId = ids.length ? checked(await db.from('marketplace_items').select(select).in('id', ids).limit(21)) ?? [] : []
+      const bySku = skus.length ? checked(await db.from('marketplace_items').select(select).in('sku', skus).limit(21)) ?? [] : []
       const rows = [...new Map([...byId, ...bySku].map(item => [item.id, item])).values()]
       if (rows.length > 20) throw new JobError('Too many matching items or ambiguous SKUs.')
       const items = rows.map(row => ({ id: row.id, ownerId: row.owner_id, sku: row.sku, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at }))
-      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported,material_variants').eq('owner_id', owner).in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
+      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported,material_variants').in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
       if (components.length > 20 || components.reduce((sum, row) => sum + row.gcode.length + JSON.stringify(row.material_variants ?? {}).length, 0) > 12000000) throw new JobError('Selected component library exceeds the per-job limit. Split the order into smaller jobs.')
       const parts = components.map(row => {
         const part = { ...createPartFromGCode(row.original_filename, row.gcode, undefined, row.item_id), id: row.id, ownerId: row.owner_id, name: row.name, sku: row.sku, dateImported: row.date_imported }

@@ -474,8 +474,8 @@ function App() {
 
   const ensureItemComponents = useCallback((itemId: string): Promise<Part[]> => {
     const current = orderSheetInputs.current
-    const item = current.items.find(item => item.id === itemId && item.ownerId === userId)
-    if (!item || !userId || accountRef.current !== userId) return Promise.reject(new Error('This item is not in your current account.'))
+    const item = current.items.find(item => item.id === itemId)
+    if (!item || !userId || accountRef.current !== userId) return Promise.reject(new Error('This item is not available in the shared catalogue.'))
     if (loadedItems.current.has(itemId)) return Promise.resolve(current.parts.filter(part => part.itemId === itemId))
     const pending = loadingItems.current.get(itemId)
     if (pending) return pending
@@ -567,7 +567,7 @@ function App() {
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
   function canEditItem(item?: MarketplaceItem): boolean {
-    return Boolean(userId && item && item.ownerId === userId)
+    return Boolean(userId && item)
   }
 
   async function requireAuthSession(): Promise<boolean> {
@@ -738,7 +738,7 @@ function App() {
     setLoadedAccountId(undefined)
     resetComponentLoading()
     setLibraryLoadError(undefined)
-    setStatus('Loading your items…')
+    setStatus('Loading shared items…')
     void loadRemoteProject(userId, message => {
       if (!cancelled && accountRef.current === userId) setStatus(message)
     }).then((remoteProject) => {
@@ -759,7 +759,7 @@ function App() {
       setSelectedInstanceId(undefined)
       setActiveSheetIndex(0)
       setLoadedAccountId(userId)
-      setStatus('Loaded your private item library.')
+      setStatus('Loaded the shared item library.')
     }).catch(error => {
       if (cancelled || accountRef.current !== userId) return
       remoteHydratedRef.current = false
@@ -850,7 +850,7 @@ function App() {
   async function importFilesForItem(itemId: string, fileList: FileList, createdItem?: MarketplaceItem) {
     const targetItem = createdItem ?? items.find((item) => item.id === itemId)
     if (!canEditItem(targetItem)) {
-      setStatus('This item is not in your account.')
+      setStatus('This shared item is not available in this session.')
       return
     }
 
@@ -883,7 +883,7 @@ function App() {
 
   function saveGeneratedComponent(value: CamSave) {
     const target = items.find(item => item.id === value.itemId)
-    if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
+    if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not available in this session.')
     const reserved = new Set([...catalogueComponents.filter(p => p.itemId === value.itemId).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId).map(job => job.id)]).size
     const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, reserved)
     part.name = part.name.replace(/-(?:6|12|15|18)mm(?:-2pass)?$/, '')
@@ -893,7 +893,7 @@ function App() {
 
   async function persistGeneratedComponent(part: Part) {
     const target = items.find(item => item.id === part.itemId)
-    if (!canEditItem(target) || part.ownerId !== userId || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
+    if (!canEditItem(target) || part.ownerId !== userId || accountRef.current !== userId) throw new Error('The selected item is not available in this session.')
     const result = await saveRemoteComponent(part, userId!)
     if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
     if (accountRef.current !== userId) return
@@ -928,7 +928,7 @@ function App() {
   function updateMarketplaceItem(itemId: string, patch: Partial<MarketplaceItem>) {
     const targetItem = items.find((item) => item.id === itemId)
     if (!canEditItem(targetItem)) {
-      setStatus('This item is not in your account.')
+      setStatus('This shared item is not available in this session.')
       return
     }
 
@@ -937,7 +937,7 @@ function App() {
 
   async function updateItemImage(itemId: string, image: ItemImage | null) {
     const item = items.find(value => value.id === itemId)
-    if (!item || !canEditItem(item) || !userId || accountRef.current !== userId) throw new Error('This item is not in your account.')
+    if (!item || !canEditItem(item) || !userId || accountRef.current !== userId) throw new Error('This shared item is not available in this session.')
     await saveRemoteItemImage(item, image, userId)
     if (accountRef.current !== userId) return
     setItems(current => current.map(value => value.id === itemId ? { ...value, image, updatedAt: new Date().toISOString() } : value))
@@ -947,7 +947,7 @@ function App() {
     const part = parts.find((candidate) => candidate.id === partId)
     const item = part?.itemId ? items.find((candidate) => candidate.id === part.itemId) : undefined
     if (!canEditItem(item)) {
-      setStatus('This item is not in your account.')
+      setStatus('This shared item is not available in this session.')
       return
     }
 
@@ -973,7 +973,7 @@ function App() {
 
   async function addAllItemComponents(itemId: string): Promise<number> {
     const item = items.find(value => value.id === itemId)
-    if (!item || !userId || accountRef.current !== userId) throw new Error('This item is not in your account.')
+    if (!item || !userId || accountRef.current !== userId) throw new Error('This shared item is not available in this session.')
     if (!loadedItems.current.has(itemId)) throw new Error('Wait for all item components to load before adding them.')
     const initial = orderSheetInputs.current, epoch = componentEpoch.current
     const obstacles = new Set(initial.sheet.instances.flatMap(instance => {
@@ -1329,7 +1329,7 @@ function App() {
     return (
       <main className="login-shell">
         <div className="login-panel">
-          <h2>{libraryLoadError ? 'Your items could not be loaded' : 'Loading your items'}</h2>
+          <h2>{libraryLoadError ? 'Your items could not be loaded' : 'Loading shared items'}</h2>
           <p role={libraryLoadError ? 'alert' : 'status'}>{libraryLoadError ?? status}</p>
           {libraryLoadError && <button type="button" onClick={() => setLibraryReload(value => value + 1)}>Retry loading items</button>}
           <p>{userEmail}</p>
@@ -1430,7 +1430,7 @@ function App() {
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}

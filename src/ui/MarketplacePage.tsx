@@ -44,11 +44,11 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
   const [added, setAdded] = useState<string>()
   const [addError, setAddError] = useState('')
   const [adding, setAdding] = useState(false)
-  const ownItems = useMemo(() => items.filter(item => currentUserId && item.ownerId === currentUserId), [items, currentUserId])
+  const sharedItems = useMemo(() => currentUserId ? items : [], [items, currentUserId])
   const partsByItem = useMemo(() => {
     const map = new Map<string, ComponentSummary[]>()
     for (const part of componentIndex ?? parts) {
-      if (!part.itemId || part.ownerId !== currentUserId) continue
+      if (!part.itemId || !currentUserId) continue
       const group = map.get(part.itemId) ?? []
       group.push(part)
       map.set(part.itemId, group)
@@ -56,15 +56,15 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
     return map
   }, [componentIndex, parts, currentUserId])
   const stock = useBoxStock(currentUserId)
-  const packingJobs = stock.boxes ? JSON.stringify(ownItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
+  const packingJobs = stock.boxes ? JSON.stringify(sharedItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
   const estimates = usePackingEstimates(packingJobs)
-  const selectedItem = ownItems.find(item => item.id === detailId)
-  const selectedParts = selectedItem ? parts.filter(part => part.ownerId === currentUserId && part.itemId === selectedItem.id) : []
+  const selectedItem = sharedItems.find(item => item.id === detailId)
+  const selectedParts = selectedItem ? parts.filter(part => part.itemId === selectedItem.id) : []
   const selectedCount = selectedItem ? partsByItem.get(selectedItem.id)?.length ?? 0 : 0
   const componentLoad = selectedItem ? componentLoads?.[selectedItem.id] : undefined
   const componentsReady = !componentLoad || componentLoad.state === 'loaded'
   const term = query.trim().toLowerCase()
-  const visibleItems = ownItems.filter(item => {
+  const visibleItems = sharedItems.filter(item => {
     const components = partsByItem.get(item.id) ?? []
     return (filter === 'all' || (filter === 'populated' ? components.length > 0 : components.length === 0)) &&
       [item.name, item.sku, item.description, ...components.flatMap(part => [part.name, part.sku, part.originalFilename])].some(value => value.toLowerCase().includes(term))
@@ -124,24 +124,24 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         </article>)}
       </div> : <div className="items-empty"><Package size={32} /><h3>{selectedParts.length ? 'No matching components' : 'No components yet'}</h3>{componentQuery && <button type="button" onClick={() => setComponentQuery('')}>Clear search</button>}</div>}
     </> : <>
-      <header className="items-heading"><div><h2>Items</h2><p>{ownItems.length} items <span aria-hidden="true">/</span> {ownItems.reduce((sum, item) => sum + (partsByItem.get(item.id)?.length ?? 0), 0)} components</p></div><button type="button" className="primary" onClick={() => openItem(onCreateItem())}><Plus size={17} /> New item</button></header>
+      <header className="items-heading"><div><h2>Items</h2><p>{sharedItems.length} items <span aria-hidden="true">/</span> {sharedItems.reduce((sum, item) => sum + (partsByItem.get(item.id)?.length ?? 0), 0)} components</p></div><button type="button" className="primary" onClick={() => openItem(onCreateItem())}><Plus size={17} /> New item</button></header>
       <div className="items-controls">
         <label className="items-search"><Search size={18} /><input aria-label="Search items" placeholder="Search items, SKUs or components" value={query} onChange={event => setQuery(event.target.value)} />{query && <button className="items-icon" type="button" title="Clear search" aria-label="Clear search" onClick={() => setQuery('')}><X size={16} /></button>}</label>
         <label>Show<select aria-label="Filter items" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All items</option><option value="populated">With components</option><option value="empty">Empty items</option></select></label>
         <label>Sort by<select aria-label="Sort items" value={sort} onChange={event => setSort(event.target.value)}><option value="name">Name A-Z</option><option value="updated">Recently updated</option><option value="components">Most components</option></select></label>
       </div>
-      <p className="items-result-count" role="status">{visibleItems.length} of {ownItems.length} items</p>
+      <p className="items-result-count" role="status">{visibleItems.length} of {sharedItems.length} items</p>
       {stock.error && <p role="alert">Box stock: {stock.error} <button type="button" onClick={stock.reload}>Retry box stock</button></p>}
       {visibleItems.length ? <div className="items-grid">
         {visibleItems.map(item => {
           const components = partsByItem.get(item.id) ?? []
           return <button type="button" className="items-grid-card" key={item.id} aria-label={`Open ${item.name || 'Untitled item'}`} onClick={() => openItem(item.id)}>
-            {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.ownerId === currentUserId && part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
+            {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
             <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{estimates[item.id] && <span className="items-box-estimate">{estimates[item.id]?.result?.boxes[0] ? `${estimates[item.id].result!.boxes.length} box${estimates[item.id].result!.boxes.length === 1 ? '' : 'es'}: ${estimates[item.id].result!.boxes.map(box => boxSize(box.internal)).join(' + ')}` : estimates[item.id]?.error || 'Box estimate: review dimensions'}</span>}</div>
             <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>Updated {dateLabel(item.updatedAt)}</small></div>
           </button>
         })}
-      </div> : <div className="items-empty"><Package size={36} /><h3>{ownItems.length ? 'No matching items' : 'No items yet'}</h3>{ownItems.length > 0 && <button type="button" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div>}
+      </div> : <div className="items-empty"><Package size={36} /><h3>{sharedItems.length ? 'No matching items' : 'No items yet'}</h3>{sharedItems.length > 0 && <button type="button" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div>}
     </>}
   </main>
 }

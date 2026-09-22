@@ -22,7 +22,7 @@ export function OrderSheetDialog({ userId, orderId, items, parts, sheetName, onA
   const [retry, setRetry] = useState(0)
   const running = useRef<AbortController | undefined>(undefined)
   const dialog = useRef<HTMLDialogElement>(null)
-  const catalogue = items.filter(item => item.ownerId === userId)
+  const catalogue = items
   const initialItems = useRef(items)
 
   useEffect(() => { dialog.current?.showModal(); return () => running.current?.abort() }, [])
@@ -53,7 +53,7 @@ export function OrderSheetDialog({ userId, orderId, items, parts, sheetName, onA
   }, [userId, orderId, retry])
 
   const lines = data?.order.lineItems.nodes.filter(line => line.currentQuantity > 0) ?? []
-  const countFor = (id: string) => parts.filter(part => part.ownerId === userId && part.itemId === id).length
+  const countFor = (id: string) => parts.filter(part => part.itemId === id).length
   const count = lines.reduce((sum, line) => sum + countFor(matches[line.id]) * line.currentQuantity, 0)
   const ready = lines.length > 0 && lines.every(line => catalogue.some(item => item.id === matches[line.id]) && countFor(matches[line.id]) > 0)
   async function add() {
