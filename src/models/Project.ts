@@ -1,4 +1,4 @@
-import type { Part } from './Part'
+import type { ComponentSummary, Part } from './Part'
 import type { Sheet } from './Sheet'
 import type { MarketplaceItem } from './Item'
 
@@ -17,6 +17,7 @@ export interface Project {
   version: 1
   items?: MarketplaceItem[]
   parts: Part[]
+  componentIndex?: ComponentSummary[]
   sheet: Sheet
   sheetHistory?: SheetHistoryEntry[]
   savedAt: string

@@ -5,7 +5,8 @@ export function privateProject(project: Project, userId: string): Project {
   const items = (project.items ?? []).filter((item) => item.ownerId === userId)
   const itemIds = new Set(items.map((item) => item.id))
   const parts = project.parts.filter((part) => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
-  const partIds = new Set(parts.map((part) => part.id))
+  const componentIndex = project.componentIndex?.filter(part => part.ownerId === userId && itemIds.has(part.itemId ?? ''))
+  const partIds = new Set([...parts, ...(componentIndex ?? [])].map((part) => part.id))
   const cleanSheet = (sheet: Sheet): Sheet => ({
     ...sheet,
     instances: sheet.instances.filter((instance) => partIds.has(instance.partId)),
@@ -15,6 +16,7 @@ export function privateProject(project: Project, userId: string): Project {
     ...project,
     items,
     parts,
+    ...(componentIndex ? { componentIndex } : {}),
     sheet: cleanSheet(project.sheet),
     sheetHistory: project.sheetHistory?.map((entry) => ({
       ...entry,
@@ -26,6 +28,7 @@ export function privateProject(project: Project, userId: string): Project {
 
 // Explicit file imports create independent copies, never overwrite another owner's IDs.
 export function copyProjectToAccount(project: Project, userId: string): Project {
+  if (project.componentIndex?.some(component => !project.parts.some(part => part.id === component.id))) throw new Error('This project is incomplete. Export it again after loading its components.')
   const itemIds = new Map((project.items ?? []).map((item) => [item.id, crypto.randomUUID()]))
   const partIds = new Map(project.parts.map((part) => [part.id, crypto.randomUUID()]))
   const copySheet = (sheet: Sheet): Sheet => {
@@ -41,6 +44,7 @@ export function copyProjectToAccount(project: Project, userId: string): Project 
   }
   return {
     ...project,
+    componentIndex: undefined,
     items: project.items?.map((item) => ({ ...item, id: itemIds.get(item.id)!, ownerId: userId, uploadedBy: undefined,
       packing: item.packing ? { ...item.packing, components: Object.fromEntries(Object.entries(item.packing.components ?? {}).filter(([id]) => partIds.has(id)).map(([id, value]) => [partIds.get(id)!, value])) } : undefined,
     })),

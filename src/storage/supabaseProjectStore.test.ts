@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteProject, saveRemoteComponent, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, failOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; filters: [string, string][]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', error: null as null | { message: string }, failOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; columns?: string; filters: [string, string][]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
     auth: { getUser: async () => ({ data: { user: { id: mock.userId } } }) },
     from: (table: string) => {
-      const query = { table, filters: [] as [string, string][], write: undefined as unknown, options: undefined as unknown, range: undefined as [number, number] | undefined }
+      const query = { table, columns: undefined as string | undefined, filters: [] as [string, string][], write: undefined as unknown, options: undefined as unknown, range: undefined as [number, number] | undefined }
       mock.queries.push(query)
       const builder = {
-        select: () => builder,
+        select: (columns: string) => { query.columns = columns; return builder },
         eq: (key: string, value: string) => { query.filters.push([key, value]); return builder },
         order: () => builder,
         range: (from: number, to: number) => { query.range = [from, to]; return builder },
@@ -23,7 +23,7 @@ vi.mock('./supabaseClient', () => ({
         update: (value: unknown) => { query.write = value; return builder },
         upsert: (value: unknown, options?: unknown) => { query.write = value; query.options = options; return builder },
         then: (resolve: (value: unknown) => unknown) => {
-          const rows = table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : table === 'cnc_components' ? mock.components : []
+          const rows = table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : table === 'cnc_components' ? mock.components.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value)) : []
           const data = query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
           const error = table === 'cnc_components' && query.range?.[0] === mock.failOffset && mock.failOffset !== undefined ? { message: 'Response too large' } : mock.error
           return Promise.resolve({ data, error }).then(resolve)
@@ -39,31 +39,52 @@ const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpa
 describe('cloud account boundaries', () => {
   beforeEach(() => { mock.queries = []; mock.userId = 'alice'; mock.error = null; mock.rows = []; mock.components = []; mock.failOffset = undefined })
 
+  it('loads only the requested owned item through bounded program pages', async () => {
+    const item = { id: 'target', ownerId: 'alice', sku: 'T', name: 'Target', description: '', createdAt: '', updatedAt: '' }
+    mock.components = Array.from({ length: 61 }, (_, index) => ({ id: `p-${index}`, owner_id: 'alice', item_id: 'target', sku: `T-${index}`, name: `Panel ${index}`, original_filename: 'panel.nc', gcode: testParts[0].gcode }))
+    mock.components.push({ id: 'foreign', owner_id: 'bob', item_id: 'target' }, { id: 'other', owner_id: 'alice', item_id: 'other' })
+    const result = await loadRemoteItemComponents(item, 'alice')
+    expect(result).toHaveLength(61)
+    expect(result.every(part => part.gcode === testParts[0].gcode && part.ownerId === 'alice' && part.itemId === 'target')).toBe(true)
+    expect(mock.queries.every(query => query.filters.some(([key, value]) => key === 'item_id' && value === 'target') && query.filters.some(([key, value]) => key === 'owner_id' && value === 'alice'))).toBe(true)
+    expect(mock.queries.every(query => query.range![1] - query.range![0] === 24)).toBe(true)
+    mock.queries = []
+    await expect(loadRemoteItemComponents({ ...item, ownerId: 'bob' }, 'alice')).rejects.toThrow('account changed')
+    expect(mock.queries).toEqual([])
+    mock.userId = 'bob'
+    await expect(loadRemoteItemComponents(item, 'alice')).rejects.toThrow('account changed')
+    expect(mock.queries).toEqual([])
+  })
+
   it('loads a large catalogue completely through bounded owner-filtered pages', async () => {
     mock.rows = Array.from({ length: 88 }, (_, index) => ({ id: `item-${index}`, owner_id: 'alice', name: `Item ${index}`, sku: `I${index}` }))
     mock.components = Array.from({ length: 1078 }, (_, index) => ({ id: `part-${index}`, owner_id: 'alice', item_id: `item-${index % 88}`, name: `Panel ${index}`, sku: `P${index}`, original_filename: 'panel.nc', gcode: testParts[0].gcode }))
     const progress = vi.fn()
     const result = await loadRemoteProject('alice', progress)
     expect(result?.items).toHaveLength(88)
-    expect(result?.parts).toHaveLength(1078)
-    expect(new Set(result?.parts.map(part => part.id)).size).toBe(1078)
-    expect(result?.parts.at(-1)?.gcode).toBe(testParts[0].gcode)
+    expect(result?.parts).toHaveLength(0)
+    expect(result?.componentIndex).toHaveLength(1078)
+    expect(new Set(result?.componentIndex?.map(part => part.id)).size).toBe(1078)
+    expect(result?.componentIndex?.at(-1)).not.toHaveProperty('gcode')
     const pages = mock.queries.filter(query => query.range)
-    expect(pages.every(query => query.range![1] - query.range![0] === 24)).toBe(true)
+    expect(pages.every(query => query.range![1] - query.range![0] === (query.table === 'cnc_components' ? 499 : 24))).toBe(true)
     expect(pages.every(query => query.filters.some(([key, value]) => key === 'owner_id' && value === 'alice'))).toBe(true)
-    expect(progress).toHaveBeenCalledWith('Preparing cutting components: 1075 of 1078…')
+    expect(pages.filter(query => query.table === 'cnc_components')).toHaveLength(3)
+    expect(pages.filter(query => query.table === 'cnc_components').every(query => !query.columns?.split(',').some(field => ['*', 'gcode', 'dxf', 'material_variants'].includes(field)))).toBe(true)
   })
 
   it('reports a failed later page without returning an incomplete library', async () => {
-    mock.components = Array.from({ length: 100 }, (_, index) => ({ id: `part-${index}` }))
-    mock.failOffset = 75
-    await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load cutting components: Response too large')
+    mock.components = Array.from({ length: 1700 }, (_, index) => ({ id: `part-${index}`, owner_id: 'alice' }))
+    mock.failOffset = 1500
+    await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load component index: Response too large')
   })
 
   it('identifies unreadable profiles instead of silently discarding components', async () => {
     mock.rows = [{ id: 'item', owner_id: 'alice', name: 'Cabinet', sku: 'CAB' }]
     mock.components = [{ id: 'part', item_id: 'item', owner_id: 'alice', name: 'Panel', sku: 'CAB-P1', original_filename: 'panel.nc', gcode: testParts[0].gcode, material_variants: { broken: true } }]
-    await expect(loadRemoteProject('alice')).rejects.toThrow('CAB-P1: saved cutting profiles could not be read')
+    const project = await loadRemoteProject('alice')
+    expect(project?.parts).toEqual([])
+    await expect(loadRemoteItemComponents(project!.items[0], 'alice')).rejects.toThrow('CAB-P1: saved cutting profiles could not be read')
   })
 
   it('round-trips owned material variants separately so legacy metadata autosaves cannot erase them', async () => {
@@ -75,8 +96,9 @@ describe('cloud account boundaries', () => {
     mock.components = rows
     mock.rows = [{ id: part.itemId, owner_id: 'alice', name: 'Test', sku: 'TEST' }]
     const loaded = await loadRemoteProject('alice')
-    expect(loaded?.parts[0].metadata.materialVariants).toEqual(materialVariants)
-    expect(loaded?.parts[0].gcode).toBe(part.gcode)
+    const components = await loadRemoteItemComponents(loaded!.items[0], 'alice')
+    expect(components[0].metadata.materialVariants).toEqual(materialVariants)
+    expect(components[0].gcode).toBe(part.gcode)
     mock.queries = []
     await saveRemoteComponent({ ...testParts[0], ownerId: 'alice' }, 'alice')
     expect(mock.queries[0].write).toEqual([expect.not.objectContaining({ material_variants: expect.anything() })])

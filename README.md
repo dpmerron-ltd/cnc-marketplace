@@ -50,6 +50,15 @@ The current MVP stores G-code and optional DXF text in Postgres rows. Row-level 
 
 Browser backups are keyed by account ID. The old shared browser cache is never automatically loaded. Explicit project-file imports create independent copies with new IDs in the importing account. Saved placements referencing another account's components are removed when loaded.
 
+The item grid loads a lightweight, owner-scoped component index, not NC/DXF files
+or full material variants. Opening an item loads and caches its programs for the
+current account session. Saved sheets and order additions fetch the components
+they need on demand. Counts, search and packing estimates use the index; unloaded
+components are not treated as deleted. Failed downloads have a retry state and
+cannot enable a partial item export. Export Project explicitly loads the complete
+catalogue before downloading a self-contained backup. Partial catalogues never
+overwrite the last complete browser backup; sheet autosaves still go to the cloud.
+
 The Pages deployment applies `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql` transactionally before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
 
 ## MVP Features

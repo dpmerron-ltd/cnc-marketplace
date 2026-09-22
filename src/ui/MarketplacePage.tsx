@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, ArrowRight, FileUp, Package, Plus, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
-import type { Part } from '../models/Part'
+import type { ComponentSummary, Part } from '../models/Part'
 import { ItemPreview } from './ItemPreview'
 import { PackingPanel } from './PackingPanel'
 import { boxSize } from '../packing/format'
@@ -15,6 +15,9 @@ import './MarketplacePage.css'
 interface MarketplacePageProps {
   items: MarketplaceItem[]
   parts: Part[]
+  componentIndex?: ComponentSummary[]
+  componentLoads?: Record<string, { state: 'idle' | 'loading' | 'loaded' | 'error'; error?: string }>
+  onLoadComponents?: (itemId: string) => Promise<unknown>
   currentUserId?: string
   onCreateItem: () => string
   onSelectItem: (itemId: string) => void
@@ -23,7 +26,7 @@ interface MarketplacePageProps {
   onImportComponents: (itemId: string, files: FileList) => void
   onDeleteComponent: (partId: string) => void
   onAddToSheet: (partId: string) => void
-  onAddItemToSheet: (itemId: string) => number
+  onAddItemToSheet: (itemId: string) => number | Promise<number>
   onOpenSheet: () => void
 }
 
@@ -32,7 +35,7 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
+export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
   const [detailId, setDetailId] = useState<string>()
   const [query, setQuery] = useState('')
   const [componentQuery, setComponentQuery] = useState('')
@@ -40,22 +43,26 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
   const [filter, setFilter] = useState('all')
   const [added, setAdded] = useState<string>()
   const [addError, setAddError] = useState('')
+  const [adding, setAdding] = useState(false)
   const ownItems = useMemo(() => items.filter(item => currentUserId && item.ownerId === currentUserId), [items, currentUserId])
   const partsByItem = useMemo(() => {
-    const map = new Map<string, Part[]>()
-    for (const part of parts) {
+    const map = new Map<string, ComponentSummary[]>()
+    for (const part of componentIndex ?? parts) {
       if (!part.itemId || part.ownerId !== currentUserId) continue
       const group = map.get(part.itemId) ?? []
       group.push(part)
       map.set(part.itemId, group)
     }
     return map
-  }, [parts, currentUserId])
+  }, [componentIndex, parts, currentUserId])
   const stock = useBoxStock(currentUserId)
   const packingJobs = stock.boxes ? JSON.stringify(ownItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
   const estimates = usePackingEstimates(packingJobs)
   const selectedItem = ownItems.find(item => item.id === detailId)
-  const selectedParts = selectedItem ? partsByItem.get(selectedItem.id) ?? [] : []
+  const selectedParts = selectedItem ? parts.filter(part => part.ownerId === currentUserId && part.itemId === selectedItem.id) : []
+  const selectedCount = selectedItem ? partsByItem.get(selectedItem.id)?.length ?? 0 : 0
+  const componentLoad = selectedItem ? componentLoads?.[selectedItem.id] : undefined
+  const componentsReady = !componentLoad || componentLoad.state === 'loaded'
   const term = query.trim().toLowerCase()
   const visibleItems = ownItems.filter(item => {
     const components = partsByItem.get(item.id) ?? []
@@ -74,21 +81,23 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
     setComponentQuery('')
     setAdded(undefined)
     setAddError('')
+    void onLoadComponents?.(id).catch(() => {})
   }
 
   return <main className="items-page">
     {selectedItem ? <>
       <button type="button" className="items-back" onClick={() => setDetailId(undefined)}><ArrowLeft size={16} /> All items</button>
       <header className="items-heading">
-        <div><h2>{selectedItem.name || 'Untitled item'}</h2><p>{selectedItem.sku} <span aria-hidden="true">/</span> {selectedParts.length} components</p></div>
+        <div><h2>{selectedItem.name || 'Untitled item'}</h2><p>{selectedItem.sku} <span aria-hidden="true">/</span> {selectedCount} components</p></div>
         <div className="items-actions">
-          <button type="button" disabled={!selectedParts.length} onClick={() => {
-            setAddError('')
-            try { const count = onAddItemToSheet(selectedItem.id); setAdded(`${count} components from ${selectedItem.name}`) }
+          <button type="button" disabled={adding || !componentsReady || !selectedParts.length} onClick={async () => {
+            setAddError(''); setAdding(true)
+            try { const count = await onAddItemToSheet(selectedItem.id); setAdded(`${count} components from ${selectedItem.name}`) }
             catch (error) { setAdded(undefined); setAddError(error instanceof Error ? error.message : 'The item could not be added.') }
-          }}><Plus size={16} /> Add all to sheet</button>
+            finally { setAdding(false) }
+          }}><Plus size={16} /> {adding ? 'Adding components...' : 'Add all to sheet'}</button>
           <button type="button" onClick={onOpenSheet}>Open sheet <ArrowRight size={16} /></button>
-          <label className="file-button items-upload"><FileUp size={16} /> Upload components<input aria-label="Upload components" type="file" multiple accept=".nc,.tap,.gcode,.cnc,.dxf" onChange={event => {
+          <label className="file-button items-upload"><FileUp size={16} /> Upload components<input aria-label="Upload components" disabled={!componentsReady} type="file" multiple accept=".nc,.tap,.gcode,.cnc,.dxf" onChange={event => {
             if (event.target.files?.length) onImportComponents(selectedItem.id, event.target.files)
             event.currentTarget.value = ''
           }} /></label>
@@ -101,11 +110,11 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
       <ItemImageEditor key={`${currentUserId}:${selectedItem.id}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} />
-      {selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
-      <div className="items-component-bar"><h3>Components <span>{selectedParts.length}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
+      {componentsReady && selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
+      <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}
       {addError && <p role="alert">{addError}</p>}
-      {visibleParts.length ? <div className="items-grid items-components">
+      {!componentsReady ? <div className="items-empty">{componentLoad?.error ? <><p role="alert">{componentLoad.error}</p><button type="button" onClick={() => void onLoadComponents?.(selectedItem.id).catch(() => {})}><RefreshCw size={16} /> Retry components</button></> : <p role="status">Loading components...</p>}</div> : visibleParts.length ? <div className="items-grid items-components">
         {visibleParts.map(part => <article key={part.id} className="items-component-card">
           <ItemPreview parts={[part]} label={`${part.name} toolpath`} />
           <div className="items-card-body"><h4>{part.name}</h4><span className="items-sku">{part.sku}</span><p>{part.width.toFixed(1)} x {part.height.toFixed(1)} mm</p><p className="items-filename">{part.originalFilename}{part.dxf ? ' + DXF' : ''}</p></div>
@@ -127,8 +136,8 @@ export function MarketplacePage({ items, parts, currentUserId, onCreateItem, onS
         {visibleItems.map(item => {
           const components = partsByItem.get(item.id) ?? []
           return <button type="button" className="items-grid-card" key={item.id} aria-label={`Open ${item.name || 'Untitled item'}`} onClick={() => openItem(item.id)}>
-            {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={components} label={`${item.name} components`} />}
-            <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{components.length > 0 && <span className="items-box-estimate">{estimates[item.id]?.result?.boxes[0] ? `${estimates[item.id].result!.boxes.length} box${estimates[item.id].result!.boxes.length === 1 ? '' : 'es'}: ${estimates[item.id].result!.boxes.map(box => boxSize(box.internal)).join(' + ')}` : estimates[item.id]?.error || (estimates[item.id]?.result?.errors.length ? 'Box estimate: review dimensions' : 'Calculating boxes...')}</span>}</div>
+            {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.ownerId === currentUserId && part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
+            <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{estimates[item.id] && <span className="items-box-estimate">{estimates[item.id]?.result?.boxes[0] ? `${estimates[item.id].result!.boxes.length} box${estimates[item.id].result!.boxes.length === 1 ? '' : 'es'}: ${estimates[item.id].result!.boxes.map(box => boxSize(box.internal)).join(' + ')}` : estimates[item.id]?.error || 'Box estimate: review dimensions'}</span>}</div>
             <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>Updated {dateLabel(item.updatedAt)}</small></div>
           </button>
         })}

@@ -3,6 +3,7 @@ import { createPartFromGCode } from '../gcode/importPart'
 import type { Project } from '../models/Project'
 import { copyProjectToAccount, privateProject } from './accountProject'
 import { loadProject, saveProject } from './projectStorage'
+import { summarizePart } from '../models/Part'
 
 function fixture(): Project {
   const items = ['alice', 'bob'].map((ownerId) => ({
@@ -25,6 +26,25 @@ function fixture(): Project {
 
 describe('account-local projects', () => {
   beforeEach(() => localStorage.clear())
+
+  it('retains unloaded owned placements and history but never preserves foreign index references', () => {
+    const original = fixture()
+    const project = { ...original, parts: [], componentIndex: original.parts.map(summarizePart), sheetHistory: [{ id: 'history', name: '', savedAt: '', sheet: original.sheet, itemCount: 2, componentCount: 2, placedCount: 2 }] }
+    const own = privateProject(project, 'alice')
+    expect(own.parts).toEqual([])
+    expect(own.componentIndex?.map(part => part.id)).toEqual(['alice-part'])
+    expect(own.sheet.instances.map(instance => instance.partId)).toEqual(['alice-part'])
+    expect(own.sheetHistory?.[0].sheet.instances).toEqual(own.sheet.instances)
+    expect(() => copyProjectToAccount(project, 'bob')).toThrow('incomplete')
+  })
+
+  it('never overwrites a complete browser backup with a partially loaded catalogue', () => {
+    const original = fixture()
+    expect(saveProject(original, 'alice')).toBe(true)
+    const before = localStorage.getItem('sheet-builder-project:alice')
+    expect(saveProject({ ...original, parts: [], componentIndex: original.parts.map(summarizePart) }, 'alice')).toBe(false)
+    expect(localStorage.getItem('sheet-builder-project:alice')).toBe(before)
+  })
 
   it('keeps browser backups separate and ignores the old shared cache', () => {
     const project = fixture()

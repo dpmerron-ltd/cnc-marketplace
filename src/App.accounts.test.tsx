@@ -4,13 +4,15 @@ import App from './App'
 import { testParts } from './test/jobFixtures'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
+import { summarizePart, type Part } from './models/Part'
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
 const mock = vi.hoisted(() => ({
   userId: 'alice',
   authChanged: undefined as undefined | ((event: string, session: unknown) => void),
-  load: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
+  load: vi.fn(), loadItem: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
   programs: vi.fn(), savePrograms: vi.fn(),
+  download: vi.fn(),
 }))
 vi.mock('./storage/supabaseClient', () => ({
   supabaseUrl: 'https://test.supabase.co',
@@ -32,11 +34,13 @@ vi.mock('./storage/supabaseClient', () => ({
 vi.mock('./storage/supabaseProjectStore', () => ({
   canUseSupabase: () => true,
   loadRemoteProject: (...args: unknown[]) => mock.load(...args),
+  loadRemoteItemComponents: (...args: unknown[]) => mock.loadItem(...args),
   saveRemoteProject: (...args: unknown[]) => mock.save(...args),
   deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(async () => ({ ok: true })),
   saveRemoteComponent: vi.fn(async () => ({ ok: true })),
 }))
 vi.mock('./storage/programSettingsStore', () => ({ loadProgramSettings: (...args: unknown[]) => mock.programs(...args), saveProgramSettings: (...args: unknown[]) => mock.savePrograms(...args) }))
+vi.mock('./storage/projectStorage', async importOriginal => ({ ...await importOriginal<typeof import('./storage/projectStorage')>(), downloadText: (...args: unknown[]) => mock.download(...args) }))
 
 function library(userId: string): RemoteProjectState {
   return {
@@ -52,13 +56,138 @@ async function switchAccount(userId: string) {
   })
 }
 
+function lazyLibrary() {
+  const remote = library('alice')
+  remote.items.push({ ...remote.items[0], id: 'alice-second', name: 'Second item', sku: 'SECOND' })
+  const components = remote.items.map((item, index) => ({ ...testParts[0], id: `panel-${index}`, name: `Panel ${index}`, ownerId: 'alice', itemId: item.id }))
+  remote.componentIndex = components.map(summarizePart)
+  return { remote, components }
+}
+
 async function openSheet() {
   fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
 }
 
 describe('account switching', () => {
-  beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
+  beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('loads programs only for an opened item, shows progress and caches repeat opens', async () => {
+    const { remote, components } = lazyLibrary()
+    mock.load.mockResolvedValue(remote)
+    let resolve!: (parts: Part[]) => void
+    mock.loadItem.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    render(<App />)
+    await screen.findByRole('button', { name: "Open alice's private item" })
+    expect(mock.loadItem).not.toHaveBeenCalled()
+    expect(screen.getByText(/^2 items/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: "Open alice's private item" }))
+    await screen.findByText('Loading components...')
+    expect(screen.queryByText('No components yet')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add all to sheet' })).toBeDisabled()
+    expect(mock.loadItem).toHaveBeenCalledExactlyOnceWith(remote.items[0], 'alice')
+    fireEvent.click(screen.getByRole('button', { name: 'All items' }))
+    fireEvent.click(screen.getByRole('button', { name: "Open alice's private item" }))
+    expect(mock.loadItem).toHaveBeenCalledTimes(1)
+    await act(async () => resolve([components[0]]))
+    expect(await screen.findByRole('heading', { name: 'Panel 0' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'All items' }))
+    fireEvent.click(screen.getByRole('button', { name: "Open alice's private item" }))
+    expect(mock.loadItem).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('heading', { name: 'Panel 1' })).not.toBeInTheDocument()
+  })
+
+  it('preserves unloaded saved placements and history, blocks machining until loaded, and retries failures', async () => {
+    const { remote, components } = lazyLibrary()
+    remote.sheet = { name: 'Saved layout', width: 1220, height: 1220, spacing: 30, borderSpacing: 10, instances: [{ id: 'placed', partId: components[1].id, x: 40, y: 50, rotation: 0, locked: true, sheetIndex: 0 }], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 20 } }
+    remote.sheetHistory = [{ id: 'saved', name: 'History layout', savedAt: '', sheet: remote.sheet, itemCount: 2, componentCount: 2, placedCount: 1 }]
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockRejectedValueOnce(new Error('Component fetch failed')).mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    render(<App />)
+    await screen.findByRole('button', { name: 'Sheet' })
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ instances: [expect.objectContaining(remote.sheet!.instances[0])] }), expect.anything(), 'alice'))
+    expect(mock.loadItem).not.toHaveBeenCalled()
+    await openSheet()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Component fetch failed')
+    expect(screen.queryByRole('button', { name: 'Export Combined' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry sheet components' }))
+    expect(await screen.findByRole('button', { name: 'Export Combined' })).toBeInTheDocument()
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ instances: [expect.objectContaining(remote.sheet!.instances[0])] }))
+    fireEvent.click(screen.getByRole('button', { name: 'History' }))
+    expect(await screen.findByText('History layout')).toBeInTheDocument()
+    expect(mock.save.mock.calls.every(call => (call[1] as unknown[]).length === 0)).toBe(true)
+  })
+
+  it('does not accept a partial item response or treat it as an empty item', async () => {
+    const { remote } = lazyLibrary()
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockResolvedValue([])
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Some components are no longer available')
+    expect(screen.getByRole('button', { name: 'Add all to sheet' })).toBeDisabled()
+    expect(screen.queryByText('No components yet')).not.toBeInTheDocument()
+  })
+
+  it('ignores an item download from an account that has been signed out', async () => {
+    const { remote, components } = lazyLibrary()
+    let resolve!: (parts: Part[]) => void
+    mock.load.mockResolvedValueOnce(remote).mockResolvedValueOnce(library('bob'))
+    mock.loadItem.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByText('Loading components...')
+    await switchAccount('bob')
+    await screen.findByRole('button', { name: "Open bob's private item" })
+    await act(async () => resolve(components))
+    expect(screen.queryByText('Panel 0')).not.toBeInTheDocument()
+    expect(screen.queryByText("alice's private item")).not.toBeInTheDocument()
+    await waitFor(() => expect(mock.save.mock.calls.some(call => call[4] === 'bob')).toBe(true))
+    expect(mock.save.mock.calls.filter(call => call[4] === 'bob').every(call => (call[1] as unknown[]).length === 0)).toBe(true)
+  })
+
+  it('loads the complete catalogue for explicit project export without changing source programs', async () => {
+    const { remote, components } = lazyLibrary()
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Project' }))
+    await waitFor(() => expect(mock.download).toHaveBeenCalledTimes(1))
+    const project = JSON.parse(mock.download.mock.calls[0][1])
+    expect(project.parts).toHaveLength(2)
+    expect(project.parts.map((part: Part) => part.gcode)).toEqual(components.map(part => part.gcode))
+    expect(project.componentIndex).toBeUndefined()
+    expect(mock.loadItem).toHaveBeenCalledTimes(2)
+  })
+
+  it('loads existing sheet obstacles before adding all components of another item', async () => {
+    const { remote, components } = lazyLibrary()
+    remote.sheet = { name: 'Existing parts', width: 1220, height: 1220, spacing: 30, borderSpacing: 10, instances: [{ id: 'obstacle', partId: components[1].id, x: 50, y: 50, rotation: 0, locked: true, sheetIndex: 0 }], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 20 } }
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByRole('heading', { name: 'Panel 0' })
+    expect(mock.loadItem).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
+    await screen.findByText("1 components from alice's private item added to the sheet.")
+    expect(mock.loadItem).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ instances: expect.arrayContaining([expect.objectContaining(remote.sheet!.instances[0]), expect.objectContaining({ partId: components[0].id })]) }))
+  })
+
+  it('does not download an incomplete project when an unopened item fails', async () => {
+    const { remote, components } = lazyLibrary()
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockResolvedValueOnce([components[0]]).mockRejectedValueOnce(new Error('Second item unavailable'))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Project' }))
+    await screen.findByText('Project export failed: Second item unavailable')
+    expect(mock.download).not.toHaveBeenCalled()
+    mock.loadItem.mockResolvedValueOnce([components[1]])
+    fireEvent.click(screen.getByRole('button', { name: 'Export Project' }))
+    await waitFor(() => expect(mock.download).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(mock.download.mock.calls[0][1]).parts).toHaveLength(2)
+    expect(mock.loadItem).toHaveBeenCalledTimes(3)
+  })
   it('shows a retryable error without rendering or saving a false empty catalogue', async () => {
     mock.load.mockRejectedValueOnce(new Error('Could not load cutting components: timeout')).mockResolvedValueOnce(library('alice'))
     render(<App />)

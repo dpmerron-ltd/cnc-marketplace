@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Plus, RefreshCw, Save, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
-import type { Part } from '../models/Part'
+import type { ComponentSummary } from '../models/Part'
 import type { BoxStock } from '../packing/boxStock'
 import { boxSize } from '../packing/format'
 import { packingPieces } from '../packing/packing'
@@ -24,7 +24,7 @@ function StockCount({ box, userId, onSaved }: { box: BoxStock; userId: string; o
   return <><div className="stock-count"><input aria-label={`Stock count for ${box.name}`} type="number" min="0" max="100000" step="1" value={quantity} disabled={busy} onChange={e => setQuantity(e.target.value)} /><button type="button" className="icon-button" title="Save stock count" aria-label={`Save stock count for ${box.name}`} disabled={busy || !valid || Number(quantity) === box.quantity} onClick={() => void save()}><Save size={17} /></button></div>{error && <p role="alert" className="queue-error">{error}</p>}</>
 }
 
-export function BoxStockPage({ userId, items, parts }: { userId: string; items: MarketplaceItem[]; parts: Part[] }) {
+export function BoxStockPage({ userId, items, parts }: { userId: string; items: MarketplaceItem[]; parts: ComponentSummary[] }) {
   const stock = useBoxStock(userId)
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ name: '', length: '', width: '', height: '', quantity: '0' })

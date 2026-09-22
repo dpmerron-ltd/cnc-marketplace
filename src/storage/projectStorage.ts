@@ -5,6 +5,9 @@ const storageKey = 'sheet-builder-project'
 
 export function saveProject(project: Project, userId: string | undefined): boolean {
   if (!userId) return false
+  // A partially loaded catalogue must never replace a complete local backup.
+  const loadedIds = new Set(project.parts.map(part => part.id))
+  if (project.componentIndex?.some(component => !loadedIds.has(component.id))) return false
   // Avoid serializing tens of megabytes of parsed programs into synchronous browser storage.
   // The cloud retains the complete library; leave the last usable local backup intact.
   const sourceCharacters = project.parts.reduce((total, part) => total + part.gcode.length + (part.dxf?.length ?? 0) + Object.values(part.metadata.materialVariants?.profiles ?? {}).reduce((size, profile) => size + (profile?.gcode.length ?? 0), 0), 0)

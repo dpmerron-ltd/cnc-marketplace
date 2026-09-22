@@ -1,11 +1,11 @@
 import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageSchema, type ItemImage } from '../models/ItemImage'
-import type { Part } from '../models/Part'
+import type { ComponentSummary, Part } from '../models/Part'
 import type { SheetHistoryEntry } from '../models/Project'
 import type { GCodePreset, Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
-import { materialVariantsSchema } from '../cam/materialProfiles'
+import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
 
 interface ComponentRow {
   id: string
@@ -48,6 +48,7 @@ interface GCodePresetRow {
 export interface RemoteProjectState {
   items: MarketplaceItem[]
   parts: Part[]
+  componentIndex?: ComponentSummary[]
   sheet?: Sheet
   selectedItemId?: string
   sheetHistory: SheetHistoryEntry[]
@@ -125,9 +126,8 @@ function fallbackComponentSku(id: string, itemSku: string): string {
 }
 
 // Bound both response size and concurrency: component rows contain full NC variants.
-async function readLibraryPages<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>, label: string, onProgress?: (message: string) => void): Promise<T[]> {
+async function readLibraryPages<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>, label: string, onProgress?: (message: string) => void, pageSize = 25): Promise<T[]> {
   const rows: T[] = []
-  const pageSize = 25
   const concurrency = 3
   for (let offset = 0; ; offset += pageSize * concurrency) {
     const pages = await Promise.all(Array.from({ length: concurrency }, (_, index) => fetchPage(offset + index * pageSize, offset + (index + 1) * pageSize - 1)))
@@ -151,7 +151,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const client = supabase
   const [itemRows, componentRows, projectResult, historyResult, presetsResult] = await Promise.all([
     readLibraryPages((from, to) => client.from('marketplace_items').select('*').eq('owner_id', userId).order('created_at').order('id').range(from, to), 'items', onProgress),
-    readLibraryPages((from, to) => client.from('cnc_components').select('*').eq('owner_id', userId).order('date_imported').order('id').range(from, to), 'cutting components', onProgress),
+    readLibraryPages((from, to) => client.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,width,height,material_profile:material_variants->>primaryProfile').eq('owner_id', userId).order('id').range(from, to), 'component index', onProgress, 500),
     supabase.from('sheet_projects').select('*').eq('owner_id', userId).eq('id', userId).maybeSingle<ProjectRow>(),
     supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
     supabase.from('gcode_presets').select('*').eq('owner_id', userId).order('name'),
@@ -174,29 +174,12 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   }))
 
   const itemSkuById = new Map(items.map((item) => [item.id, item.sku]))
-  const parts: Part[] = []
-  const ownedRows = (componentRows as ComponentRow[]).filter((row) => row.owner_id === userId && itemSkuById.has(row.item_id))
-  for (const [index, row] of ownedRows.entries()) {
-    if (index % 25 === 0) {
-      onProgress?.(`Preparing cutting components: ${index} of ${ownedRows.length}…`)
-      await new Promise(resolve => setTimeout(resolve, 0))
-    }
-    const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, row.item_id)
-    if (row.material_variants != null) {
-      const variants = materialVariantsSchema.safeParse(row.material_variants)
-      if (!variants.success) throw new Error(`${row.sku ?? row.name}: saved cutting profiles could not be read. No components have been removed.`)
-      part.metadata.materialVariants = variants.data
-    }
-    const itemSku = itemSkuById.get(row.item_id) ?? 'ITEM'
-    parts.push({
-      ...part,
-      id: row.id,
-      ownerId: row.owner_id,
-      sku: row.sku ?? fallbackComponentSku(row.id, itemSku),
-      name: row.name,
-      dateImported: row.date_imported,
-    })
-  }
+  const componentIndex: ComponentSummary[] = componentRows.filter(row => row.owner_id === userId && itemSkuById.has(row.item_id)).map(row => ({
+    id: row.id, ownerId: row.owner_id, itemId: row.item_id,
+    sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
+    originalFilename: row.original_filename, width: row.width, height: row.height,
+    ...(materialProfiles.some(profile => profile.id === row.material_profile) ? { materialThicknessMm: materialProfiles.find(profile => profile.id === row.material_profile)!.thickness } : {}),
+  }))
 
   const project = projectResult.error ? undefined : projectResult.data
   const gcodePresets: GCodePreset[] = ((presetsResult.data ?? []) as GCodePresetRow[]).map((row) => ({
@@ -221,12 +204,35 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 
   return {
     items,
-    parts,
+    parts: [],
+    componentIndex,
     sheet: project?.sheet,
     selectedItemId: project?.selected_item_id ?? items[0]?.id,
     sheetHistory,
     gcodePresets,
   }
+}
+
+export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUserId: string): Promise<Part[]> {
+  if (!supabase || item.ownerId !== expectedUserId || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
+  const client = supabase
+  const rows = await readLibraryPages<ComponentRow>((from, to) => client.from('cnc_components')
+    .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants')
+    .eq('owner_id', expectedUserId).eq('item_id', item.id).order('date_imported').order('id').range(from, to), 'item components')
+  if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
+  const parts: Part[] = []
+  for (const [index, row] of rows.entries()) {
+    if (row.owner_id !== expectedUserId || row.item_id !== item.id) continue
+    if (index % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0))
+    const part = createPartFromGCode(row.original_filename, row.gcode, row.dxf ?? undefined, item.id)
+    if (row.material_variants != null) {
+      const variants = materialVariantsSchema.safeParse(row.material_variants)
+      if (!variants.success) throw new Error(`${row.sku ?? row.name}: saved cutting profiles could not be read. No components have been removed.`)
+      part.metadata.materialVariants = variants.data
+    }
+    parts.push({ ...part, id: row.id, ownerId: row.owner_id, sku: row.sku ?? fallbackComponentSku(row.id, item.sku), name: row.name, dateImported: row.date_imported })
+  }
+  return parts
 }
 
 export async function saveRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string): Promise<RemoteSaveResult> {

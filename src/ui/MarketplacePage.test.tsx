@@ -28,12 +28,12 @@ describe('item library grid', () => {
     callbacks.rerender(<MarketplacePage items={[...items, item('new', 'New cabinet')]} parts={parts} currentUserId="alice" {...callbacks} />)
     expect(screen.getByLabelText('Upload item image')).toBeEnabled()
   })
-  it('adds an entire item, disables empty items and shows placement failures', () => {
+  it('adds an entire item, disables empty items and shows placement failures', async () => {
     const callbacks = setup()
     fireEvent.click(screen.getByRole('button', { name: 'Open Beta locker' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
     expect(callbacks.onAddItemToSheet).toHaveBeenCalledExactlyOnceWith('b')
-    expect(screen.getByText('2 components from Beta locker added to the sheet.')).toBeInTheDocument()
+    expect(await screen.findByText('2 components from Beta locker added to the sheet.')).toBeInTheDocument()
     callbacks.onAddItemToSheet.mockImplementationOnce(() => { throw new Error('Panel does not fit') })
     fireEvent.click(screen.getByRole('button', { name: 'Add all to sheet' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Panel does not fit')

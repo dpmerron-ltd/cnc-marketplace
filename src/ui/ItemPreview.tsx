@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from 'react'
 import { Package } from 'lucide-react'
 import type { Part } from '../models/Part'
 
-export const ItemPreview = memo(function ItemPreview({ parts, label }: { parts: Part[]; label: string }) {
+export const ItemPreview = memo(function ItemPreview({ parts, label, emptyLabel = 'No components' }: { parts: Part[]; label: string; emptyLabel?: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const canvas = ref.current
@@ -46,7 +46,7 @@ export const ItemPreview = memo(function ItemPreview({ parts, label }: { parts: 
     })
   }, [parts])
   return <div className="items-preview">
-    {parts.length ? <canvas ref={ref} width={640} height={320} role="img" aria-label={label} /> : <Package size={32} aria-label="No components" />}
+    {parts.length ? <canvas ref={ref} width={640} height={320} role="img" aria-label={label} /> : <Package size={32} aria-label={emptyLabel} />}
     {parts.length > 4 && <span className="items-preview-extra">+{parts.length - 4}</span>}
   </div>
 })

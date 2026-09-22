@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Layers, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
-import type { Part } from '../models/Part'
+import type { ComponentSummary } from '../models/Part'
 import type { ShopifyOrder, ShopifyOrderDetail } from '../orders/types'
 import { matchOrderItems, type AddOrderRequest, type NestProgress, type OrderItemMatches } from '../orders/addOrderToSheet'
 import { jobApiRequest } from '../storage/jobsApi'
 
 export interface OrderSheetProps {
   items: MarketplaceItem[]
-  parts: Part[]
+  parts: ComponentSummary[]
   sheetName: string
   onAdd: (request: AddOrderRequest, signal: AbortSignal, onProgress: (progress: NestProgress) => void) => Promise<void>
 }

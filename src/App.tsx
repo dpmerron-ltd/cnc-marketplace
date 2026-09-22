@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { Download, UserRound } from 'lucide-react'
 import { ProfilePage } from './ui/ProfilePage'
@@ -22,7 +22,8 @@ import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
 import type { MarketplaceItem } from './models/Item'
 import { itemImageSchema, type ItemImage } from './models/ItemImage'
-import type { Part } from './models/Part'
+import type { ComponentSummary, Part } from './models/Part'
+import { summarizePart } from './models/Part'
 import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
@@ -37,6 +38,7 @@ import {
   deleteRemoteComponent,
   deleteRemoteSheetHistory,
   loadRemoteProject,
+  loadRemoteItemComponents,
   saveRemoteComponent,
   saveRemoteItemImage,
   saveRemoteProject,
@@ -117,7 +119,7 @@ function normalizeSheet(sheet: Sheet): Sheet {
   })
 }
 
-function pruneMissingSheetInstances(sheet: Sheet, availableParts: Part[]): Sheet {
+function pruneMissingSheetInstances(sheet: Sheet, availableParts: { id: string }[]): Sheet {
   const partIds = new Set(availableParts.map((part) => part.id))
   return {
     ...sheet,
@@ -350,7 +352,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
     return {
       items,
       parts,
-      sheet: pruneMissingSheetInstances(normalizeSheet(project.sheet), parts),
+      sheet: pruneMissingSheetInstances(normalizeSheet(project.sheet), [...parts, ...(project.componentIndex ?? [])]),
       sheetHistory: project.sheetHistory ?? [],
       selectedItemId: fallbackItemId,
       restored: true,
@@ -420,6 +422,13 @@ function App() {
   const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes'>('marketplace')
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
+  const [componentIndex, setComponentIndex] = useState<ComponentSummary[]>([])
+  const [componentLoads, setComponentLoads] = useState<Record<string, { state: 'idle' | 'loading' | 'loaded' | 'error'; error?: string }>>({})
+  const [componentRetry, setComponentRetry] = useState(0)
+  const [exportingProject, setExportingProject] = useState(false)
+  const componentEpoch = useRef(0)
+  const loadedItems = useRef(new Set<string>())
+  const loadingItems = useRef(new Map<string, Promise<Part[]>>())
   const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
   const [activeSheetIndex, setActiveSheetIndex] = useState(0)
   const [sheetHistory, setSheetHistory] = useState<SheetHistoryEntry[]>(initialState.sheetHistory)
@@ -443,8 +452,8 @@ function App() {
   const importProjectRef = useRef<HTMLInputElement>(null)
   const remoteHydratedRef = useRef(false)
   const accountRef = useRef<string | undefined>(undefined)
-  const orderSheetInputs = useRef({ sheet, parts, items })
-  orderSheetInputs.current = { sheet, parts, items }
+  const orderSheetInputs = useRef({ sheet, parts, items, componentIndex })
+  orderSheetInputs.current = { sheet, parts, items, componentIndex }
   const [loadedAccountId, setLoadedAccountId] = useState<string>()
   const [libraryLoadError, setLibraryLoadError] = useState<string>()
   const [libraryReload, setLibraryReload] = useState(0)
@@ -454,6 +463,66 @@ function App() {
   const programs = programState.ownerId === userId && !programState.loading && !programState.error ? programState.programs : undefined
   const programSheet = programs ? { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } : sheet
   const componentSaves = useComponentSaveQueue(userId, persistGeneratedComponent)
+
+  function resetComponentLoading(nextItems: MarketplaceItem[] = [], loadedIds: string[] = []) {
+    componentEpoch.current++
+    loadedItems.current = new Set(loadedIds)
+    loadingItems.current.clear()
+    setComponentLoads(Object.fromEntries(nextItems.map(item => [item.id, { state: loadedIds.includes(item.id) ? 'loaded' : 'idle' }])))
+    setExportingProject(false)
+  }
+
+  const ensureItemComponents = useCallback((itemId: string): Promise<Part[]> => {
+    const current = orderSheetInputs.current
+    const item = current.items.find(item => item.id === itemId && item.ownerId === userId)
+    if (!item || !userId || accountRef.current !== userId) return Promise.reject(new Error('This item is not in your current account.'))
+    if (loadedItems.current.has(itemId)) return Promise.resolve(current.parts.filter(part => part.itemId === itemId))
+    const pending = loadingItems.current.get(itemId)
+    if (pending) return pending
+    const epoch = componentEpoch.current
+    const active = () => epoch === componentEpoch.current && accountRef.current === userId
+    setComponentLoads(states => ({ ...states, [itemId]: { state: 'loading' } }))
+    const task = (async () => {
+      try {
+        const fetched = await loadRemoteItemComponents(item, userId)
+        if (!active()) throw new Error('Your account or catalogue changed. Try again.')
+        const latest = orderSheetInputs.current
+        const combined = [...new Map([...fetched, ...latest.parts].map(part => [part.id, part])).values()]
+        const known = new Set(combined.map(part => part.id))
+        if (latest.componentIndex.some(part => part.itemId === itemId && !known.has(part.id))) throw new Error('Some components are no longer available. Refresh the catalogue before continuing; your sheet has not been changed.')
+        for (const part of fetched) persistedComponentIds.current.add(part.id)
+        loadedItems.current.add(itemId)
+        orderSheetInputs.current = { ...latest, parts: combined }
+        setParts(combined)
+        setComponentLoads(states => ({ ...states, [itemId]: { state: 'loaded' } }))
+        return combined.filter(part => part.itemId === itemId)
+      } catch (error) {
+        if (active()) setComponentLoads(states => ({ ...states, [itemId]: { state: 'error', error: errorMessage(error) } }))
+        throw error
+      } finally { if (active()) loadingItems.current.delete(itemId) }
+    })()
+    loadingItems.current.set(itemId, task)
+    return task
+  }, [userId])
+
+  const catalogueComponents = useMemo(() => [...new Map<ComponentSummary['id'], ComponentSummary>([...componentIndex, ...parts.map(summarizePart)].map(part => [part.id, part])).values()], [componentIndex, parts])
+  const sheetReady = sheet.instances.every(instance => parts.some(part => part.id === instance.partId))
+  const requiredSheetItems = JSON.stringify([...new Set([
+    ...sheet.instances.flatMap(instance => { const part = catalogueComponents.find(part => part.id === instance.partId); return part?.itemId ? [part.itemId] : [] }),
+    ...(selectedItemId ? [selectedItemId] : []),
+  ])])
+  useEffect(() => {
+    if (page !== 'sheet' || !userId || loadedAccountId !== userId) return
+    let cancelled = false
+    void (async () => {
+      for (const id of JSON.parse(requiredSheetItems) as string[]) {
+        if (cancelled) return
+        await ensureItemComponents(id)
+      }
+    })().catch(error => { if (!cancelled && accountRef.current === userId) setStatus(errorMessage(error)) })
+    return () => { cancelled = true }
+  }, [page, userId, loadedAccountId, requiredSheetItems, componentRetry, ensureItemComponents])
+  const sheetLoadError = (JSON.parse(requiredSheetItems) as string[]).map(id => componentLoads[id]?.error).find(Boolean)
 
   useEffect(() => {
     if (!userId || !mfaReady) return
@@ -493,7 +562,7 @@ function App() {
   const visibleParts = selectedItemId ? sheetParts.filter((part) => part.itemId === selectedItemId) : []
   const sheetCount = sheetCountFor(sheet)
   const currentSheetIndex = Math.min(activeSheetIndex, sheetCount - 1)
-  const issues = useMemo(() => validateSheet(parts, sheet), [parts, sheet])
+  const issues = useMemo(() => sheetReady ? validateSheet(parts, sheet) : [], [parts, sheet, sheetReady])
   const errors = issues.filter((issue) => issue.level === 'error')
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
@@ -647,7 +716,7 @@ function App() {
 
     const timeout = window.setTimeout(() => {
       if (accountRef.current !== userId) return
-      saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() }, userId)
+      saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, sheetHistory, savedAt: new Date().toISOString() }, userId)
       if (remoteHydratedRef.current && canUseSupabase()) {
         const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
         void saveRemoteProject(items, newParts, sheet, selectedItemId, userId).then((result) => {
@@ -659,7 +728,7 @@ function App() {
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, selectedItemId, sheet, sheetHistory, userId, loadedAccountId, mfaReady])
+  }, [items, parts, catalogueComponents, selectedItemId, sheet, sheetHistory, userId, loadedAccountId, mfaReady])
 
   useEffect(() => {
     if (!canUseSupabase() || !userId || !mfaReady) return
@@ -667,6 +736,7 @@ function App() {
     let cancelled = false
     remoteHydratedRef.current = false
     setLoadedAccountId(undefined)
+    resetComponentLoading()
     setLibraryLoadError(undefined)
     setStatus('Loading your items…')
     void loadRemoteProject(userId, message => {
@@ -675,13 +745,16 @@ function App() {
       if (cancelled || accountRef.current !== userId) return
       if (!remoteProject) throw new Error('Your account library could not be loaded. Please retry.')
       remoteHydratedRef.current = true
-      persistedComponentIds.current = new Set(remoteProject.parts.map(part => part.id))
+      const index = remoteProject.componentIndex ?? remoteProject.parts
+      persistedComponentIds.current = new Set([...index, ...remoteProject.parts].map(part => part.id))
       const project = privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
       const loaded = projectToAppState(project)
+      setComponentIndex(project.componentIndex ?? loaded.parts)
+      resetComponentLoading(loaded.items, loaded.items.filter(item => index.filter(part => part.itemId === item.id).every(summary => loaded.parts.some(part => part.id === summary.id))).map(item => item.id))
       setItems(loaded.items)
       setParts(loaded.parts)
       setSheetHistory(loaded.sheetHistory)
-      setSheet(pruneMissingSheetInstances({ ...loaded.sheet, gcodePresets: mergePresets(loaded.sheet.gcodePresets, remoteProject?.gcodePresets ?? []) }, loaded.parts))
+      setSheet(pruneMissingSheetInstances({ ...loaded.sheet, gcodePresets: mergePresets(loaded.sheet.gcodePresets, remoteProject?.gcodePresets ?? []) }, [...loaded.parts, ...index]))
       setSelectedItemId(loaded.items.some((item) => item.id === remoteProject?.selectedItemId) ? remoteProject?.selectedItemId : loaded.selectedItemId)
       setSelectedInstanceId(undefined)
       setActiveSheetIndex(0)
@@ -708,6 +781,8 @@ function App() {
         remoteHydratedRef.current = false
         setLoadedAccountId(undefined)
         persistedComponentIds.current.clear()
+        resetComponentLoading()
+        setComponentIndex([])
         setLibraryLoadError(undefined)
         setProgramState({ loading: true })
         setMfaReady(false)
@@ -798,7 +873,7 @@ function App() {
     setParts((current) => {
       const item = targetItem
       const itemSku = item?.sku ?? 'ITEM'
-      const existingCount = current.filter((part) => part.itemId === itemId).length
+      const existingCount = new Set([...catalogueComponents, ...current].filter(part => part.itemId === itemId).map(part => part.id)).size
       const nextImported = imported.map((part, index) => normalizePart(part, itemSku, existingCount + index))
       return [...current, ...nextImported]
     })
@@ -809,7 +884,7 @@ function App() {
   function saveGeneratedComponent(value: CamSave) {
     const target = items.find(item => item.id === value.itemId)
     if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not in your current account.')
-    const reserved = new Set([...parts.filter(p => p.itemId === value.itemId).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId).map(job => job.id)]).size
+    const reserved = new Set([...catalogueComponents.filter(p => p.itemId === value.itemId).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId).map(job => job.id)]).size
     const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, reserved)
     part.name = part.name.replace(/-(?:6|12|15|18)mm(?:-2pass)?$/, '')
     part.metadata.materialVariants = materialVariantsSchema.parse(value.materialVariants)
@@ -822,6 +897,7 @@ function App() {
     const result = await saveRemoteComponent(part, userId!)
     if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
     if (accountRef.current !== userId) return
+    persistedComponentIds.current.add(part.id)
     setParts(current => [...current.filter(p => p.id !== part.id), part])
     setItems(current => current.map(item => item.id === part.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
     setStatus(`Generated component added to ${target!.name}.`)
@@ -843,6 +919,7 @@ function App() {
     const item = newItem(`Item ${items.length + 1}`, userEmail, userId)
     setItems((current) => [...current, item])
     setSelectedItemId(item.id)
+    loadedItems.current.add(item.id)
     setPage('marketplace')
     setStatus('Created new marketplace item.')
     return item.id
@@ -881,6 +958,7 @@ function App() {
     }
 
     setParts((current) => current.filter((part) => part.id !== partId))
+    setComponentIndex(current => current.filter(part => part.id !== partId))
     void deleteRemoteComponent(partId)
     if (selectedPartId === partId) setSelectedPartId(undefined)
     setStatus('Removed component from item.')
@@ -893,11 +971,21 @@ function App() {
     }))
   }
 
-  function addAllItemComponents(itemId: string): number {
+  async function addAllItemComponents(itemId: string): Promise<number> {
     const item = items.find(value => value.id === itemId)
     if (!item || !userId || accountRef.current !== userId) throw new Error('This item is not in your account.')
-    const next = addItemToSheet(item, parts, sheet, userId, currentSheetIndex)
-    const count = next.instances.length - sheet.instances.length
+    if (!loadedItems.current.has(itemId)) throw new Error('Wait for all item components to load before adding them.')
+    const initial = orderSheetInputs.current, epoch = componentEpoch.current
+    const obstacles = new Set(initial.sheet.instances.flatMap(instance => {
+      const part = catalogueComponents.find(part => part.id === instance.partId)
+      return part?.itemId ? [part.itemId] : []
+    }))
+    for (const id of obstacles) await ensureItemComponents(id)
+    const latest = orderSheetInputs.current
+    if (componentEpoch.current !== epoch || accountRef.current !== userId || initial.sheet !== latest.sheet || initial.items !== latest.items) throw new Error('Your sheet or catalogue changed. Try again.')
+    if (latest.sheet.instances.some(instance => !latest.parts.some(part => part.id === instance.partId))) throw new Error('The sheet contains unavailable components. Refresh before adding this item.')
+    const next = addItemToSheet(item, latest.parts, latest.sheet, userId, currentSheetIndex)
+    const count = next.instances.length - latest.sheet.instances.length
     setSheet(next)
     setStatus(`Added all ${count} components of ${item.name} to the sheet.`)
     return count
@@ -905,7 +993,18 @@ function App() {
 
   async function addOrderToSheet(request: AddOrderRequest, signal: AbortSignal, onProgress: (progress: NestProgress) => void) {
     if (!userId || accountRef.current !== userId || loadedAccountId !== userId) throw new Error('Wait for your account catalogue to finish loading.')
+    const initial = orderSheetInputs.current
+    const epoch = componentEpoch.current
+    const required = new Set([...Object.values(request.matches), ...initial.sheet.instances.flatMap(instance => {
+      const part = catalogueComponents.find(part => part.id === instance.partId)
+      return part?.itemId ? [part.itemId] : []
+    })])
+    for (const id of required) {
+      if (signal.aborted || accountRef.current !== userId || componentEpoch.current !== epoch) throw new Error('Order loading cancelled.')
+      await ensureItemComponents(id)
+    }
     const snapshot = orderSheetInputs.current
+    if (signal.aborted || accountRef.current !== userId || componentEpoch.current !== epoch || initial.sheet !== snapshot.sheet || initial.items !== snapshot.items) throw new Error('Your sheet or catalogue changed. Try again.')
     const prepared = prepareOrderSheet(request, snapshot.items, snapshot.parts, snapshot.sheet, userId, currentSheetIndex)
     const instances = await nestOrder(prepared.parts, prepared.sheet, signal, onProgress)
     const latest = orderSheetInputs.current
@@ -949,7 +1048,26 @@ function App() {
   }
 
   function buildProject(): Project {
-    return { version: 1, items, parts, sheet: programSheet, sheetHistory, savedAt: new Date().toISOString() }
+    return { version: 1, items, parts, componentIndex: catalogueComponents, sheet: programSheet, sheetHistory, savedAt: new Date().toISOString() }
+  }
+
+  async function exportProject() {
+    if (exportingProject) return
+    const epoch = componentEpoch.current
+    const initial = orderSheetInputs.current
+    setExportingProject(true)
+    try {
+      for (const item of items) {
+        if (componentEpoch.current !== epoch || accountRef.current !== userId) throw new Error('Your account or catalogue changed. Export cancelled.')
+        await ensureItemComponents(item.id)
+      }
+      if (componentEpoch.current !== epoch || accountRef.current !== userId) throw new Error('Your account or catalogue changed. Export cancelled.')
+      const latest = orderSheetInputs.current
+      if (latest.items !== initial.items || latest.sheet !== initial.sheet) throw new Error('Your sheet or items changed while loading. Export again to include those changes.')
+      downloadText('sheet-builder-project.json', JSON.stringify({ ...buildProject(), parts: latest.parts, componentIndex: undefined }, null, 2), 'application/json')
+      setStatus('Exported complete project.')
+    } catch (error) { if (componentEpoch.current === epoch) setStatus(`Project export failed: ${errorMessage(error)}`) }
+    finally { if (componentEpoch.current === epoch) setExportingProject(false) }
   }
 
   function buildHistoryEntry(): SheetHistoryEntry {
@@ -961,7 +1079,7 @@ function App() {
       sheet: normalizeSheet({ ...programSheet, instances: sheet.instances.map((instance) => ({ ...instance })) }),
       selectedItemId,
       itemCount: items.length,
-      componentCount: parts.length,
+      componentCount: catalogueComponents.length,
       placedCount: sheet.instances.length,
     }
   }
@@ -970,7 +1088,7 @@ function App() {
     if (!userId || loadedAccountId !== userId) return false
     const historyEntry = buildHistoryEntry()
     const nextHistory = [historyEntry, ...sheetHistory]
-    const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
+    const localSaved = saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
     if (!localSaved && !(remoteHydratedRef.current && canUseSupabase())) {
       setStatus('Could not save project; browser storage may be full.')
       return false
@@ -1004,6 +1122,8 @@ function App() {
     }
 
     setItems(loadedState.items)
+    setComponentIndex(loadedState.parts)
+    resetComponentLoading(loadedState.items, loadedState.items.map(item => item.id))
     setSelectedItemId(loadedState.selectedItemId)
     setParts(loadedState.parts)
     setSheet(pruneMissingSheetInstances(normalizeSheet(loadedState.sheet), loadedState.parts))
@@ -1027,6 +1147,8 @@ function App() {
       return
     }
     setItems(importedState.items)
+    setComponentIndex(importedState.parts)
+    resetComponentLoading(importedState.items, importedState.items.map(item => item.id))
     setSelectedItemId(importedState.selectedItemId)
     setParts(importedState.parts)
     setSheet(pruneMissingSheetInstances(normalizeSheet(importedState.sheet), importedState.parts))
@@ -1165,7 +1287,7 @@ function App() {
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
-    const nextSheet = pruneMissingSheetInstances(normalizeSheet(entry.sheet), parts)
+    const nextSheet = pruneMissingSheetInstances(normalizeSheet(entry.sheet), catalogueComponents)
     setSheet(nextSheet)
     setSelectedItemId(entry.selectedItemId)
     setSelectedInstanceId(undefined)
@@ -1233,7 +1355,7 @@ function App() {
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
           <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
         </nav>
-        {(page === 'sheet' || page === 'history') && <><div className="sheet-controls">
+        {sheetReady && (page === 'sheet' || page === 'history') && <><div className="sheet-controls">
           <label className="sheet-name-control">
             Job name
             <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
@@ -1288,6 +1410,7 @@ function App() {
           </label>
         </div>
         <div className="toolbar-actions">
+          {sheetLoadError && <button type="button" onClick={() => setComponentRetry(value => value + 1)}>Retry item components</button>}
           <AutoNestButton parts={parts} sheet={sheet} accountId={userId} onStatus={setStatus}
             onComplete={instances => {
               setSheet({ ...sheet, instances })
@@ -1307,11 +1430,14 @@ function App() {
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={parts} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(item => item.ownerId === userId)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
           parts={parts}
+          componentIndex={catalogueComponents}
+          componentLoads={componentLoads}
+          onLoadComponents={ensureItemComponents}
           currentUserId={userId}
           onCreateItem={createMarketplaceItem}
           onSelectItem={setSelectedItemId}
@@ -1325,18 +1451,18 @@ function App() {
         />
       ) : page === 'history' ? (
         <HistoryPage history={sheetHistory} onOpen={openHistoryEntry} onDelete={deleteHistoryEntry} />
-      ) : (
+      ) : !sheetReady ? <main className="items-page"><p role={sheetLoadError ? 'alert' : 'status'}>{sheetLoadError ?? 'Loading sheet components...'}</p>{sheetLoadError && <button type="button" onClick={() => setComponentRetry(value => value + 1)}>Retry sheet components</button>}</main> : (
         <div className="workspace">
           <PartLibrary
             items={items}
             parts={visibleParts}
             title={selectedItem ? selectedItem.name : 'Components'}
-            emptyText="Select an item above or upload components to add them to the sheet."
+            emptyText={componentLoads[selectedItemId ?? '']?.error ?? (componentLoads[selectedItemId ?? '']?.state === 'loading' ? 'Loading components...' : 'Select an item above or upload components to add them to the sheet.')}
             selectedItemId={selectedItemId}
             selectedPartId={selectedPartId}
             onSelectItem={setSelectedItemId}
             onManageItems={() => setPage('marketplace')}
-            canImport={canEditItem(selectedItem)}
+            canImport={canEditItem(selectedItem) && loadedItems.current.has(selectedItemId ?? '')}
             onImport={importFiles}
             onAdd={addPart}
             onSelect={setSelectedPartId}
@@ -1508,7 +1634,7 @@ function App() {
         <div className={warnings.length > 0 ? 'issue warning' : 'issue'}>
           {warnings.length} warnings
         </div></>}
-        <button type="button" onClick={() => downloadText('sheet-builder-project.json', JSON.stringify(buildProject(), null, 2), 'application/json')}>Export Project</button>
+        <button type="button" disabled={exportingProject} onClick={() => void exportProject()}>{exportingProject ? 'Loading project components...' : 'Export Project'}</button>
         <button type="button" onClick={() => importProjectRef.current?.click()}>Import Project</button>
         <input ref={importProjectRef} className="hidden-file" type="file" accept=".json" onChange={(event) => void importProject(event.target.files)} />
       </section>}

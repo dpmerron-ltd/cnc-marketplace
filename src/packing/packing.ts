@@ -1,4 +1,4 @@
-import type { Part } from '../models/Part'
+import type { ComponentSummary } from '../models/Part'
 import type { PackingEstimate, PackingPiece, PackingPlan, PackingSettings, PackingSize } from './types'
 
 export const maxBoxLengthMm = 1200
@@ -7,10 +7,10 @@ export const packingDefaults = { paddingMm: 10, separatorMm: 2, wallMm: 5 }
 const roundUp = (value: number) => Math.ceil((value - 1e-7) / 10) * 10
 const volume = (size: PackingSize) => size.length * size.width * size.height / 1000000
 
-export function packingPieces(parts: Part[], settings: PackingSettings = {}): PackingPiece[] {
+export function packingPieces(parts: (ComponentSummary & { gcode?: string })[], settings: PackingSettings = {}): PackingPiece[] {
   return parts.map(part => {
     const entered = settings.components?.[part.id]
-    const header = part.gcode.match(/\(Material\s+(\d+(?:\.\d+)?)\s*mm\s*\//i)?.[1]
+    const header = part.gcode?.match(/\(Material\s+(\d+(?:\.\d+)?)\s*mm\s*\//i)?.[1] ?? part.materialThicknessMm
     const filename = part.originalFilename.match(/(?:^|[_ -])(\d+(?:\.\d+)?)\s*mm(?:[_ .-]|$)/i)?.[1]
     const hint = header ?? filename
     return {
