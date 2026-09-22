@@ -446,6 +446,9 @@ function App() {
   const orderSheetInputs = useRef({ sheet, parts, items })
   orderSheetInputs.current = { sheet, parts, items }
   const [loadedAccountId, setLoadedAccountId] = useState<string>()
+  const [libraryLoadError, setLibraryLoadError] = useState<string>()
+  const [libraryReload, setLibraryReload] = useState(0)
+  const persistedComponentIds = useRef(new Set<string>())
   const [programState, setProgramState] = useState<{ ownerId?: string; programs?: ProgramSettings; loading: boolean; error?: string }>({ loading: true })
   const [programReload, setProgramReload] = useState(0)
   const programs = programState.ownerId === userId && !programState.loading && !programState.error ? programState.programs : undefined
@@ -646,8 +649,11 @@ function App() {
       if (accountRef.current !== userId) return
       saveProject({ version: 1, items, parts, sheet, sheetHistory, savedAt: new Date().toISOString() }, userId)
       if (remoteHydratedRef.current && canUseSupabase()) {
-        void saveRemoteProject(items, parts, sheet, selectedItemId, userId).then((result) => {
-          if (accountRef.current === userId && !result.ok) setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
+        const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
+        void saveRemoteProject(items, newParts, sheet, selectedItemId, userId).then((result) => {
+          if (accountRef.current !== userId) return
+          if (result.ok) for (const part of newParts) persistedComponentIds.current.add(part.id)
+          else setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
         })
       }
     }, 300)
@@ -660,12 +666,17 @@ function App() {
 
     let cancelled = false
     remoteHydratedRef.current = false
-    void loadRemoteProject(userId).catch(() => undefined).then((remoteProject) => {
+    setLoadedAccountId(undefined)
+    setLibraryLoadError(undefined)
+    setStatus('Loading your items…')
+    void loadRemoteProject(userId, message => {
+      if (!cancelled && accountRef.current === userId) setStatus(message)
+    }).then((remoteProject) => {
       if (cancelled || accountRef.current !== userId) return
-      remoteHydratedRef.current = Boolean(remoteProject)
-      const project = remoteProject
-        ? privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
-        : loadProject(userId)
+      if (!remoteProject) throw new Error('Your account library could not be loaded. Please retry.')
+      remoteHydratedRef.current = true
+      persistedComponentIds.current = new Set(remoteProject.parts.map(part => part.id))
+      const project = privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
       const loaded = projectToAppState(project)
       setItems(loaded.items)
       setParts(loaded.parts)
@@ -675,13 +686,17 @@ function App() {
       setSelectedInstanceId(undefined)
       setActiveSheetIndex(0)
       setLoadedAccountId(userId)
-      setStatus(remoteProject ? 'Loaded your private item library.' : 'Cloud unavailable. Using this account\'s browser backup; cloud saving is disabled.')
+      setStatus('Loaded your private item library.')
+    }).catch(error => {
+      if (cancelled || accountRef.current !== userId) return
+      remoteHydratedRef.current = false
+      setLibraryLoadError(errorMessage(error))
     })
 
     return () => {
       cancelled = true
     }
-  }, [userId, mfaReady])
+  }, [userId, mfaReady, libraryReload])
 
   useEffect(() => {
     if (!supabase) return
@@ -692,6 +707,8 @@ function App() {
         accountRef.current = nextUserId
         remoteHydratedRef.current = false
         setLoadedAccountId(undefined)
+        persistedComponentIds.current.clear()
+        setLibraryLoadError(undefined)
         setProgramState({ loading: true })
         setMfaReady(false)
         setMfaMode('enroll')
@@ -743,7 +760,8 @@ function App() {
     if (componentSaves.pending && !window.confirm('Some components have not saved. Signing out will discard queued and failed saves. Sign out anyway?')) return
     if (userId && loadedAccountId === userId) saveProject(buildProject(), userId)
     if (userId && loadedAccountId === userId && remoteHydratedRef.current && canUseSupabase()) {
-      const result = await saveRemoteProject(items, parts, sheet, selectedItemId, userId)
+      const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
+      const result = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId)
       if (accountRef.current !== userId) return
       if (!result.ok) {
         setStatus(`Sign out blocked. Cloud save failed: ${result.error ?? 'unknown error'}`)
@@ -953,19 +971,21 @@ function App() {
     const historyEntry = buildHistoryEntry()
     const nextHistory = [historyEntry, ...sheetHistory]
     const localSaved = saveProject({ version: 1, items, parts, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
-    if (!localSaved) {
+    if (!localSaved && !(remoteHydratedRef.current && canUseSupabase())) {
       setStatus('Could not save project; browser storage may be full.')
       return false
     }
 
     if (remoteHydratedRef.current && canUseSupabase()) {
-      const remoteSaved = await saveRemoteProject(items, parts, sheet, selectedItemId, userId)
+      const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
+      const remoteSaved = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId)
       const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry, userId) : remoteSaved
       if (accountRef.current !== userId) return false
       if (!historySaved.ok) {
         setStatus(`Cloud save failed: ${historySaved.error ?? 'unknown error'}`)
         return false
       }
+      for (const part of newParts) persistedComponentIds.current.add(part.id)
       setSheetHistory(nextHistory)
       setStatus('Saved sheet to history.')
       return true
@@ -1184,7 +1204,16 @@ function App() {
   }
 
   if (!userId || loadedAccountId !== userId) {
-    return <main className="login-shell"><div className="login-panel">Loading your account...</div></main>
+    return (
+      <main className="login-shell">
+        <div className="login-panel">
+          <h2>{libraryLoadError ? 'Your items could not be loaded' : 'Loading your items'}</h2>
+          <p role={libraryLoadError ? 'alert' : 'status'}>{libraryLoadError ?? status}</p>
+          {libraryLoadError && <button type="button" onClick={() => setLibraryReload(value => value + 1)}>Retry loading items</button>}
+          <p>{userEmail}</p>
+        </div>
+      </main>
+    )
   }
 
   return (

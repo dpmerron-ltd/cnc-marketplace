@@ -5,6 +5,11 @@ const storageKey = 'sheet-builder-project'
 
 export function saveProject(project: Project, userId: string | undefined): boolean {
   if (!userId) return false
+  // Avoid serializing tens of megabytes of parsed programs into synchronous browser storage.
+  // The cloud retains the complete library; leave the last usable local backup intact.
+  const sourceCharacters = project.parts.reduce((total, part) => total + part.gcode.length + (part.dxf?.length ?? 0) + Object.values(part.metadata.materialVariants?.profiles ?? {}).reduce((size, profile) => size + (profile?.gcode.length ?? 0), 0), 0)
+    + (project.items ?? []).reduce((total, item) => total + (item.image?.dataBase64.length ?? 0), 0)
+  if (sourceCharacters > 2_000_000) return false
   try {
     localStorage.setItem(`${storageKey}:${userId}`, JSON.stringify(privateProject(project, userId)))
     return true

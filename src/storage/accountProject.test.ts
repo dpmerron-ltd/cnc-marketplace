@@ -40,6 +40,15 @@ describe('account-local projects', () => {
     expect(loadProject('alice')?.items?.[0].ownerId).toBe('alice')
   })
 
+  it('preserves the previous backup when the library exceeds browser storage capacity', () => {
+    const project = fixture()
+    expect(saveProject(project, 'alice')).toBe(true)
+    const previous = loadProject('alice')
+    project.parts[0].gcode = 'G01 X0 Y0\n'.repeat(220_000)
+    expect(saveProject(project, 'alice')).toBe(false)
+    expect(loadProject('alice')).toEqual(previous)
+  })
+
   it('removes foreign components, foreign parents, and placements from current and saved sheets', () => {
     const project = fixture()
     project.parts.push({ ...project.parts[0], id: 'wrong-parent', itemId: 'bob-item' })

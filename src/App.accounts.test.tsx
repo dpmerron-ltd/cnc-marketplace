@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { testParts } from './test/jobFixtures'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
@@ -32,7 +33,7 @@ vi.mock('./storage/supabaseProjectStore', () => ({
   canUseSupabase: () => true,
   loadRemoteProject: (...args: unknown[]) => mock.load(...args),
   saveRemoteProject: (...args: unknown[]) => mock.save(...args),
-  deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(),
+  deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(async () => ({ ok: true })),
   saveRemoteComponent: vi.fn(async () => ({ ok: true })),
 }))
 vi.mock('./storage/programSettingsStore', () => ({ loadProgramSettings: (...args: unknown[]) => mock.programs(...args), saveProgramSettings: (...args: unknown[]) => mock.savePrograms(...args) }))
@@ -58,6 +59,39 @@ async function openSheet() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.save.mockClear(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('shows a retryable error without rendering or saving a false empty catalogue', async () => {
+    mock.load.mockRejectedValueOnce(new Error('Could not load cutting components: timeout')).mockResolvedValueOnce(library('alice'))
+    render(<App />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load cutting components: timeout')
+    expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument()
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)) })
+    expect(mock.save).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading items' }))
+    await screen.findByRole('button', { name: "Open alice's private item" })
+    expect(mock.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('saves sheet changes without resending already-persisted cutting programs', async () => {
+    const remote = library('alice')
+    remote.parts = [{ ...testParts[0], ownerId: 'alice', itemId: 'alice-item' }]
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    await openSheet()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Job name' }), { target: { value: 'Updated sheet' } })
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ name: 'Updated sheet' }), expect.anything(), 'alice'))
+  })
+
+  it('can save sheet history to the cloud when the library exceeds browser backup capacity', async () => {
+    const remote = library('alice')
+    remote.parts = [{ ...testParts[0], ownerId: 'alice', itemId: 'alice-item', gcode: 'G01 X0 Y0\n'.repeat(220_000) }]
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    await openSheet()
+    fireEvent.click(screen.getByRole('button', { name: 'Save Sheet' }))
+    await screen.findByText('Saved sheet to history.')
+    expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.anything(), expect.anything(), 'alice')
+  })
+
   it('keeps programs private across account switches and requires setup for new accounts', async () => {
     mock.load.mockImplementation(async owner => library(owner))
     mock.programs.mockImplementation(async owner => owner === 'alice' ? { ...defaultProgramSettings, startGcode: '(Alice only)\nG21 G90' } : undefined)
@@ -178,7 +212,7 @@ describe('account switching', () => {
     render(<App />)
     await screen.findByText("alice's private item")
     await switchAccount('bob')
-    await waitFor(() => expect(mock.load).toHaveBeenCalledWith('bob'))
+    await waitFor(() => expect(mock.load).toHaveBeenCalledWith('bob', expect.any(Function)))
     await screen.findByRole('button', { name: 'New item' })
     expect(screen.queryByText("alice's private item")).not.toBeInTheDocument()
     await waitFor(() => expect(mock.save).toHaveBeenCalled(), { timeout: 1500 })
@@ -191,7 +225,7 @@ describe('account switching', () => {
     let resolveAlice!: (value: RemoteProjectState) => void
     mock.load.mockImplementationOnce(() => new Promise((resolve) => { resolveAlice = resolve })).mockResolvedValueOnce(library('bob'))
     render(<App />)
-    await waitFor(() => expect(mock.load).toHaveBeenCalledWith('alice'))
+    await waitFor(() => expect(mock.load).toHaveBeenCalledWith('alice', expect.any(Function)))
     await switchAccount('bob')
     await screen.findByText("bob's private item")
     await act(async () => resolveAlice(library('alice')))
