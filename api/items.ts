@@ -10,3 +10,5 @@ export const createItemSchema = z.strictObject({
 })
 export type CreateItemInput = z.infer<typeof createItemSchema>
 export const updateImageSchema = z.strictObject({ image: itemImageSchema.nullable() })
+
+export const updateDescriptionSchema = z.strictObject({ expectedDescription: z.string().nullable(), description: z.string().max(10000) })

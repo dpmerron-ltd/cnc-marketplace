@@ -65,4 +65,36 @@ begin
   if (select count(*) from public.cnc_components) <> 2 then raise exception 'New import lost'; end if;
   if (select gcode from public.cnc_components where id = 'protected-part') <> 'G21 G90' then raise exception 'Insert-only autosave replaced corrected program'; end if;
 end $$;
+-- Correct source drawing and all programs atomically without changing identities.
+set local role service_role;
+select public.replace_cnc_component_source(
+  '00000000-0000-4000-8000-000000000071', '10000000-0000-4000-8000-000000000071', 'protected-part',
+  encode(sha256('G21 G90'::bytea), 'hex'), '{"profiles":{"12":{"gcode":"G21 G90"}}}', 'DXF', 'DXF corrected',
+  'G21 G90 G17', '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 11, 21, '{}', '{}', '{}'
+);
+do $$
+begin
+  if (select dxf from public.cnc_components where id = 'protected-part') <> 'DXF corrected' then raise exception 'Corrected source missing'; end if;
+  if (select name from public.cnc_components where id = 'protected-part') <> 'Right side' then raise exception 'Identity changed'; end if;
+  if (select gcode from public.cnc_components where id = 'protected-part') <> 'G21 G90 G17' then raise exception 'Corrected NC missing'; end if;
+  begin
+    perform public.replace_cnc_component_source(
+      '00000000-0000-4000-8000-000000000071', '10000000-0000-4000-8000-000000000071', 'protected-part',
+      encode(sha256('G21 G90 G17'::bytea), 'hex'), '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 'stale DXF', 'WRONG',
+      'G21 G90 G17', '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 11, 21, '{}', '{}', '{}');
+    raise exception 'Stale source update accepted';
+  exception when raise_exception then
+    if sqlerrm <> 'COMPONENT_REVISION_CONFLICT' then raise; end if;
+  end;
+  begin
+    perform public.replace_cnc_component_source(
+      '00000000-0000-4000-8000-000000000072', '10000000-0000-4000-8000-000000000071', 'protected-part',
+      encode(sha256('G21 G90 G17'::bytea), 'hex'), '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 'DXF corrected', 'WRONG',
+      'G21 G90 G17', '{"profiles":{"12":{"gcode":"G21 G90 G17"}}}', 11, 21, '{}', '{}', '{}');
+    raise exception 'Cross-owner source update accepted';
+  exception when raise_exception then
+    if sqlerrm <> 'COMPONENT_NOT_FOUND' then raise; end if;
+  end;
+  if (select dxf from public.cnc_components where id = 'protected-part') <> 'DXF corrected' then raise exception 'Conflict mutated source'; end if;
+end $$;
 rollback;

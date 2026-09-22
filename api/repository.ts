@@ -83,6 +83,11 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       if (!row) throw new Error('Item was not created.')
       return row
     },
+    async updateItemDescription(owner, id, expected, description) {
+      let query = db.from('marketplace_items').update({ description, updated_at: new Date().toISOString() }).eq('owner_id', owner).eq('id', id)
+      query = expected === null ? query.is('description', null) : query.eq('description', expected)
+      return Boolean(checked(await query.select('id').maybeSingle()))
+    },
     async itemImage(owner, id) {
       const row = checked(await db.from('marketplace_items').select('image').eq('owner_id', owner).eq('id', id).maybeSingle())
       const parsed = itemImageSchema.safeParse(row?.image)
@@ -129,9 +134,11 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
     async replaceComponent(owner, itemId, id, input) {
       const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) throw new JobError('Component not found.', 404)
-      const result = parseComponent({ id, name: row.name, sku: row.sku, filename: row.original_filename, dxf: row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId)
+      if (input.dxf !== undefined && row.dxf !== input.expectedDxf) throw new JobError('Component source changed; reload before replacing it.', 409)
+      const result = parseComponent({ id, name: row.name, sku: row.sku, filename: row.original_filename, dxf: input.dxf ?? row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId)
       const { materialVariants, ...metadata } = result.part.metadata
-      checked(await db.rpc('replace_cnc_component_gcode', {
+      checked(await db.rpc(input.dxf === undefined ? 'replace_cnc_component_gcode' : 'replace_cnc_component_source', {
+        ...(input.dxf === undefined ? {} : { p_dxf: input.dxf }),
         p_owner: owner, p_item: itemId, p_id: id, p_expected_sha: input.expectedSha256,
         p_expected_variants: input.expectedMaterialVariants, p_expected_dxf: row.dxf,
         p_gcode: result.part.gcode, p_variants: materialVariants,

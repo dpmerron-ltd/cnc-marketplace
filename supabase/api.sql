@@ -156,6 +156,29 @@ begin
 end $$;
 revoke all on function public.replace_cnc_component_gcode(uuid, uuid, text, text, jsonb, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.replace_cnc_component_gcode(uuid, uuid, text, text, jsonb, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) to service_role;
+-- Source revisions replace DXF and all programs together under the same owner/revision guard.
+create or replace function public.replace_cnc_component_source(
+  p_owner uuid, p_item uuid, p_id text, p_expected_sha text, p_expected_variants jsonb,
+  p_expected_dxf text, p_dxf text, p_gcode text, p_variants jsonb, p_width double precision,
+  p_height double precision, p_bounds jsonb, p_original_bounds jsonb, p_metadata jsonb
+) returns boolean language plpgsql security definer set search_path = '' as $$
+declare current_part public.cnc_components;
+begin
+  select * into current_part from public.cnc_components
+    where id = p_id and owner_id = p_owner and item_id = p_item for update;
+  if current_part.id is null then raise exception 'COMPONENT_NOT_FOUND'; end if;
+  if current_part.dxf is distinct from p_expected_dxf then raise exception 'COMPONENT_REVISION_CONFLICT'; end if;
+  if current_part.gcode = p_gcode and current_part.material_variants is not distinct from p_variants and current_part.dxf is not distinct from p_dxf then return false; end if;
+  if encode(extensions.digest(current_part.gcode, 'sha256'), 'hex') is distinct from p_expected_sha
+    or current_part.material_variants is distinct from p_expected_variants then raise exception 'COMPONENT_REVISION_CONFLICT'; end if;
+  update public.cnc_components set dxf = p_dxf, gcode = p_gcode, material_variants = p_variants,
+    width = p_width, height = p_height, bounding_box = p_bounds,
+    original_bounds = p_original_bounds, metadata = p_metadata
+    where id = p_id and owner_id = p_owner and item_id = p_item;
+  return true;
+end $$;
+revoke all on function public.replace_cnc_component_source(uuid, uuid, text, text, jsonb, text, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.replace_cnc_component_source(uuid, uuid, text, text, jsonb, text, text, text, jsonb, double precision, double precision, jsonb, jsonb, jsonb) to service_role;
 create or replace function public.count_cnc_boxes(p_actor uuid, p_id uuid, p_quantity integer, p_expected_version integer)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare current_box public.box_stock;

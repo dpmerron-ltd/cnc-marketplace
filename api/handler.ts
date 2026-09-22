@@ -7,7 +7,7 @@ import { jobPdfs } from './pdf'
 import { dxfBodyLimit, generateDxfNc } from './dxf'
 import type { ProgramSettings } from '../src/gcode/programSettings'
 import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
-import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
+import { createItemSchema, updateImageSchema, updateDescriptionSchema, type CreateItemInput } from './items'
 import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement, type ComponentSource } from './components'
 import { shopifyReader, type ShopifyReader } from './shopify'
 import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
@@ -25,6 +25,7 @@ export interface JobRepository extends OrderRepository {
   programSettings(owner: string): Promise<ProgramSettings | undefined>
   catalog(owner: string, limit: number, offset: number): Promise<unknown[]>
   createItem(owner: string, input: CreateItemInput, actor: string): Promise<{ id: string; name: string; sku: string; description: string }>
+  updateItemDescription(owner: string, id: string, expected: string | null, description: string): Promise<boolean>
   itemImage(owner: string, id: string): Promise<ItemImage | undefined>
   updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
   ownsItem(owner: string, id: string): Promise<boolean>
@@ -115,6 +116,15 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         if (!parsed.success) throw new JobError('Invalid item. Supply name, sku, optional description and JPEG/PNG image.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
         const item = await repository.createItem(owner, parsed.data, identity.actor)
         return json({ ...item, imageContentType: parsed.data.image?.contentType ?? null }, 201)
+      }
+      const descriptionMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/description$/i)
+      if (descriptionMatch && z.uuid().safeParse(descriptionMatch[1]).success && request.method === 'PATCH') {
+        const id = descriptionMatch[1]
+        const input = updateDescriptionSchema.safeParse(await body(request))
+        if (!input.success) throw new JobError('Supply expectedDescription and description.', 400)
+        if (!await repository.ownsItem(owner, id)) throw new JobError('Item not found.', 404)
+        if (!await repository.updateItemDescription(owner, id, input.data.expectedDescription, input.data.description)) throw new JobError('Item description changed; reload before replacing it.', 409)
+        return json({ id, description: input.data.description })
       }
       const componentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components$/i)
       if (componentMatch && z.uuid().safeParse(componentMatch[1]).success && request.method === 'POST') {

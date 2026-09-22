@@ -330,3 +330,9 @@ return 404; responses are private and not cached. No programs are generated and
 no data is changed. Use the returned hash and exact bundle as `expectedSha256`
 and `expectedMaterialVariants` for a revision-checked repair. Catalogue lists
 still contain only lightweight component summaries.
+
+### Correct a component source drawing
+
+`PATCH /v1/items/:itemId/components/:componentId/gcode` also accepts optional `dxf` and `expectedDxf`. Supply both when correcting geometry. The current DXF, NC hash and material-variant bundle must match the supplied expected values; source DXF, NC, variants and derived geometry are then replaced atomically, preserving the component ID, item ID, SKU and name. Omit both DXF fields for a program-only repair. Read back the same endpoint to verify the stored files.
+
+`PATCH /v1/items/:itemId/description` accepts `{expectedDescription, description}`. It replaces only an owned item's description, with a conflict if the description has changed. Image changes continue to use the existing `/image` endpoint. Neither action creates a cutting job.

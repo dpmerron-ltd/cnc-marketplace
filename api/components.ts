@@ -24,7 +24,9 @@ export const replaceComponentSchema = z.strictObject({
   expectedMaterialVariants: materialVariantsSchema.nullable(),
   gcode: z.string().min(1).max(2000000),
   materialVariants: materialVariantsSchema,
-})
+  dxf: z.string().min(1).max(2000000).optional(),
+  expectedDxf: z.string().nullable().optional(),
+}).refine(value => value.dxf === undefined || Object.hasOwn(value, 'expectedDxf'), { message: 'Replacing source DXF requires expectedDxf.' })
 export type ComponentReplacement = z.infer<typeof replaceComponentSchema>
 const schema = z.strictObject({
   id: z.uuid(),

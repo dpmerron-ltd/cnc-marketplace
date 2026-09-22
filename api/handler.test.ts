@@ -32,6 +32,7 @@ function fixture() {
     ownsItem: vi.fn(async owner => owner === 'alice'),
     createComponent: vi.fn(async () => ({ created: true })),
     componentSource: vi.fn(async () => undefined),
+    updateItemDescription: vi.fn(async () => true),
     replaceComponent: vi.fn(async () => ({ part: testParts[0], warnings: [] })),
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
@@ -58,6 +59,25 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('requires a source revision for DXF corrections and restricts description edits to the owner', async () => {
+    const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
+    const path = `/items/${testItem.id}/components/${id}/gcode`
+    const variants = materialVariantsSchema.parse({ version: 1, primaryProfile: '12', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
+    const input = { expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null, gcode: testParts[0].gcode, materialVariants: variants, dxf: 'corrected source' }
+    expect((await f.call(path, 'PATCH', input)).status).toBe(400)
+    expect(f.repo.replaceComponent).not.toHaveBeenCalled()
+    expect((await f.call(path, 'PATCH', { ...input, expectedDxf: null })).status).toBe(200)
+    expect(f.repo.replaceComponent).toHaveBeenCalledWith('alice', testItem.id, id, { ...input, expectedDxf: null })
+    const description = `/items/${testItem.id}/description`
+    expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' }, 'bob')).status).toBe(404)
+    expect(f.repo.updateItemDescription).not.toHaveBeenCalled()
+    expect((await f.call(description, 'PATCH', { description: 'Rev C' })).status).toBe(400)
+    expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(200)
+    expect(f.repo.updateItemDescription).toHaveBeenCalledWith('alice', testItem.id, 'Rev B', 'Rev C')
+    f.repo.updateItemDescription = vi.fn(async () => false)
+    expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(409)
+  })
+
   it('reads an owned component revision for repairs without writes or program generation', async () => {
     const f = fixture()
     const id = '20000000-0000-4000-8000-000000000001'
