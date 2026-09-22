@@ -8,7 +8,7 @@ import { dxfBodyLimit, generateDxfNc } from './dxf'
 import type { ProgramSettings } from '../src/gcode/programSettings'
 import { imageBytes, itemImageBodyLimit, type ItemImage } from '../src/models/ItemImage'
 import { createItemSchema, updateImageSchema, type CreateItemInput } from './items'
-import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement } from './components'
+import { componentBodyLimit, parseComponent, replaceComponentSchema, type ComponentReplacement, type ComponentSource } from './components'
 import { shopifyReader, type ShopifyReader } from './shopify'
 import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
 import { orderService, type OrderRepository } from './orderAssignments'
@@ -29,6 +29,7 @@ export interface JobRepository extends OrderRepository {
   updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
   ownsItem(owner: string, id: string): Promise<boolean>
   createComponent(owner: string, part: Part): Promise<{ created: boolean }>
+  componentSource(owner: string, itemId: string, id: string): Promise<ComponentSource | undefined>
   replaceComponent(owner: string, itemId: string, id: string, input: ComponentReplacement): Promise<{ part: Part; warnings: string[] }>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
   list(owner: string, limit: number, offset: number, status?: JobStatus): Promise<JobSummary[]>
@@ -125,9 +126,14 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       }
       const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
       const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([0-9a-f-]{36})\/gcode$/i)
-      if (replacementMatch && replacementMatch.slice(1).every(id => z.uuid().safeParse(id).success) && request.method === 'PATCH') {
+      if (replacementMatch && replacementMatch.slice(1).every(id => z.uuid().safeParse(id).success) && ['GET', 'PATCH'].includes(request.method)) {
         const [, itemId, id] = replacementMatch
         if (!await repository.ownsItem(owner, itemId)) throw new JobError('Item not found.', 404)
+        if (request.method === 'GET') {
+          const source = await repository.componentSource(owner, itemId, id)
+          if (!source) throw new JobError('Component not found.', 404)
+          return json(source)
+        }
         const input = replaceComponentSchema.safeParse(await body(request, componentBodyLimit))
         if (!input.success) throw new JobError('Supply expectedSha256, expectedMaterialVariants, replacement gcode and materialVariants.', 400)
         const { part, warnings } = await repository.replaceComponent(owner, itemId, id, input.data)

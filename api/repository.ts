@@ -116,6 +116,16 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       checked(result)
       return { created: true }
     },
+    async componentSource(owner, itemId, id) {
+      const row = checked(await db.from('cnc_components').select('id,item_id,name,sku,original_filename,gcode,dxf,material_variants').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
+      if (!row) return undefined
+      return {
+        id: row.id, itemId: row.item_id, name: row.name, sku: row.sku,
+        filename: row.original_filename, gcode: row.gcode, dxf: row.dxf,
+        materialVariants: row.material_variants == null ? null : materialVariantsSchema.parse(row.material_variants),
+        sha256: await sha256(row.gcode),
+      }
+    },
     async replaceComponent(owner, itemId, id, input) {
       const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf').eq('owner_id', owner).eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) throw new JobError('Component not found.', 404)

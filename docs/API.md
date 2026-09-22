@@ -319,3 +319,14 @@ profiles, e.g. `thicknessMm: 12, variantProfiles: ["12"]`. The list must be uniq
 and include the primary profile. The exact primary program is unchanged. Omitted
 profiles contain an explicit not-generated error and no NC, so they cannot be
 selected accidentally. Omitting this option retains generation of all profiles.
+
+### Read a component revision
+
+`GET /v1/items/{itemId}/components/{componentId}/gcode` returns the owned component's
+`id`, `itemId`, `name`, `sku`, `filename`, exact `gcode`, nullable `dxf`, nullable
+`materialVariants`, and the primary NC `sha256`. It requires the same account key
+or MFA session as other catalogue routes. Missing/foreign items and components
+return 404; responses are private and not cached. No programs are generated and
+no data is changed. Use the returned hash and exact bundle as `expectedSha256`
+and `expectedMaterialVariants` for a revision-checked repair. Catalogue lists
+still contain only lightweight component summaries.

@@ -3,8 +3,20 @@ import { createPartFromGCode } from '../src/gcode/importPart'
 import { simulateGCode } from '../src/gcode/simulator'
 import { transformPartProgram } from '../src/gcode/transform'
 import { JobError } from '../src/jobs/generateJob'
-import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
+import { materialProfiles, materialVariantsSchema, type MaterialVariants } from '../src/cam/materialProfiles'
 import { materialPreset } from '../src/cam/generate'
+
+export interface ComponentSource {
+  id: string
+  itemId: string
+  name: string
+  sku: string
+  filename: string
+  gcode: string
+  dxf: string | null
+  materialVariants: MaterialVariants | null
+  sha256: string
+}
 
 export const componentBodyLimit = 12 * 1024 * 1024
 export const replaceComponentSchema = z.strictObject({

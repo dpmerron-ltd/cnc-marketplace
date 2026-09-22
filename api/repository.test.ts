@@ -14,6 +14,18 @@ function fixture() {
   return { query, db, repo: supabaseRepository(db as unknown as SupabaseClient) }
 }
 describe('API credential verification', () => {
+  it('returns exact source and revision only through owner, item and component filters', async () => {
+    const row = { id: 'part', item_id: 'item', name: 'Panel', sku: 'P1', original_filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'original DXF', material_variants: null }
+    let data: typeof row | null = row
+    const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data, error: null })) }
+    query.select.mockReturnValue(query); query.eq.mockReturnValue(query)
+    const repo = supabaseRepository({ from: () => query } as unknown as SupabaseClient)
+    expect(await repo.componentSource('alice', 'item', 'part')).toEqual({ id: 'part', itemId: 'item', name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: row.gcode, dxf: row.dxf, materialVariants: null, sha256: await sha256(row.gcode) })
+    for (const pair of [['owner_id', 'alice'], ['item_id', 'item'], ['id', 'part']]) expect(query.eq).toHaveBeenCalledWith(...pair)
+    data = null
+    expect(await repo.componentSource('alice', 'item', 'missing')).toBeUndefined()
+  })
+
   it('passes authenticated identity into scoped order RPCs and reports assignment conflicts', async () => {
     const rpc = vi.fn(async (_name: string, _args: unknown): Promise<{ data: unknown; error: { message: string } | null }> => ({ data: [], error: null }))
     const repo = supabaseRepository({ rpc } as unknown as SupabaseClient)

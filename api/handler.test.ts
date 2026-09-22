@@ -31,6 +31,7 @@ function fixture() {
     updateItemImage: vi.fn(async () => false),
     ownsItem: vi.fn(async owner => owner === 'alice'),
     createComponent: vi.fn(async () => ({ created: true })),
+    componentSource: vi.fn(async () => undefined),
     replaceComponent: vi.fn(async () => ({ part: testParts[0], warnings: [] })),
     loadComponents: vi.fn(async owner => ({ items: owner === 'alice' ? [testItem] : [], parts: owner === 'alice' ? testParts : [] })),
     list: async () => [],
@@ -57,6 +58,27 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('reads an owned component revision for repairs without writes or program generation', async () => {
+    const f = fixture()
+    const id = '20000000-0000-4000-8000-000000000001'
+    const path = `/items/${testItem.id}/components/${id}/gcode`
+    const source = { id, itemId: testItem.id, name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'source DXF', materialVariants: null, sha256: 'a'.repeat(64) }
+    f.repo.componentSource = vi.fn(async () => source)
+    const result = await f.call(path, 'GET')
+    expect(result.status).toBe(200)
+    expect(await result.json()).toEqual(source)
+    expect(result.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(f.repo.componentSource).toHaveBeenCalledWith('alice', testItem.id, id)
+    expect(f.repo.replaceComponent).not.toHaveBeenCalled()
+    expect(f.repo.programSettings).not.toHaveBeenCalled()
+    vi.mocked(f.repo.componentSource).mockClear()
+    expect((await f.call(path, 'GET', undefined, 'bob')).status).toBe(404)
+    expect(f.repo.componentSource).not.toHaveBeenCalled()
+    f.repo.componentSource = vi.fn(async () => undefined)
+    expect((await f.call(path, 'GET')).status).toBe(404)
+    expect((await f.call(path.replace(id, 'invalid'), 'GET')).status).toBe(404)
+  })
+
   it('authenticates Shopify routes and rejects writes without any Shopify mutation', async () => {
     const f = fixture(), reader = shopifyReader(), api = createApi(f.repo, font, () => reader)
     const invoke = (path: string, token = 'alice', method = 'GET') => api(new Request(`http://localhost/v1${path}`, { method, headers: { Authorization: `Bearer ${token}` } }))
