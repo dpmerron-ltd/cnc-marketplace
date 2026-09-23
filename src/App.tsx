@@ -8,6 +8,9 @@ import { numberSheetParts } from './labels/partLabels'
 import { PartLabelsDialog } from './ui/PartLabelsDialog'
 import { TabMapDownload } from './ui/TabMapDownload'
 import { QueuePage } from './ui/QueuePage'
+import { MachinePage } from './ui/MachinePage'
+import { buildExportSnapshot } from './machine/exportSnapshot'
+import { saveMachineRun } from './storage/machineRunsStore'
 import { OrdersPage } from './ui/OrdersPage'
 import { nestOrder, prepareOrderSheet, type AddOrderRequest, type NestProgress } from './orders/addOrderToSheet'
 import { BoxStockPage } from './ui/BoxStockPage'
@@ -321,6 +324,7 @@ interface ExportSummary {
 }
 
 interface PendingExport {
+  id: string
   mode: 'combined' | 'sheets'
   files: PendingExportFile[]
   summary: ExportSummary
@@ -419,7 +423,12 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes'>('marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine'>(() => window.location.hash.startsWith('#machine') ? 'machine' : 'marketplace')
+  useEffect(() => {
+    const navigate = () => { if (window.location.hash.startsWith('#machine')) setPage('machine') }
+    window.addEventListener('hashchange', navigate)
+    return () => window.removeEventListener('hashchange', navigate)
+  }, [])
   const [items, setItems] = useState<MarketplaceItem[]>(initialState.items)
   const [parts, setParts] = useState<Part[]>(initialState.parts)
   const [componentIndex, setComponentIndex] = useState<ComponentSummary[]>([])
@@ -438,6 +447,9 @@ function App() {
   const [preview, setPreview] = useState<string>()
   const [previewSimulation, setPreviewSimulation] = useState<GCodeSimulation>()
   const [pendingExport, setPendingExport] = useState<PendingExport>()
+  const [exportBusy, setExportBusy] = useState(false)
+  const exportBusyRef = useRef(false)
+  const [exportError, setExportError] = useState('')
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
@@ -802,7 +814,7 @@ function App() {
         setPreviewSimulation(undefined)
         setPendingExport(undefined)
         setLabelsOpen(false)
-        setPage('marketplace')
+        setPage(window.location.hash.startsWith('#machine') ? 'machine' : 'marketplace')
         setStatus(session ? 'Loading your account...' : 'Signed out.')
       }
       setUserId(nextUserId)
@@ -1222,11 +1234,13 @@ function App() {
       return
     }
     setPendingExport({
+      id: crypto.randomUUID(),
       mode: 'combined',
       files: [{ filename, gcode: result.gcode, simulation }],
       summary: exportSummary(result.warnings, [simulation]),
-      tabMap: { parts, sheet },
+      tabMap: { parts, sheet: { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } },
     })
+    setExportError('')
   }
 
   function prepareSheetExports() {
@@ -1258,32 +1272,33 @@ function App() {
       return
     }
     setPendingExport({
+      id: crypto.randomUUID(),
       mode: 'sheets',
       files,
       summary: exportSummary(results.flatMap((result) => result.warnings), files.map((file) => file.simulation)),
-      tabMap: { parts, sheet },
+      tabMap: { parts, sheet: { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } },
     })
+    setExportError('')
   }
 
   async function confirmPendingExport() {
-    if (!pendingExport) return
+    if (!pendingExport || !userId || exportBusyRef.current) return
     const exportToConfirm = pendingExport
-
-    exportToConfirm.files.forEach((file) => {
-      downloadText(file.filename, file.gcode, 'application/x-gcode')
-    })
-    setPendingExport(undefined)
-
-    const saved = await saveCurrentProject()
-    setStatus(
-      saved
-        ? exportToConfirm.mode === 'combined'
-          ? `Saved sheet and exported ${exportToConfirm.files[0].filename}.`
-          : `Saved sheet and exported ${exportToConfirm.files.length} sheet G-code file(s).`
-        : exportToConfirm.mode === 'combined'
-          ? `Exported ${exportToConfirm.files[0].filename}, but could not save the sheet.`
-          : `Exported ${exportToConfirm.files.length} sheet G-code file(s), but could not save the sheet.`,
-    )
+    const ownerId = userId
+    exportBusyRef.current = true
+    setExportBusy(true); setExportError('')
+    try {
+      const snapshot = await buildExportSnapshot({ ...exportToConfirm, ...exportToConfirm.tabMap })
+      if (accountRef.current !== ownerId) return
+      await saveMachineRun(exportToConfirm.id, ownerId, snapshot)
+      if (accountRef.current !== ownerId) return
+      exportToConfirm.files.forEach(file => downloadText(file.filename, file.gcode, 'application/x-gcode'))
+      setPendingExport(undefined)
+      const saved = await saveCurrentProject()
+      if (accountRef.current === ownerId) setStatus(`Exported ${exportToConfirm.files.length} NC file(s) and saved to At Machine, waiting to cut.${saved ? '' : ' The editable sheet history could not be saved.'}`)
+    } catch (error) {
+      if (accountRef.current === ownerId) setExportError(`Export could not finish: ${errorMessage(error)}. Retry to save the same export; no new cutting programs will be generated.`)
+    } finally { exportBusyRef.current = false; setExportBusy(false) }
   }
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
@@ -1325,7 +1340,7 @@ function App() {
     )
   }
 
-  if (!userId || loadedAccountId !== userId) {
+  if (!userId || (loadedAccountId !== userId && page !== 'machine')) {
     return (
       <main className="login-shell">
         <div className="login-panel">
@@ -1339,7 +1354,7 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${page === 'machine' ? ' machine-mode' : ''}`}>
       <header className="toolbar">
         <div className="brand-block">
           <h1>CNC Marketplace</h1>
@@ -1348,6 +1363,7 @@ function App() {
         <nav className="nav-tabs" aria-label="Primary">
           <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
           <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
+          <button type="button" className={page === 'machine' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'machine'; setPage('machine') }}>At Machine</button>
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'orders' ? 'active-nav' : ''} onClick={() => setPage('orders')}>Orders</button>
@@ -1426,11 +1442,11 @@ function App() {
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {(page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1519,7 +1535,7 @@ function App() {
                     : 'Export Sheets creates one G-code file for each physical sheet.'}
                 </p>
               </div>
-              <button type="button" onClick={() => setPendingExport(undefined)}>Close</button>
+              <button type="button" disabled={exportBusy} onClick={() => setPendingExport(undefined)}>Close</button>
             </div>
 
             <div className="export-summary-grid">
@@ -1615,16 +1631,17 @@ function App() {
 
             <div className="modal-actions">
               <TabMapDownload parts={pendingExport.tabMap.parts} sheet={pendingExport.tabMap.sheet} />
-              <button type="button" onClick={() => setPendingExport(undefined)}>Cancel</button>
-              <button type="button" className="primary" onClick={() => void confirmPendingExport()}>
-                Export G-code
+              {exportError && <p role="alert">{exportError}</p>}
+              <button type="button" disabled={exportBusy} onClick={() => setPendingExport(undefined)}>Cancel</button>
+              <button type="button" className="primary" disabled={exportBusy} onClick={() => void confirmPendingExport()}>
+                {exportBusy ? 'Saving export...' : 'Export G-code'}
               </button>
             </div>
           </section>
         </div>
       )}
 
-      {page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
+      {page !== 'machine' && page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>

@@ -345,4 +345,54 @@ select sizes.name, sizes.length_mm, 350, 400, 10,
 from (values ('105 x 35 x 40 cm', 1050), ('120 x 35 x 40 cm', 1200)) sizes(name, length_mm)
 on conflict (length_mm, width_mm, height_mm) do nothing;
 
+-- Immutable exported files/layouts are private even though the catalogue is shared.
+create table if not exists public.cnc_machine_runs (
+  id uuid primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  order_number text not null,
+  material text not null,
+  thickness text not null,
+  sheet_count integer not null check (sheet_count > 0),
+  part_count integer not null check (part_count > 0),
+  status text not null default 'waiting' check (status in ('waiting', 'cutting', 'completed', 'cancelled')),
+  created_at timestamptz not null default now(),
+  snapshot jsonb not null check ((snapshot->>'version' = '1' and jsonb_typeof(snapshot->'files') = 'array') is true)
+);
+create index if not exists cnc_machine_runs_owner_created on public.cnc_machine_runs(owner_id, created_at desc);
+alter table public.cnc_machine_runs enable row level security;
+revoke all on public.cnc_machine_runs from anon, authenticated;
+grant select, insert on public.cnc_machine_runs to authenticated;
+grant update(status) on public.cnc_machine_runs to authenticated;
+grant all on public.cnc_machine_runs to service_role;
+drop policy if exists "own machine exports" on public.cnc_machine_runs;
+create policy "own machine exports" on public.cnc_machine_runs for all to authenticated
+  using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+  with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+drop policy if exists "machine export account guard" on public.cnc_machine_runs;
+create policy "machine export account guard" on public.cnc_machine_runs as restrictive for all
+  using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+  with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+
+create or replace function public.guard_machine_export()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.status <> 'waiting' then raise exception 'New exports must wait to cut' using errcode = '23514'; end if;
+  else
+    if (to_jsonb(new) - 'status') is distinct from (to_jsonb(old) - 'status') then
+      raise exception 'Exported files and layouts cannot be changed' using errcode = '42501';
+    end if;
+    if new.status is distinct from old.status and not (
+      (old.status = 'waiting' and new.status in ('cutting', 'cancelled')) or
+      (old.status = 'cutting' and new.status in ('completed', 'cancelled'))
+    ) then raise exception 'Invalid export status transition' using errcode = '23514'; end if;
+  end if;
+  return new;
+end $$;
+revoke all on function public.guard_machine_export() from public, anon, authenticated;
+drop trigger if exists guard_machine_export on public.cnc_machine_runs;
+create trigger guard_machine_export before insert or update on public.cnc_machine_runs
+  for each row execute function public.guard_machine_export();
+
 commit;
