@@ -320,6 +320,22 @@ and include the primary profile. The exact primary program is unchanged. Omitted
 profiles contain an explicit not-generated error and no NC, so they cannot be
 selected accidentally. Omitting this option retains generation of all profiles.
 
+### 12 mm Single-Pass With Shallow Drills
+
+Use `thicknessMm: 12, profilePasses: 1, drillDepthMm: 2` for DXF conversion
+(omitting `profilePasses` also means one pass). For jobs, put these fields in
+`sheet`. The profile ID is `12-2mm`; the browser label is **12 mm (1 pass, 2 mm drills)**.
+
+Contours cut to 12.2 mm in one pass; drills stop at 2 mm with one peck. Feeds,
+ramps, spindle, cutter, tabs, pockets and Z20 clearance are unchanged. The usual
+12 mm profile still drills to 4.5 mm. Two-pass 12 mm stock and other thicknesses
+cannot use the 2 mm drill selector. Optional `variantProfiles: ["12-2mm"]` generates
+only this profile; omitting the list generates all seven profiles.
+
+New bundles include this variant. Older components remain valid but need DXF
+regeneration before they can be exported using `12-2mm`; no saved programs are
+changed automatically.
+
 ### Read a component revision
 
 `GET /v1/items/{itemId}/components/{componentId}/gcode` returns the shared component's

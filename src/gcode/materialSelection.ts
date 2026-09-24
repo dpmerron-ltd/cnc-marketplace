@@ -23,7 +23,7 @@ export function selectMaterialParts(parts: Part[], sheet: Pick<Sheet, 'materialP
     if (!entries) { entries = new Map(); cache.set(part, entries) }
     const cached = entries.get(profile.id)
     if (cached?.gcode === variant.gcode) return cached.part
-    const filename = `${part.originalFilename.replace(/(?:-(?:6|12|15|18)mm(?:-2pass|-9mm-holes)?)?\.[^.]+$/, '')}-${profile.thickness}mm${profile.id === '18-9mm' ? '-9mm-holes' : profile.id === '12-2pass' ? '-2pass' : ''}.nc`
+    const filename = `${part.originalFilename.replace(/(?:-(?:6|12|15|18)mm(?:-2pass|-[29]mm-holes)?)?\.[^.]+$/, '')}-${profile.thickness}mm${profile.drillDepthMm !== undefined ? `-${profile.drillDepthMm}mm-holes` : profile.id === '12-2pass' ? '-2pass' : ''}.nc`
     const generated = createPartFromGCode(filename, variant.gcode, part.dxf, part.itemId)
     const resolved: Part = { ...part, ...generated, id: part.id, ownerId: part.ownerId, name: part.name, sku: part.sku, dateImported: part.dateImported, metadata: { ...generated.metadata, materialVariants: part.metadata.materialVariants } }
     entries.set(profile.id, { gcode: variant.gcode, part: resolved })

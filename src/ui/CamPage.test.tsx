@@ -69,9 +69,9 @@ describe('DXF review queue', () => {
     expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
   })
 
-  it.each(['6', '12', '15', '12-2pass', '18-9mm'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
+  it.each(['6', '12', '12-2mm', '15', '12-2pass', '18-9mm'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
     const thickness = choice === '18-9mm' ? 18 : choice === '15' ? 15 : choice === '6' ? 6 : 12
-    const suffix = choice === '18-9mm' ? '18mm-9mm-holes' : choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
+    const suffix = choice === '12-2mm' ? '12mm-2mm-holes' : choice === '18-9mm' ? '18mm-9mm-holes' : choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
     const onSave = vi.fn()
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={onSave} />)
     const first = file('first.dxf'), second = file('second.dxf')
@@ -90,7 +90,7 @@ describe('DXF review queue', () => {
     await waitFor(() => expect(screen.getByText('File 2 of 2')).toBeInTheDocument())
     await generated()
     expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ filename: `first-${suffix}.nc`, itemId: testItem.id, source: dxf }))
-    expect(Object.keys(onSave.mock.calls[0][0].materialVariants.profiles)).toHaveLength(6)
+    expect(Object.keys(onSave.mock.calls[0][0].materialVariants.profiles)).toHaveLength(7)
     expect(onSave.mock.calls[0][0].materialVariants.profiles['6'].gcode).toContain('Pass depth 6.2')
     expect(onSave.mock.calls[0][0].materialVariants.profiles['18'].gcode).toContain('Pass depth 18.4')
     expect(screen.getByLabelText('Material thickness')).toHaveValue(choice)
@@ -114,12 +114,12 @@ describe('DXF review queue', () => {
   it('resets review and pass selection when changing material presets', async () => {
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
     upload([file('panel.dxf')]); await generated()
-    for (const choice of ['18-9mm', '12-2pass', '6', '12-2pass', '15', '18-9mm', '18', '12-2pass', '12']) {
+    for (const choice of ['18-9mm', '12-2mm', '12-2pass', '6', '12-2pass', '15', '12-2mm', '18-9mm', '18', '12-2pass', '12']) {
       fireEvent.click(review())
       fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
       expect(review()).not.toBeChecked()
       expect(TestWorker.instances.at(-1)!.request.settings.profilePasses).toBe(choice === '12-2pass' ? 2 : undefined)
-      expect(TestWorker.instances.at(-1)!.request.settings.drillDepthMm).toBe(choice === '18-9mm' ? 9 : undefined)
+      expect(TestWorker.instances.at(-1)!.request.settings.drillDepthMm).toBe(choice === '12-2mm' ? 2 : choice === '18-9mm' ? 9 : undefined)
       expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
     }
   })

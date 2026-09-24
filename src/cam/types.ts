@@ -22,7 +22,7 @@ export interface OperationOverride { kind?: OperationKind; depthMm?: number; tab
 export interface CamSettings {
   thickness: 6 | 12 | 15 | 18
   profilePasses?: 1 | 2
-  drillDepthMm?: 9
+  drillDepthMm?: 2 | 9
   units: 'auto' | 'mm' | 'inches'
   operations: Record<string, OperationOverride>
   programs?: ProgramSettings

@@ -28,12 +28,12 @@ const sheet: Sheet = { name: 'Thickness test', width: 500, height: 400, spacing:
 
 describe('material variants', () => {
   it.each(materialProfiles)('generates $label with the same operations, tabs and account programs', profile => {
-    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
+    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
     const variant = bundle.profiles[profile.id]!
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)
     expect(expected.operations.find(operation => operation.kind === 'outside')?.tabs).toHaveLength(2)
-    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, undefined, profile.id === '18-9mm' ? 9 : undefined).drill)
+    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, undefined, profile.drillDepthMm).drill)
     expect(simulateGCode(variant.gcode).deepestCutMm).toBe(materialPreset(profile.thickness).depth)
   })
 
@@ -60,9 +60,9 @@ describe('material variants', () => {
   it('retains valid hinge variants and blocks thin-stock variants rather than dropping the hinge', () => {
     const hinge = readDxf(dxf([rectangle(0, 0, 300, 200), rectangle(80, 60, 120, 80, 'DOOR'), circle(110, 100, 17.5, 'HINGE')]))
     const variants = generateMaterialVariants(hinge, { ...settings, operations: {} })
-    for (const id of ['6', '12', '12-2pass'] as const) {
-      expect(variants.profiles[id].gcode).toBe('')
-      expect(variants.profiles[id].errors.join(' ')).toContain('hinge pockets')
+    for (const id of ['6', '12', '12-2mm', '12-2pass'] as const) {
+      expect(variants.profiles[id]!.gcode).toBe('')
+      expect(variants.profiles[id]!.errors.join(' ')).toContain('hinge pockets')
     }
     for (const id of ['15', '18'] as const) expect(variants.profiles[id].errors).toEqual([])
     const hingePart = { ...part, metadata: { ...part.metadata, materialVariants: variants } }
@@ -90,6 +90,24 @@ describe('material variants', () => {
     const legacy = { ...part, metadata: { ...part.metadata, materialVariants: undefined } }
     await expect(generateJob(job.manifest.request, [testItem], [legacy])).rejects.toThrow('thickness is unavailable')
   })
+})
+
+it('uses 2 mm drills and one 12.2 mm contour pass for API jobs, without silently substituting old variants', async () => {
+  const request = parseJobRequest({ jobName: 'Shallow drills', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: 12, profilePasses: 1, drillDepthMm: 2, screwMarks: false } })
+  const job = await generateJob(request, [testItem], [part])
+  expect(job.sheet.materialProfile).toBe('12-2mm')
+  expect(job.parts[0].gcode).toBe(bundle.profiles['12-2mm']?.gcode)
+  expect(job.parts[0].originalFilename).toBe('panel-12mm-2mm-holes.nc')
+  expect(job.exported[0].gcode).toContain('Z-2 F600')
+  expect(job.exported[0].gcode).not.toContain('Z-4 F600')
+  expect(job.simulations[0].deepestCutMm).toBe(12.2)
+  const olderBundle = structuredClone(bundle)
+  delete olderBundle.profiles['12-2mm']
+  const legacy = { ...part, metadata: { ...part.metadata, materialVariants: olderBundle } }
+  await expect(generateJob(request, [testItem], [legacy])).rejects.toThrow('unavailable')
+  for (const patch of [{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }, { profilePasses: 2 }, { thicknessMm: undefined }]) {
+    expect(() => parseJobRequest({ ...request, sheet: { ...request.sheet, ...patch } })).toThrow()
+  }
 })
 
 it('preserves 9 mm holes when selecting the new profile for a complete API job', async () => {

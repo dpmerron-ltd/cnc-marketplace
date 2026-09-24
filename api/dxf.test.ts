@@ -21,7 +21,7 @@ describe('DXF API generation', () => {
     expect(result.materialVariants.profiles['6'].gcode).toBe(result.gcode)
     for (const profile of materialProfiles) {
       expect(result.materialVariants.profiles[profile.id]!.errors).toEqual([])
-      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, drillDepthMm: profile.id === '18-9mm' ? 9 : undefined, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
+      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
     }
     const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: 'panel.nc', dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
     expect(uploaded.part.metadata.materialVariants).toEqual(result.materialVariants)
@@ -47,6 +47,37 @@ describe('DXF API generation', () => {
     expect(result.settings.drillDepthMm).toBe(thicknessMm === 12 ? 4.5 : 9.2)
     const overridden = await generateDxfNc({ dxf: source, thicknessMm, operations: { f1: { tabs: 2 } } })
     expect(overridden.operations.find(op => op.featureId === 'f1')?.tabCount).toBe(0)
+  })
+  it.each([undefined, 1])('supports one-pass 12 mm stock with 2 mm drills (passes %s), preserving all other machining', async profilePasses => {
+    const source = dxf([profile, circle(), [0, 'CIRCLE', 8, 'POCKET', 10, 100, 20, 100, 40, 10]])
+    const input = { dxf: source, thicknessMm: 12, filename: 'panel.dxf', layerOperations: { POCKET: { kind: 'pocket', depthMm: 5 } } }
+    const normal = await generateDxfNc(input)
+    const shallow = await generateDxfNc({ ...input, profilePasses, drillDepthMm: 2, variantProfiles: materialProfiles.map(profile => profile.id) })
+    expect(shallow.settings).toEqual({ ...normal.settings, drillDepthMm: 2 })
+    expect(shallow.settings).toMatchObject({ passDepthsMm: [12.2], cutDepthMm: 12.2, drillDepthMm: 2, cutterDiameterMm: 6.35, clearanceMm: 20, cutFeedMmPerMinute: 3000, spindleRpm: 18000, rampDegrees: 3 })
+    expect(shallow.filename).toBe('panel-12mm-2mm-holes.nc')
+    expect(shallow.materialVariants.primaryProfile).toBe('12-2mm')
+    expect(shallow.materialVariants.profiles['12-2mm']?.gcode).toBe(shallow.gcode)
+    expect(shallow.gcode).toBe(generateCam(readDxf(source), { thickness: 12, drillDepthMm: 2, units: 'auto', operations: { f2: { kind: 'pocket', depthMm: 5 } } }).gcode)
+    for (const operation of shallow.operations) {
+      const block = shallow.gcode.split('\n').slice(operation.firstLine - 1, operation.lastLine).join('\n')
+      if (operation.kind === 'drill') {
+        expect(operation.depthMm).toBe(2)
+        expect(block.match(/G01 Z-\d[^\n]*/g)).toEqual(['G01 Z-2 F600'])
+        expect(block).toContain('G00 Z20')
+      } else {
+        const original = normal.operations.find(value => value.featureId === operation.featureId)!
+        expect(block).toBe(normal.gcode.split('\n').slice(original.firstLine - 1, original.lastLine).join('\n'))
+      }
+    }
+    const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: shallow.filename, gcode: shallow.gcode, materialVariants: shallow.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
+    expect(uploaded.part.metadata.materialVariants?.primaryProfile).toBe('12-2mm')
+    const older = structuredClone(normal.materialVariants)
+    delete older.profiles['12-2mm']
+    expect(parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Old panel', sku: 'OLD', filename: normal.filename, gcode: normal.gcode, materialVariants: older }, 'alice', '10000000-0000-4000-8000-000000000001').part.metadata.materialVariants?.profiles['12-2mm']).toBeUndefined()
+  })
+  it.each([{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }, { thicknessMm: 12, profilePasses: 2 }])('rejects unsupported 2 mm drilling combinations %j', async patch => {
+    await expect(generateDxfNc({ dxf: drawing, drillDepthMm: 2, ...patch })).rejects.toMatchObject({ status: 400 })
   })
   it('supports opt-in two-pass 12 mm generation with exact browser parity', async () => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm: 12, profilePasses: 2, filename: 'panel.dxf' })
