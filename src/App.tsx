@@ -63,6 +63,8 @@ import { materialProfiles, materialVariantsSchema, type MaterialProfileId } from
 import { selectMaterialParts } from './gcode/materialSelection'
 
 const CamPage = lazy(() => import('./ui/CamPage').then(module => ({ default: module.CamPage })))
+const PrintablesPage = lazy(() => import('./ui/PrintablesPage').then(module => ({ default: module.PrintablesPage })))
+const pageFromHash = () => window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
 
 const defaultSheet: Sheet = {
   name: 'Untitled Sheet',
@@ -423,9 +425,9 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine'>(() => window.location.hash.startsWith('#machine') ? 'machine' : 'marketplace')
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine' | 'prints'>(pageFromHash)
   useEffect(() => {
-    const navigate = () => { if (window.location.hash.startsWith('#machine')) setPage('machine') }
+    const navigate = () => { const next = pageFromHash(); if (next !== 'marketplace') setPage(next) }
     window.addEventListener('hashchange', navigate)
     return () => window.removeEventListener('hashchange', navigate)
   }, [])
@@ -814,7 +816,7 @@ function App() {
         setPreviewSimulation(undefined)
         setPendingExport(undefined)
         setLabelsOpen(false)
-        setPage(window.location.hash.startsWith('#machine') ? 'machine' : 'marketplace')
+        setPage(pageFromHash())
         setStatus(session ? 'Loading your account...' : 'Signed out.')
       }
       setUserId(nextUserId)
@@ -1368,6 +1370,7 @@ function App() {
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'orders' ? 'active-nav' : ''} onClick={() => setPage('orders')}>Orders</button>
           <button type="button" className={page === 'boxes' ? 'active-nav' : ''} onClick={() => setPage('boxes')}>Boxes</button>
+          <button type="button" className={page === 'prints' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'prints'; setPage('prints') }}>3D Prints</button>
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
           <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
         </nav>
@@ -1442,11 +1445,11 @@ function App() {
           <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes' || page === 'prints') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={items} /></Suspense> : page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1641,7 +1644,7 @@ function App() {
         </div>
       )}
 
-      {page !== 'machine' && page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
+      {page !== 'prints' && page !== 'machine' && page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>
