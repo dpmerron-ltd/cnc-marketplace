@@ -4,6 +4,14 @@ import { PDFDocument } from 'pdf-lib'
 import { parseDocument } from './documents'
 const id = '10000000-0000-4000-8000-000000000001'
 describe('document upload validation', () => {
+  it('accepts multi-megabyte illustrated PDFs without overflowing the base64 validator', async () => {
+    const pdf = await PDFDocument.create(); pdf.addPage([200, 300])
+    pdf.context.register(pdf.context.stream(new Uint8Array(7 * 1024 * 1024)))
+    const bytes = await pdf.save()
+    expect(bytes.length).toBeGreaterThan(7 * 1024 * 1024)
+    const result = await parseDocument({ id, kind: 'instructions', filename: 'illustrated.pdf', dataBase64: Buffer.from(bytes).toString('base64') })
+    expect(result.pages).toBe(1); expect(result.bytes.length).toBe(bytes.length)
+  })
   it('counts the PDF pages and retains the original bytes', async () => {
     const pdf = await PDFDocument.create(); pdf.addPage([200, 300]); pdf.addPage([300, 200])
     const bytes = await pdf.save()
