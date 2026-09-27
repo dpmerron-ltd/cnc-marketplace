@@ -241,7 +241,7 @@ function editableMetadata(item: MarketplaceItem) {
   return { sku: item.sku, name: item.name, description: item.description, packing: item.packing ?? {} }
 }
 let catalogueWriteQueue: Promise<RemoteSaveResult> = Promise.resolve({ ok: true })
-function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
+export function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
   const next = catalogueWriteQueue.then(() => persistCatalogueItem(item, userId))
   catalogueWriteQueue = next.catch(error => ({ ok: false, error: String(error) }))
   return next

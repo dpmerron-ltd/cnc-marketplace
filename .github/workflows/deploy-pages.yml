@@ -32,7 +32,7 @@ jobs:
         run: |
           if [ "$EVENT_NAME" != "push" ] || [ -z "$BEFORE_SHA" ] || [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
             echo "schema=true" >> "$GITHUB_OUTPUT"
-          elif git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- supabase/schema.sql supabase/api.sql supabase/orders.sql supabase/printables.sql; then
+          elif git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- supabase/schema.sql supabase/api.sql supabase/orders.sql supabase/printables.sql supabase/item-documents.sql; then
             echo "schema=false" >> "$GITHUB_OUTPUT"
           else
             echo "schema=true" >> "$GITHUB_OUTPUT"
@@ -79,6 +79,9 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/printables.sql
           psql --set ON_ERROR_STOP=on --file supabase/printables.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/printables-isolation.sql
+          psql --set ON_ERROR_STOP=on --file supabase/item-documents.sql
+          psql --set ON_ERROR_STOP=on --file supabase/item-documents.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/item-documents-isolation.sql
 
   build:
     runs-on: ubuntu-latest

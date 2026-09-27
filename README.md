@@ -36,7 +36,7 @@ npm run build
 Sign-in and MFA use Supabase. All signed-in accounts use the same item catalogue. Browser backups and cutting sheets remain account-specific.
 
 1. Open Supabase SQL Editor.
-2. Run `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql`, in that order.
+2. Run `supabase/schema.sql`, `supabase/api.sql`, `supabase/orders.sql`, `supabase/printables.sql` and `supabase/item-documents.sql`, in that order.
 3. Restart the app.
 
 For local development, copy `.env.example` to `.env.local` and set:
@@ -59,7 +59,13 @@ cannot enable a partial item export. Export Project explicitly loads the complet
 catalogue before downloading a self-contained backup. Partial catalogues never
 overwrite the last complete browser backup; sheet autosaves still go to the cloud.
 
-The Pages deployment applies `supabase/schema.sql`, `supabase/api.sql` and `supabase/orders.sql` transactionally before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
+The Pages deployment applies the schema files listed above before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
+
+## Item Documents
+
+Open a catalogue item and use **Documents** to upload pre-generated PDF user instructions or packing lists (20 MB and 200 pages per file). Documents are shared with MFA-authenticated catalogue users; only the uploader can remove a document.
+
+On **Orders**, choose **Print documents**. Items match by SKU; missing or ambiguous matches require selection. Choose documents and copies, then **Prepare print PDF** and **Open / print PDF** to print from the PDF viewer. Copies default to current order quantities; refunded lines are excluded. Original page sizes are preserved. Missing documents are listed, and failed downloads do not produce partial packets. Print packets are limited to 500 pages and 100 MB of source files.
 
 ## MVP Features
 

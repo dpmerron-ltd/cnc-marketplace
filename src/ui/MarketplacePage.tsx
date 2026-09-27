@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
+import { ItemDocuments } from './ItemDocuments'
 import type { ComponentSummary, Part } from '../models/Part'
 import { ItemPreview } from './ItemPreview'
 import { PackingPanel } from './PackingPanel'
@@ -110,6 +111,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
       <ItemImageEditor key={`${currentUserId}:${selectedItem.id}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} />
+      {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${selectedItem.id}`} userId={currentUserId} item={selectedItem} />}
       {componentsReady && selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}

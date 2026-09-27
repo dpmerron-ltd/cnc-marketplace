@@ -5,6 +5,7 @@ import { testParts } from './test/jobFixtures'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
 import { summarizePart, type Part } from './models/Part'
+vi.mock('./ui/ItemDocuments', () => ({ ItemDocuments: () => <section aria-label="Item documents" /> }))
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
 const mock = vi.hoisted(() => ({

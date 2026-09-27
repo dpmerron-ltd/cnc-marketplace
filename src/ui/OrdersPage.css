@@ -23,6 +23,7 @@
 .orders-lines code { white-space: normal; }
 .orders-detail-error { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .order-add-button { white-space: nowrap; }
+.order-action-buttons { display: flex; flex-direction: column; align-items: start; gap: 8px; }
 .order-sheet-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 20px; border: 1px solid #b7c3cc; border-radius: 8px; background: #fff; color: #18242c; }
 .order-sheet-dialog::backdrop { background: #0007; }
 .order-sheet-dialog h3 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
