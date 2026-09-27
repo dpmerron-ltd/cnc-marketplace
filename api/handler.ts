@@ -12,11 +12,12 @@ import { componentBodyLimit, parseComponent, replaceComponentSchema, type Compon
 import { shopifyReader, type ShopifyReader } from './shopify'
 import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
 import { orderService, type OrderRepository } from './orderAssignments'
+import { documentBodyLimit, parseDocument, type DocumentRepository } from './documents'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
 export interface StoredJob extends CuttingJob { request_hash: string }
-export interface JobRepository extends OrderRepository {
+export interface JobRepository extends OrderRepository, DocumentRepository {
   boxes(owner: string): Promise<BoxStock[]>
   createBox(owner: string, input: BoxInput): Promise<BoxStock>
   countBox(owner: string, id: string, input: BoxCount): Promise<BoxStock>
@@ -111,6 +112,22 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })
+      const documentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/documents(?:\/([0-9a-f-]{36})\/file)?$/i)
+      if (documentMatch && documentMatch.slice(1).filter(Boolean).every(id => z.uuid().safeParse(id).success)) {
+        const [, itemId, id] = documentMatch
+        if (!await repository.itemExists(owner, itemId)) throw new JobError('Item not found.', 404)
+        if (!id && request.method === 'GET') return json({ documents: await repository.itemDocuments(owner, itemId, limit, offset), limit, offset })
+        if (!id && request.method === 'POST') {
+          const input = await parseDocument(await body(request, documentBodyLimit))
+          const result = await repository.uploadDocument(owner, itemId, input)
+          return json({ ...result.document, sha256: await sha256(input.bytes) }, result.created ? 201 : 200, result.created ? {} : { 'Idempotent-Replayed': 'true' })
+        }
+        if (id && request.method === 'GET') {
+          const file = await repository.itemDocumentFile(owner, itemId, id)
+          if (!file) throw new JobError('Document not found.', 404)
+          return new Response(new Uint8Array(file.bytes), { headers: { ...headers, 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="document-${id}.pdf"; filename*=UTF-8''${encodeURIComponent(file.document.filename)}` } })
+        }
+      }
       if (path === '/v1/items' && request.method === 'POST') {
         const parsed = createItemSchema.safeParse(await body(request, itemImageBodyLimit))
         if (!parsed.success) throw new JobError('Invalid item. Supply name, sku, optional description and JPEG/PNG image.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))

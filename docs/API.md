@@ -10,6 +10,18 @@ Shopify orders and shared workshop box inventory are also available. See [Shopif
 
 ## Authentication
 
+### Item PDFs
+
+Authenticated account keys and MFA sessions can attach pre-generated PDFs to the shared catalogue:
+
+- `GET /items/{itemId}/documents?limit=25&offset=0`: paginated document metadata.
+- `POST /items/{itemId}/documents`: JSON `{ "id": "<stable UUID>", "kind": "instructions", "filename": "instructions.pdf", "dataBase64": "<PDF base64>" }`. Kind is `instructions` or `packing`. Upload the original PDF bytes, maximum 20 MB and 200 pages; password-protected/unreadable PDFs are rejected.
+- `GET /items/{itemId}/documents/{documentId}/file`: authenticated PDF download.
+
+Generate and save the document UUID before uploading. Reusing it with identical bytes, filename, kind, item and account returns `200` with `Idempotent-Replayed: true`; a new upload returns `201`. Different content or attribution at the same ID returns `409`, without overwriting. A successful upload response includes its SHA-256 checksum. On timeout retry the same ID and content. List existing attachments before a batch import to avoid duplicate documents. This API does not delete documents or alter item metadata, components, programs or orders.
+
+Documents appear in the item's Documents section and the order print dialog. All authenticated users can download published catalogue PDFs; only the uploader can remove them through the site. The account limit of 60 requests/minute applies. Upload bodies allow 20 MB of PDF data plus base64/JSON overhead; other endpoint limits are unchanged.
+
 In the site, open **Queue > API Access**, create a named key, and copy it before dismissing it. Keys expire after 90 days and can be revoked immediately. There may be at most 10 active keys per account. Only hashes are stored; the full key cannot be retrieved later. Key creation/revocation requires an MFA-verified signed-in session.
 
 Send `Authorization: Bearer <account API key>` on every request. A verified Supabase user access token with MFA (`aal2`) is also accepted for the operator UI. Do not use the project's public key as authentication, and never give integrations the service-role key or Supabase personal access token. Account API keys can read the shared catalogue and their account's jobs/files, create catalogue items, upload new components, replace component programs with a revision check, replace/remove item images and create or transition jobs. They cannot delete components or manage keys.

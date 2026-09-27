@@ -8,6 +8,7 @@ import { itemImageSchema } from '../src/models/ItemImage'
 import { materialVariantsSchema } from '../src/cam/materialProfiles'
 import { parseComponent } from './components'
 import { boxStockSchema } from '../src/packing/boxStock'
+import { documentRepository } from './documentRepository'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) {
@@ -29,6 +30,7 @@ function checked<T>(result: { data: T; error: { message: string } | null }): T {
 export function supabaseRepository(db: SupabaseClient): JobRepository {
   const get = async (owner: string, id: string) => checked(await db.from('cnc_jobs').select('*').eq('owner_id', owner).eq('id', id).maybeSingle()) as StoredJob | undefined
   return {
+    ...documentRepository(db),
     async orderAdmin() {
       return checked(await db.from('cnc_order_admin').select('user_id').eq('singleton', true).maybeSingle())?.user_id ?? null
     },

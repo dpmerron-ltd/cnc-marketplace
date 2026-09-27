@@ -30,6 +30,9 @@ function fixture() {
     itemImage: vi.fn(async () => undefined),
     updateItemImage: vi.fn(async () => false),
     itemExists: vi.fn(async (_owner, id) => id === testItem.id),
+    itemDocuments: vi.fn(async () => []),
+    uploadDocument: vi.fn(async () => { throw new Error('Not configured') }),
+    itemDocumentFile: vi.fn(async () => undefined),
     createComponent: vi.fn(async () => ({ created: true })),
     componentSource: vi.fn(async () => undefined),
     updateItemDescription: vi.fn(async () => true),
@@ -59,6 +62,27 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('lists, uploads and downloads item PDFs through account authentication', async () => {
+    const f = fixture(), id = '10000000-0000-4000-8000-000000000001'
+    const pdf = await PDFDocument.create(); pdf.addPage([210, 300]); const bytes = await pdf.save()
+    const document = { id, item_id: testItem.id, owner_id: 'alice', kind: 'instructions' as const, filename: 'guide.pdf', file_bytes: bytes.length, pages: 1, file_path: `alice/${id}/document.pdf`, created_at: '' }
+    vi.mocked(f.repo.itemDocuments).mockResolvedValue([document])
+    vi.mocked(f.repo.uploadDocument).mockResolvedValue({ document, created: true })
+    vi.mocked(f.repo.itemDocumentFile).mockResolvedValue({ document, bytes })
+    const path = `/items/${testItem.id}/documents`
+    expect((await f.call(path, 'GET', undefined, 'anonymous')).status).toBe(401)
+    expect((await (await f.call(path, 'GET', undefined, 'bob')).json()).documents).toEqual([document])
+    const payload = { id, kind: 'instructions', filename: 'guide.pdf', dataBase64: Buffer.from(bytes).toString('base64') }
+    expect((await f.call(path, 'POST', payload)).status).toBe(201)
+    expect(f.repo.uploadDocument).toHaveBeenCalledWith('alice', testItem.id, expect.objectContaining({ id, pages: 1, bytes }))
+    vi.mocked(f.repo.uploadDocument).mockResolvedValue({ document, created: false })
+    const repeat = await f.call(path, 'POST', payload)
+    expect(repeat.status).toBe(200); expect(repeat.headers.get('Idempotent-Replayed')).toBe('true')
+    const file = await f.call(`${path}/${id}/file`, 'GET', undefined, 'bob')
+    expect(file.headers.get('Content-Type')).toBe('application/pdf'); expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+    vi.mocked(f.repo.itemExists).mockResolvedValue(false)
+    expect((await f.call(path, 'POST', payload)).status).toBe(404)
+  })
   it('lets both users list and cut the same catalogue, with private job records', async () => {
     const f = fixture()
     expect(await (await f.call('/items', 'GET', undefined, 'bob')).json()).toEqual(await (await f.call('/items')).json())
