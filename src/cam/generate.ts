@@ -9,6 +9,7 @@ import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, ta
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
 import { materialProfileId, rampPreset } from './materialProfiles'
+import { profileEntry, routeOperations, type RouteOperation } from './routing'
 
 const toolRadius = camPreset.diameter / 2
 const n = (value: number) => Number(value.toFixed(4)).toString()
@@ -47,6 +48,31 @@ function rotatePath(path: Point[], start: number): Point[] {
   return [metric.at(start), ...positions.map(s => metric.at(s))]
 }
 
+function prepareProfile(f: CamFeature, settings: CamSettings) {
+  const onLine = f.toolCentreline && f.kind === 'inside'
+  let path = onLine ? f.points.map(point => ({ ...point })) : offset(f.points, f.kind === 'outside' ? toolRadius : -toolRadius)
+  let centers: Point[] = []
+  if (f.kind === 'inside' && !onLine && !f.circle && settings.operations[f.id]?.cornerOvercuts !== false) {
+    const relief = cornerOvercuts(f.points, [path], toolRadius)
+    path = relief.paths[0]; centers = relief.centers
+  }
+  if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
+  const tabFree = tabFreeOpening(f), warnings: string[] = []
+  let requestedTabs = tabFree ? 0 : settings.operations[f.id]?.tabs ?? defaultTabCount(f)
+  if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
+  const tabsRequired = requiresHoldingTabs(f)
+  if (tabsRequired && !requestedTabs) throw new Error('Doors and outside profiles larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
+  const intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
+  if (requestedTabs && !intervals.length) {
+    if (tabsRequired) throw new Error('No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.')
+    warnings.push(`${f.name}: tabs automatically removed because no 10 mm tab fits; verify cutout waste cannot move into the cutter.`)
+    requestedTabs = 0
+  }
+  if (intervals.length < requestedTabs) warnings.push(`${f.name}: ${intervals.length} of ${requestedTabs} tabs fit with the required spacing.`)
+  if (!requestedTabs && !tabFree) warnings.push(`${f.name}: no holding tabs; verify independent workholding.`)
+  return { path, intervals, centers, warnings, onLine }
+}
+
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
   const rampSettings = rampPreset(settings.rampProfile)
   const slope = Math.tan(rampSettings.rampDegrees * Math.PI / 180)
@@ -80,6 +106,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     const rectangle = cutterWidthOpening(feature)
     return rectangle ? [[feature.id, cutterWidthGeometry(rectangle, camPreset.diameter, false).outline] as const] : []
   }))
+  const predecessors = new Map(active.map(feature => [feature.id, new Set<string>()]))
   const relieve = (feature: CamFeature, paths: Point[][]) => {
     if (feature.circle || settings.operations[feature.id]?.cornerOvercuts === false) return paths
     const result = cornerOvercuts(feature.points, paths, toolRadius)
@@ -98,17 +125,59 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     if (overlap > 0.05 && (Math.abs(aa - ba) < 0.05 && Math.abs(overlap - aa) < 0.05 || overlap < Math.min(aa, ba) - 0.05)) errors.push(`${a.name} and ${b.name} overlap or duplicate each other.`)
     if (a.kind === 'outside' && b.kind === 'outside' && (contains(a.points, b.points[0]) || contains(b.points, a.points[0]))) errors.push(`${a.name} and ${b.name}: nested outer profiles need an inside/outside review.`)
     if ((a.kind === 'pocket' && overlap > 0.05 && Math.abs(overlap - ba) < 0.05) || (b.kind === 'pocket' && overlap > 0.05 && Math.abs(overlap - aa) < 0.05)) errors.push(`${a.name} and ${b.name}: nested geometry inside a pocket may define an island. Island pockets are not supported; review or explicitly exclude the inner geometry.`)
+    if (a.kind === 'inside' && b.kind === 'inside') {
+      if (aa > ba + 0.05 && Math.abs(overlap - ba) < 0.05) predecessors.get(a.id)!.add(b.id)
+      if (ba > aa + 0.05 && Math.abs(overlap - aa) < 0.05) predecessors.get(b.id)!.add(a.id)
+    }
   }
+  const rank = { drill: 0, pocket: 1, inside: 2, outside: 3, unassigned: 4, ignore: 5 }
   const sorted = [...active].sort((a, b) => {
-    const rank = { drill: 0, pocket: 1, inside: 2, outside: 3, unassigned: 4, ignore: 5 }
     return rank[a.kind] - rank[b.kind] || Math.abs(area(a.points)) - Math.abs(area(b.points))
   })
-  for (const f of sorted) {
+  const profiles = new Map<string, ReturnType<typeof prepareProfile>>()
+  const pockets = new Map<string, Point[][]>()
+  const slots = new Map<string, ReturnType<typeof cutterWidthGeometry>>()
+  const preparationErrors = new Map<string, unknown>()
+  const route = sorted.map((f): RouteOperation & { feature: CamFeature } => {
+    let entry: RouteOperation['entry'] = () => ({ point: { x: 0, y: 0 } })
+    try {
+      if (f.kind === 'drill') {
+        const point = f.circle?.center ?? f.points[0]
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('Drilling requires a finite centre point.')
+        entry = () => ({ point })
+      }
+      else if (f.kind === 'pocket' && f.circle) {
+        const radius = f.circle.radius - toolRadius, center = f.circle.center
+        entry = () => ({ point: { x: center.x + Math.min(toolRadius * 0.75, radius), y: center.y }, exit: { x: center.x + radius, y: center.y } })
+      } else if (f.kind === 'pocket') {
+        const paths = pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4)
+        pockets.set(f.id, paths)
+        entry = () => ({ point: paths[0][0], exit: paths.at(-1)![0] })
+      } else if (f.kind === 'inside' || f.kind === 'outside') {
+        const opening = cutterWidthOpening(f)
+        if (opening) {
+          const geometry = cutterWidthGeometry(opening, camPreset.diameter, settings.operations[f.id]?.cornerOvercuts !== false)
+          slots.set(f.id, geometry); entry = () => ({ point: geometry.path[0] })
+        } else {
+          const profile = prepareProfile(f, settings)
+          profiles.set(f.id, profile)
+          const passDepth = Math.max(...material.passes.map((depth, i) => depth - (material.passes[i - 1] ?? 0)))
+          // Reserve space for the slower standard ramp too, keeping entry geometry stable across ramp presets.
+          entry = profileEntry(profile.path, profile.intervals, f.circle ? 0 : toolRadius, passDepth / (2 * Math.tan(camPreset.rampDegrees * Math.PI / 180)))
+        }
+      }
+    } catch (error) { preparationErrors.set(f.id, error) }
+    return { id: f.id, feature: f, rank: rank[f.kind], predecessors: predecessors.get(f.id)!, entry }
+  })
+  // Controller macros may finish at an unknown XY; the origin is only a routing heuristic in that case.
+  const origin = hasControllerStart(programs.startGcode) ? { x: 0, y: 0 } : simulateGCode(startProgramLines(programs, 20).join('\n')).moves.at(-1)?.end ?? { x: 0, y: 0 }
+  for (const { operation: { feature: f }, entry } of routeOperations(route, origin).steps) {
     try {
       if (f.hinge && settings.thickness <= 12) throw new Error('35 mm hinge pockets are only supported in 15 mm or 18 mm stock. Select 15 mm or 18 mm stock or explicitly exclude the hinge geometry.')
       if (f.kind === 'unassigned') throw new Error('Assign an operation or explicitly exclude this geometry.')
       if (f.kind !== 'drill' && !f.closed) throw new Error('An open contour cannot be machined as a closed profile.')
       if (f.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x > 10000 || p.y > 10000)) throw new Error('Machining coordinates exceed 10,000 mm.')
+      if (preparationErrors.has(f.id)) throw preparationErrors.get(f.id)
       const firstLine = lines.length + 1
       emit(`(No. ${operations.length + 1} ${f.kind} machining: ${comment(f.name)})`, `(Feature: ${f.id} / Layer: ${comment(f.layer)})`)
       if (f.kind === 'drill') {
@@ -127,7 +196,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         if (depth === undefined || !Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind pocket depth greater than 0 and less than ${settings.thickness} mm. Use an inside cut for a through-hole.`)
         const passes = depth > material.passes[0] ? [material.passes[0], depth] : [depth]
         if (!f.circle) {
-          const paths = relieve(f, pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4))
+          const paths = relieve(f, pockets.get(f.id)!)
           let previous = 0
           for (const target of passes) {
             emit(`(Pass depth ${n(target)} mm)`)
@@ -187,7 +256,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       }
       const opening = cutterWidthOpening(f)
       if (opening) {
-        const { path, centers, pointHole } = cutterWidthGeometry(opening, camPreset.diameter, settings.operations[f.id]?.cornerOvercuts !== false)
+        const { path, centers, pointHole } = slots.get(f.id)!
         emit(`(Cutter-width rectangular hole: ${n(camPreset.diameter)} mm / no tabs)`)
         if (opening.width < camPreset.diameter - 1e-6) warnings.push(`${f.name}: rectangular hole widened from ${n(opening.width)} mm to the ${camPreset.diameter} mm cutter${opening.length < camPreset.diameter - 1e-6 ? ' in both dimensions' : ''}.`)
         if (centers.length) {
@@ -224,31 +293,20 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path, tabs: [], depthMm: material.depth, firstLine, lastLine: lines.length })
         continue
       }
-      const onLine = f.toolCentreline && f.kind === 'inside'
-      let path = onLine ? f.points.map(point => ({ ...point })) : offset(f.points, f.kind === 'outside' ? toolRadius : -toolRadius)
+      const profile = profiles.get(f.id)!
+      const { onLine, centers } = profile
+      let path = profile.path, intervals = profile.intervals
       if (onLine) emit('(Shared release: tool centre follows source contour; no compensation)')
-      if (f.kind === 'inside' && !onLine) path = relieve(f, [path])[0]
-      if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
-      let metric = pathMetric(path)
-      const tabFree = tabFreeOpening(f)
-      let requestedTabs = tabFree ? 0 : settings.operations[f.id]?.tabs ?? defaultTabCount(f)
-      if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
-      const tabsRequired = requiresHoldingTabs(f)
-      if (tabsRequired && !requestedTabs) throw new Error('Doors and outside profiles larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
-      let intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
-      if (requestedTabs && !intervals.length) {
-        if (tabsRequired) throw new Error('No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.')
-        warnings.push(`${f.name}: tabs automatically removed because no 10 mm tab fits; verify cutout waste cannot move into the cutter.`)
-        requestedTabs = 0
+      if (centers.length) {
+        overcuts.push({ feature: f, centers })
+        emit(`(Automatic corner overcuts: ${centers.length})`)
+        warnings.push(`${f.name}: ${centers.length} dogbone corner overcuts extend beyond the DXF outline.`)
       }
-      if (intervals.length < requestedTabs) warnings.push(`${f.name}: ${intervals.length} of ${requestedTabs} tabs fit with the required spacing.`)
-      if (!requestedTabs && !tabFree) warnings.push(`${f.name}: no holding tabs; verify independent workholding.`)
-      // Start in the longest tab-free span. Every ramp stays in a cleared, tab-free path segment.
-      let start = 0
-      if (intervals.length) {
-        const gaps = intervals.map((tab, i) => ({ start: tab[1], length: (intervals[(i + 1) % intervals.length][0] + (i === intervals.length - 1 ? metric.length : 0)) - tab[1] }))
-        gaps.sort((a, b) => b.length - a.length)
-        start = (gaps[0].start + gaps[0].length / 2) % metric.length
+      warnings.push(...profile.warnings)
+      let metric = pathMetric(path)
+      // Rotate the path and tab distances together; winding and physical tab locations stay unchanged.
+      const start = entry.start ?? 0
+      if (start) {
         const originalLength = metric.length
         intervals = intervals.map(([a, b]) => [(a - start + originalLength) % originalLength, (b - start + originalLength) % originalLength] as [number, number]).sort((a, b) => a[0] - b[0])
         path = rotatePath(path, start); metric = pathMetric(path)
