@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Cuboid, Download, Package, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
+import { itemFamily } from '../models/itemVersions'
 import { dimensionLabel, fileSizeLabel, purposeLabel, type ParsedStl, type PrintableAsset } from '../printing/types'
 import { readStl } from '../printing/readStl'
 import { downloadPrintable, listPrintables, printableThumbnails, printablesPageSize, removePrintable } from '../storage/printablesStore'
@@ -51,6 +52,8 @@ function PrintDetail({ asset, userId, item, onClose, onRemoved }: { asset: Print
 }
 
 export function PrintablesPage({ userId, items }: { userId: string; items: MarketplaceItem[] }) {
+  // STL attachments belong to the product, not an individual CNC revision.
+  items = items.map(item => ({ ...item, id: itemFamily(item) }))
   const [assets, setAssets] = useState<PrintableAsset[]>([])
   const [count, setCount] = useState(0)
   const [images, setImages] = useState<Record<string, string>>({})

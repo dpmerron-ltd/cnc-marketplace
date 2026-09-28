@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrintablesPage } from './PrintablesPage'
+import { testItem } from '../test/jobFixtures'
 const mock = vi.hoisted(() => ({ list: vi.fn(), thumbnails: vi.fn(), download: vi.fn(), upload: vi.fn(), read: vi.fn(), remove: vi.fn() }))
 vi.mock('../storage/printablesStore', () => ({ listPrintables: mock.list, printableThumbnails: mock.thumbnails, downloadPrintable: mock.download, uploadPrintable: mock.upload, removePrintable: mock.remove, printablesPageSize: 24 }))
 vi.mock('../printing/readStl', () => ({ readStl: mock.read }))
@@ -22,6 +23,13 @@ describe('3D-print library', () => {
     expect(mock.download).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Download Corner protector' }))
     await waitFor(() => expect(mock.download).toHaveBeenCalledWith('bob', expect.objectContaining({ owner_id: 'alice' })))
+  })
+  it('keeps STL product links and filtering stable when the default item version changes', async () => {
+    mock.list.mockResolvedValue({ assets: [{ ...asset, item_id: testItem.id }], count: 1 })
+    render(<PrintablesPage userId="bob" items={[{ ...testItem, id: 'new-version', version: { familyId: testItem.id, number: 2, status: 'published', isDefault: true } }]} />)
+    expect(await screen.findByText(testItem.name, { selector: '.print-product' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: testItem.id } })
+    await waitFor(() => expect(mock.list).toHaveBeenLastCalledWith('bob', expect.objectContaining({ item: testItem.id }), expect.any(AbortSignal)))
   })
   it('opens a real model preview and notes without another uploader remove control', async () => {
     render(<PrintablesPage userId="bob" items={[]} />)
