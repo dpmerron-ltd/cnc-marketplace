@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient'
-import { saveCatalogueItem } from './supabaseProjectStore'
+import { saveCatalogueItem, updateRemoteItem } from './supabaseProjectStore'
+import { itemFamily } from '../models/itemVersions'
 import type { MarketplaceItem } from '../models/Item'
 import { inspectPdf, maxDocumentBytes, type DocumentKind, type ItemDocument } from '../documents/itemDocuments'
 
@@ -36,8 +37,7 @@ export async function uploadItemDocument(userId: string, item: MarketplaceItem, 
     const upload = await client.storage.from(bucket).upload(path, new Blob([file], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false })
     if (upload.error) throw new Error(upload.error.message)
     await clientFor(userId)
-    const result = await client.from('item_documents').insert({ id, owner_id: userId, item_id: item.id, kind, filename: file.name, file_bytes: file.size, pages })
-    if (result.error) throw new Error(result.error.message)
+    await updateRemoteItem(userId, itemFamily(item), 'add_document', { id, kind, filename: file.name, file_bytes: file.size, pages })
   } catch (error) {
     await clientFor(userId)
     const check = await client.from('item_documents').select('id').eq('id', id).maybeSingle()
@@ -59,9 +59,7 @@ export async function downloadItemDocument(userId: string, document: ItemDocumen
 
 export async function removeItemDocument(userId: string, document: ItemDocument): Promise<string | undefined> {
   if (document.owner_id !== userId) throw new Error('Only the uploader can remove this document.')
-  const client = await clientFor(userId)
-  const result = await client.from('item_documents').delete().eq('id', document.id).eq('owner_id', userId).select('id').single()
-  if (result.error || !result.data) throw new Error(result.error?.message ?? 'Document could not be removed.')
-  const cleanup = await client.storage.from(bucket).remove([document.file_path])
-  return cleanup.error ? 'Document removed, but stored file cleanup failed.' : undefined
+  await clientFor(userId)
+  await updateRemoteItem(userId, document.item_id, 'remove_document', { id: document.id })
+  return undefined
 }

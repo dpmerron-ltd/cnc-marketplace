@@ -36,7 +36,7 @@ npm run build
 Sign-in and MFA use Supabase. All signed-in accounts use the same item catalogue. Browser backups and cutting sheets remain account-specific.
 
 1. Open Supabase SQL Editor.
-2. Run `supabase/schema.sql`, `supabase/api.sql`, `supabase/orders.sql`, `supabase/printables.sql` and `supabase/item-documents.sql`, in that order.
+2. Run `supabase/schema.sql`, `supabase/api.sql`, `supabase/orders.sql`, `supabase/printables.sql`, `supabase/item-documents.sql` and `supabase/item-versions.sql`, in that order.
 3. Restart the app.
 
 For local development, copy `.env.example` to `.env.local` and set:

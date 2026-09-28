@@ -26,16 +26,17 @@ function fixture() {
     allowRequest: async () => true,
     programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
     catalog: async () => [testItem],
+    itemVersions: vi.fn(async () => []),
     createItem: vi.fn(async (_owner, input) => ({ ...input, id: input.id ?? crypto.randomUUID() })),
     itemImage: vi.fn(async () => undefined),
-    updateItemImage: vi.fn(async () => false),
+    updateItemImage: vi.fn(async () => undefined),
     itemExists: vi.fn(async (_owner, id) => id === testItem.id),
     itemDocuments: vi.fn(async () => []),
     uploadDocument: vi.fn(async () => { throw new Error('Not configured') }),
     itemDocumentFile: vi.fn(async () => undefined),
     createComponent: vi.fn(async () => ({ created: true })),
     componentSource: vi.fn(async () => undefined),
-    updateItemDescription: vi.fn(async () => true),
+    updateItemDescription: vi.fn(async () => ({ id: testItem.id })),
     replaceComponent: vi.fn(async () => ({ part: testParts[0], warnings: [] })),
     loadComponents: vi.fn(async () => ({ items: [testItem], parts: testParts })),
     list: async () => [],
@@ -62,6 +63,15 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('lists automatic versions without exposing a draft/publish workflow', async () => {
+    const f = fixture()
+    const path = `/items/${testItem.id}`
+    expect((await f.call(`${path}/versions`, 'GET', undefined, 'anonymous')).status).toBe(401)
+    expect((await f.call(`${path}/versions`)).status).toBe(200)
+    expect(f.repo.itemVersions).toHaveBeenCalledWith('alice', testItem.id, 25, 0)
+    expect((await f.call(`${path}/versions`, 'POST', {})).status).toBe(404)
+    expect((await f.call(`${path}/publish`, 'POST', {})).status).toBe(404)
+  })
   it('lists, uploads and downloads item PDFs through account authentication', async () => {
     const f = fixture(), id = '10000000-0000-4000-8000-000000000001'
     const pdf = await PDFDocument.create(); pdf.addPage([210, 300]); const bytes = await pdf.save()
@@ -109,7 +119,7 @@ describe('jobs HTTP API', () => {
     expect((await f.call(description, 'PATCH', { description: 'Rev C' })).status).toBe(400)
     expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(200)
     expect(f.repo.updateItemDescription).toHaveBeenCalledWith('alice', testItem.id, 'Rev B', 'Rev C')
-    f.repo.updateItemDescription = vi.fn(async () => false)
+    f.repo.updateItemDescription = vi.fn(async () => undefined)
     expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(409)
   })
 
@@ -204,7 +214,7 @@ describe('jobs HTTP API', () => {
     expect(response.status).toBe(201)
     expect(f.repo.createItem).toHaveBeenCalledWith('alice', { ...input, description: '' }, 'api_key:alice')
     f.repo.itemImage = vi.fn(async () => testImage)
-    f.repo.updateItemImage = vi.fn(async () => true)
+    f.repo.updateItemImage = vi.fn(async () => ({ id: testItem.id }))
     const path = `/items/${testItem.id}/image`
     const image = await f.call(path)
     expect(image.headers.get('Content-Type')).toBe('image/png')

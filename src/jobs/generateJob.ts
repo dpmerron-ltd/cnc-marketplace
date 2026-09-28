@@ -12,6 +12,7 @@ import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../gco
 import type { Sheet } from '../models/Sheet'
 import type { Part } from '../models/Part'
 import type { MarketplaceItem } from '../models/Item'
+import { defaultItem } from '../models/itemVersions'
 import type { JobManifest, JobRequest } from './types'
 import { materialProfileId, rampProfileSchema } from '../cam/materialProfiles'
 import { selectMaterialParts } from '../gcode/materialSelection'
@@ -47,7 +48,7 @@ export async function sha256(value: string | Uint8Array): Promise<string> {
 export async function generateJob(request: JobRequest, catalog: MarketplaceItem[], components: Part[], programs: ProgramSettings = defaultProgramSettings) {
   const counts = new Map<string, number>()
   for (const line of request.items) {
-    const matches = catalog.filter(item => line.itemId ? item.id === line.itemId : item.sku === line.sku)
+    const matches = catalog.filter(item => line.itemId ? item.id === line.itemId : defaultItem(item) && item.sku === line.sku)
     if (matches.length !== 1) throw new JobError(`Item ${line.itemId ?? line.sku} is missing or its SKU is ambiguous in the shared catalogue.`)
     counts.set(matches[0].id, (counts.get(matches[0].id) ?? 0) + line.quantity)
   }

@@ -17,7 +17,11 @@ export function documentRepository(db: SupabaseClient): DocumentRepository {
     return new Uint8Array(await result.data.arrayBuffer())
   }
   async function replay(owner: string, itemId: string, row: ItemDocument, input: DocumentUpload) {
-    if (row.owner_id !== owner || row.item_id !== itemId || row.kind !== input.kind || row.filename !== input.filename || row.file_bytes !== input.bytes.length || row.pages !== input.pages) throw conflict()
+    if (row.owner_id !== owner || row.kind !== input.kind || row.filename !== input.filename || row.file_bytes !== input.bytes.length || row.pages !== input.pages) throw conflict()
+    if (row.item_id !== itemId) {
+      const family = await db.from('marketplace_items').select('id,version_family_id').in('id', [row.item_id, itemId])
+      if (family.error || family.data?.length !== 2 || family.data[0].version_family_id !== family.data[1].version_family_id) throw conflict()
+    }
     if (await sha256(await bytes(row.file_path)) !== await sha256(input.bytes)) throw conflict()
     return { document: row, created: false }
   }
@@ -44,14 +48,16 @@ export function documentRepository(db: SupabaseClient): DocumentRepository {
         if (!('statusCode' in upload.error) || String(upload.error.statusCode) !== '409') throw new Error('Document upload failed.')
         if (await sha256(await bytes(path)) !== await sha256(input.bytes)) throw conflict()
       }
-      const inserted = await db.from('item_documents').insert({ id: input.id, item_id: itemId, owner_id: owner, kind: input.kind, filename: input.filename, file_bytes: input.bytes.length, pages: input.pages }).select('*').single()
+      const inserted = await db.rpc('update_item_version', { p_actor: owner, p_item: itemId, p_action: 'add_document', p_payload: { id: input.id, kind: input.kind, filename: input.filename, file_bytes: input.bytes.length, pages: input.pages } })
       if (inserted.error || !inserted.data) {
         const confirmed = await byId(input.id)
         if (confirmed) return replay(owner, itemId, confirmed, input)
         // Keep an unconfirmed file for same-ID retries; another request may be publishing it.
         throw new Error('Document publication unconfirmed. Retry with the same ID and content.')
       }
-      return { document: inserted.data, created: true }
+      const document = await byId(input.id)
+      if (!document) throw new Error('Document publication unconfirmed. Retry with the same ID and content.')
+      return { document, created: true }
     },
   }
 }

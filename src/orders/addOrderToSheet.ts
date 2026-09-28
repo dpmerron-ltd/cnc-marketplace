@@ -5,6 +5,7 @@ import type { Sheet } from '../models/Sheet'
 import type { ShopifyOrder } from './types'
 import { selectMaterialParts } from '../gcode/materialSelection'
 import { numberSheetParts } from '../labels/partLabels'
+import { defaultItem } from '../models/itemVersions'
 
 export type OrderItemMatches = Record<string, string>
 export type NestProgress = { completed: number; total: number }
@@ -13,7 +14,7 @@ export type AddOrderRequest = { order: ShopifyOrder; shop: string; matches: Orde
 export function matchOrderItems(order: ShopifyOrder, items: MarketplaceItem[], ownerId: string): OrderItemMatches {
   if (!ownerId) throw new Error('Sign in to use the shared catalogue.')
   return Object.fromEntries(order.lineItems.nodes.map(line => {
-    const matches = line.sku?.trim() ? items.filter(item => item.sku.trim().toUpperCase() === line.sku!.trim().toUpperCase()) : []
+    const matches = line.sku?.trim() ? items.filter(item => defaultItem(item) && item.sku.trim().toUpperCase() === line.sku!.trim().toUpperCase()) : []
     return [line.id, matches.length === 1 ? matches[0].id : '']
   }))
 }
@@ -31,6 +32,7 @@ export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceIt
     if (!line.currentQuantity) continue
     const item = items.find(item => item.id === matches[line.id])
     if (!item) throw new Error(`${line.title}: select an item from your catalogue.`)
+    if (item.version?.status === 'draft') throw new Error(`${item.name}: publish this version before adding it to a sheet.`)
     const components = parts.filter(part => part.itemId === item.id)
     if (!components.length) throw new Error(`${item.name} has no components.`)
     if (additions.length + components.length * line.currentQuantity > 500) throw new Error('This order exceeds 500 components. Split it into smaller cutting jobs.')

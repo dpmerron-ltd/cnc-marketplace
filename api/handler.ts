@@ -25,12 +25,13 @@ export interface JobRepository extends OrderRepository, DocumentRepository {
   allowRequest(owner: string): Promise<boolean>
   programSettings(owner: string): Promise<ProgramSettings | undefined>
   catalog(owner: string, limit: number, offset: number): Promise<unknown[]>
+  itemVersions(owner: string, id: string, limit: number, offset: number): Promise<unknown[]>
   createItem(owner: string, input: CreateItemInput, actor: string): Promise<{ id: string; name: string; sku: string; description: string }>
-  updateItemDescription(owner: string, id: string, expected: string | null, description: string): Promise<boolean>
+  updateItemDescription(owner: string, id: string, expected: string | null, description: string): Promise<{ id: string } | undefined>
   itemImage(owner: string, id: string): Promise<ItemImage | undefined>
-  updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<boolean>
+  updateItemImage(owner: string, id: string, image: ItemImage | null): Promise<{ id: string } | undefined>
   itemExists(owner: string, id: string): Promise<boolean>
-  createComponent(owner: string, part: Part): Promise<{ created: boolean }>
+  createComponent(owner: string, part: Part): Promise<{ created: boolean; id?: string; itemId?: string }>
   componentSource(owner: string, itemId: string, id: string): Promise<ComponentSource | undefined>
   replaceComponent(owner: string, itemId: string, id: string, input: ComponentReplacement): Promise<{ part: Part; warnings: string[] }>
   loadComponents(owner: string, request: JobRequest): Promise<{ items: MarketplaceItem[]; parts: Part[] }>
@@ -112,6 +113,10 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })
+      const versionMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/versions$/i)
+      if (versionMatch && z.uuid().safeParse(versionMatch[1]).success) {
+        if (request.method === 'GET') return json({ versions: await repository.itemVersions(owner, versionMatch[1], limit, offset), limit, offset })
+      }
       const documentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/documents(?:\/([0-9a-f-]{36})\/file)?$/i)
       if (documentMatch && documentMatch.slice(1).filter(Boolean).every(id => z.uuid().safeParse(id).success)) {
         const [, itemId, id] = documentMatch
@@ -140,16 +145,17 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         const input = updateDescriptionSchema.safeParse(await body(request))
         if (!input.success) throw new JobError('Supply expectedDescription and description.', 400)
         if (!await repository.itemExists(owner, id)) throw new JobError('Item not found.', 404)
-        if (!await repository.updateItemDescription(owner, id, input.data.expectedDescription, input.data.description)) throw new JobError('Item description changed; reload before replacing it.', 409)
-        return json({ id, description: input.data.description })
+        const updated = await repository.updateItemDescription(owner, id, input.data.expectedDescription, input.data.description)
+        if (!updated) throw new JobError('Item description changed; reload before replacing it.', 409)
+        return json({ id: updated.id, description: input.data.description })
       }
       const componentMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components$/i)
       if (componentMatch && z.uuid().safeParse(componentMatch[1]).success && request.method === 'POST') {
         const id = componentMatch[1]
         if (!await repository.itemExists(owner, id)) throw new JobError('Item not found.', 404)
         const { part, warnings } = parseComponent(await body(request, componentBodyLimit), owner, id)
-        const { created } = await repository.createComponent(owner, part)
-        return json({ id: part.id, itemId: id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, created ? 201 : 200, created ? {} : { 'Idempotent-Replayed': 'true' })
+        const saved = await repository.createComponent(owner, part)
+        return json({ id: saved.id ?? part.id, itemId: saved.itemId ?? id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, saved.created ? 201 : 200, saved.created ? {} : { 'Idempotent-Replayed': 'true' })
       }
       const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
       const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([0-9a-f-]{36})\/gcode$/i)
@@ -164,7 +170,7 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         const input = replaceComponentSchema.safeParse(await body(request, componentBodyLimit))
         if (!input.success) throw new JobError('Supply expectedSha256, expectedMaterialVariants, replacement gcode and materialVariants.', 400)
         const { part, warnings } = await repository.replaceComponent(owner, itemId, id, input.data)
-        return json({ id, itemId, sha256: await sha256(part.gcode), reviewRequired: true, warnings })
+        return json({ id: part.id, itemId: part.itemId, sha256: await sha256(part.gcode), reviewRequired: true, warnings })
       }
       if (imageMatch && z.uuid().safeParse(imageMatch[1]).success) {
         const id = imageMatch[1]
@@ -176,8 +182,9 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         if (request.method === 'PATCH') {
           const parsed = updateImageSchema.safeParse(await body(request, itemImageBodyLimit))
           if (!parsed.success) throw new JobError('Supply image as {contentType, dataBase64}, or null to remove it. JPEG/PNG only, up to 512 KiB.', 400)
-          if (!await repository.updateItemImage(owner, id, parsed.data.image)) throw new JobError('Item not found.', 404)
-          return json({ id, hasImage: parsed.data.image !== null })
+          const updated = await repository.updateItemImage(owner, id, parsed.data.image)
+          if (!updated) throw new JobError('Item not found.', 404)
+          return json({ id: updated.id, hasImage: parsed.data.image !== null })
         }
       }
       if (path === '/v1/jobs' && request.method === 'GET') {

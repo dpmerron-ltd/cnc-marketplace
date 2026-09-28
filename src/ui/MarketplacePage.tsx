@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
+import { catalogueItems, editableItem, itemFamily, versionLabel } from '../models/itemVersions'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
 import { ItemDocuments } from './ItemDocuments'
@@ -38,6 +39,7 @@ function dateLabel(value: string): string {
 
 export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
   const [detailId, setDetailId] = useState<string>()
+  const [followDefault, setFollowDefault] = useState(true)
   const [query, setQuery] = useState('')
   const [componentQuery, setComponentQuery] = useState('')
   const [sort, setSort] = useState('name')
@@ -45,7 +47,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
   const [added, setAdded] = useState<string>()
   const [addError, setAddError] = useState('')
   const [adding, setAdding] = useState(false)
-  const sharedItems = useMemo(() => currentUserId ? items : [], [items, currentUserId])
+  const sharedItems = useMemo(() => currentUserId ? catalogueItems(items) : [], [items, currentUserId])
   const partsByItem = useMemo(() => {
     const map = new Map<string, ComponentSummary[]>()
     for (const part of componentIndex ?? parts) {
@@ -56,10 +58,16 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
     }
     return map
   }, [componentIndex, parts, currentUserId])
+  const detail = currentUserId ? items.find(item => item.id === detailId) : undefined
+  const selectedItem = detail && followDefault ? sharedItems.find(item => itemFamily(item) === itemFamily(detail)) : detail
   const stock = useBoxStock(currentUserId)
-  const packingJobs = stock.boxes ? JSON.stringify(sharedItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
+  const packingItems = selectedItem && !sharedItems.some(item => item.id === selectedItem.id) ? [...sharedItems, selectedItem] : sharedItems
+  const packingJobs = stock.boxes ? JSON.stringify(packingItems.map(item => ({ id: item.id, pieces: packingPieces(partsByItem.get(item.id) ?? [], item.packing), settings: item.packing, boxes: stock.boxes }))) : undefined
   const estimates = usePackingEstimates(packingJobs)
-  const selectedItem = sharedItems.find(item => item.id === detailId)
+  const revisions = selectedItem ? items.filter(item => itemFamily(item) === itemFamily(selectedItem)).sort((a, b) => (b.version?.number ?? 1) - (a.version?.number ?? 1)) : []
+  const editable = Boolean(selectedItem && editableItem(selectedItem))
+  const selectedItemId = selectedItem?.id
+  useEffect(() => { if (selectedItemId) void onLoadComponents?.(selectedItemId).catch(() => {}) }, [selectedItemId, onLoadComponents])
   const selectedParts = selectedItem ? parts.filter(part => part.itemId === selectedItem.id) : []
   const selectedCount = selectedItem ? partsByItem.get(selectedItem.id)?.length ?? 0 : 0
   const componentLoad = selectedItem ? componentLoads?.[selectedItem.id] : undefined
@@ -79,6 +87,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
   function openItem(id: string) {
     onSelectItem(id)
     setDetailId(id)
+    setFollowDefault(!items.find(item => item.id === id)?.version || Boolean(items.find(item => item.id === id)?.version?.isDefault))
     setComponentQuery('')
     setAdded(undefined)
     setAddError('')
@@ -98,21 +107,25 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
             finally { setAdding(false) }
           }}><Plus size={16} /> {adding ? 'Adding components...' : 'Add all to sheet'}</button>
           <button type="button" onClick={onOpenSheet}>Open sheet <ArrowRight size={16} /></button>
-          <label className="file-button items-upload"><FileUp size={16} /> Upload components<input aria-label="Upload components" disabled={!componentsReady} type="file" multiple accept=".nc,.tap,.gcode,.cnc,.dxf" onChange={event => {
+          {editable && <label className="file-button items-upload"><FileUp size={16} /> Upload components<input aria-label="Upload components" disabled={!componentsReady} type="file" multiple accept=".nc,.tap,.gcode,.cnc,.dxf" onChange={event => {
             if (event.target.files?.length) onImportComponents(selectedItem.id, event.target.files)
             event.currentTarget.value = ''
-          }} /></label>
+          }} /></label>}
         </div>
       </header>
+      <div className="items-version-bar">
+        <label>Version<select aria-label="Item version" value={selectedItem.id} onChange={event => openItem(event.target.value)}>{revisions.map(item => <option key={item.id} value={item.id}>{versionLabel(item)}</option>)}</select></label>
+        {selectedItem.version?.publishedAt && <span>Published {dateLabel(selectedItem.version.publishedAt)}</span>}
+      </div>
       <section className="items-metadata" aria-label="Item details">
-        <label>Item name<input value={selectedItem.name} onChange={event => onUpdateItem(selectedItem.id, { name: event.target.value })} /></label>
-        <label>SKU<input value={selectedItem.sku} onChange={event => onUpdateItem(selectedItem.id, { sku: event.target.value.toUpperCase() })} /></label>
-        <label>Description<textarea aria-label="Description" rows={2} value={selectedItem.description} onChange={event => onUpdateItem(selectedItem.id, { description: event.target.value })} /></label>
+        <label>Item name<input readOnly={!editable} value={selectedItem.name} onChange={event => onUpdateItem(selectedItem.id, { name: event.target.value })} /></label>
+        <label>SKU<input readOnly={!editable} value={selectedItem.sku} onChange={event => onUpdateItem(selectedItem.id, { sku: event.target.value.toUpperCase() })} /></label>
+        <label>Description<textarea readOnly={!editable} aria-label="Description" rows={2} value={selectedItem.description} onChange={event => onUpdateItem(selectedItem.id, { description: event.target.value })} /></label>
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
-      <ItemImageEditor key={`${currentUserId}:${selectedItem.id}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} />
-      {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${selectedItem.id}`} userId={currentUserId} item={selectedItem} />}
-      {componentsReady && selectedParts.length > 0 && <PackingPanel pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
+      {editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
+      {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${itemFamily(selectedItem)}`} userId={currentUserId} item={selectedItem} readOnly={!editable} />}
+      {componentsReady && selectedParts.length > 0 && <PackingPanel readOnly={!editable} pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}
       {addError && <p role="alert">{addError}</p>}
@@ -120,9 +133,9 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         {visibleParts.map(part => <article key={part.id} className="items-component-card">
           <ItemPreview parts={[part]} label={`${part.name} toolpath`} />
           <div className="items-card-body"><h4>{part.name}</h4><span className="items-sku">{part.sku}</span><p>{part.width.toFixed(1)} x {part.height.toFixed(1)} mm</p><p className="items-filename">{part.originalFilename}{part.dxf ? ' + DXF' : ''}</p></div>
-          <div className="items-card-footer"><button type="button" onClick={() => { onAddToSheet(part.id); setAdded(part.name) }}><Plus size={16} /> Add to sheet</button><button type="button" className="items-icon danger" aria-label={`Remove ${part.name}`} title={`Remove ${part.name}`} onClick={() => {
-            if (window.confirm(`Remove "${part.name}" from this item? This cannot be undone.`)) onDeleteComponent(part.id)
-          }}><Trash2 size={16} /></button></div>
+          <div className="items-card-footer"><button type="button" disabled={selectedItem.version?.status === 'draft'} onClick={() => { onAddToSheet(part.id); setAdded(part.name) }}><Plus size={16} /> Add to sheet</button>{editable && <button type="button" className="items-icon danger" aria-label={`Remove ${part.name}`} title={`Remove ${part.name}`} onClick={() => {
+            if (window.confirm(`Remove "${part.name}" from this item?${selectedItem.version ? ' Previous versions will keep this component.' : ' This cannot be undone.'}`)) onDeleteComponent(part.id)
+          }}><Trash2 size={16} /></button>}</div>
         </article>)}
       </div> : <div className="items-empty"><Package size={32} /><h3>{selectedParts.length ? 'No matching components' : 'No components yet'}</h3>{componentQuery && <button type="button" onClick={() => setComponentQuery('')}>Clear search</button>}</div>}
     </> : <>
@@ -140,7 +153,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
           return <button type="button" className="items-grid-card" key={item.id} aria-label={`Open ${item.name || 'Untitled item'}`} onClick={() => openItem(item.id)}>
             {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
             <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{estimates[item.id] && <span className="items-box-estimate">{estimates[item.id]?.result?.boxes[0] ? `${estimates[item.id].result!.boxes.length} box${estimates[item.id].result!.boxes.length === 1 ? '' : 'es'}: ${estimates[item.id].result!.boxes.map(box => boxSize(box.internal)).join(' + ')}` : estimates[item.id]?.error || 'Box estimate: review dimensions'}</span>}</div>
-            <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>Updated {dateLabel(item.updatedAt)}</small></div>
+            <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>{item.version ? versionLabel(item) : `Updated ${dateLabel(item.updatedAt)}`}</small></div>
           </button>
         })}
       </div> : <div className="items-empty"><Package size={36} /><h3>{sharedItems.length ? 'No matching items' : 'No items yet'}</h3>{sharedItems.length > 0 && <button type="button" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div>}

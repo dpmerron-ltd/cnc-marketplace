@@ -24,6 +24,8 @@ import type { GCodeSimulation } from './gcode/simulator'
 import { instanceBounds } from './gcode/transform'
 import { validateSheet } from './gcode/validator'
 import type { MarketplaceItem } from './models/Item'
+import { catalogueItems, defaultItem, editableItem, itemFamily } from './models/itemVersions'
+import { mergeVersionEdit, subscribeCatalogueChanges } from './storage/catalogueChanges'
 import { itemImageSchema, type ItemImage } from './models/ItemImage'
 import type { ComponentSummary, Part } from './models/Part'
 import { summarizePart } from './models/Part'
@@ -272,8 +274,10 @@ function newInstance(partId: string, x: number, y: number, sheetIndex: number): 
 
 function newItem(name = 'Untitled Item', uploadedBy?: string, ownerId?: string): MarketplaceItem {
   const now = new Date().toISOString()
+  const id = crypto.randomUUID()
   return {
-    id: crypto.randomUUID(),
+    id,
+    version: { familyId: id, number: 1, status: 'published', isDefault: true },
     uploadedBy,
     ownerId,
     sku: makeItemSku(name),
@@ -478,6 +482,29 @@ function App() {
   const programSheet = programs ? { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } : sheet
   const componentSaves = useComponentSaveQueue(userId, persistGeneratedComponent)
 
+  useEffect(() => subscribeCatalogueChanges(change => {
+    if (accountRef.current !== change.userId) return
+    const current = orderSheetInputs.current
+    const local = current.items.find(item => item.id === change.current.id) ?? current.items.find(item => item.id === change.previous?.id)
+    const nextItem = mergeVersionEdit(change, local)
+    const nextItems = current.items.filter(item => item.id !== nextItem.id && item.id !== change.previous?.id).map(item => itemFamily(item) === itemFamily(nextItem) && item.version ? { ...item, version: { ...item.version, isDefault: false } } : item)
+    if (change.previous) nextItems.push(change.previous)
+    nextItems.push(nextItem)
+    const copies = change.components.flatMap(summary => {
+      const source = change.parts.find(part => part.id === summary.id) ?? current.parts.find(part => part.id === summary.id || part.id === summary.sourceId)
+      return source ? [{ ...source, ...summary, itemId: nextItem.id }] : []
+    })
+    const nextParts = [...new Map([...current.parts, ...copies].map(part => [part.id, part])).values()]
+    const nextIndex = [...new Map([...current.componentIndex, ...change.components].map(part => [part.id, part])).values()]
+    const ready = change.components.every(summary => nextParts.some(part => part.id === summary.id))
+    if (ready) loadedItems.current.add(nextItem.id)
+    for (const part of change.components) persistedComponentIds.current.add(part.id)
+    orderSheetInputs.current = { ...current, items: nextItems, parts: nextParts, componentIndex: nextIndex }
+    setItems(nextItems); setParts(nextParts); setComponentIndex(nextIndex)
+    setComponentLoads(states => ({ ...states, [nextItem.id]: { state: ready ? 'loaded' : 'idle' } }))
+    setSelectedItemId(id => id === change.previous?.id ? nextItem.id : id)
+  }), [])
+
   function resetComponentLoading(nextItems: MarketplaceItem[] = [], loadedIds: string[] = []) {
     componentEpoch.current++
     loadedItems.current = new Set(loadedIds)
@@ -581,7 +608,7 @@ function App() {
   const warnings = issues.filter((issue) => issue.level === 'warning')
 
   function canEditItem(item?: MarketplaceItem): boolean {
-    return Boolean(userId && item)
+    return Boolean(userId && item && editableItem(item))
   }
 
   async function requireAuthSession(): Promise<boolean> {
@@ -868,37 +895,40 @@ function App() {
       return
     }
 
-    const files = Array.from(fileList)
-    const dxfFiles = files.filter((file) => extension(file.name) === 'dxf')
-    const gcodeFiles = files.filter((file) => ['nc', 'tap', 'gcode', 'cnc'].includes(extension(file.name)))
-    const dxfByStem = new Map<string, string>()
+    try {
+      const files = Array.from(fileList)
+      const dxfFiles = files.filter((file) => extension(file.name) === 'dxf')
+      const gcodeFiles = files.filter((file) => ['nc', 'tap', 'gcode', 'cnc'].includes(extension(file.name)))
+      const dxfByStem = new Map<string, string>()
 
-    for (const file of dxfFiles) {
-      dxfByStem.set(stem(file.name), await readFile(file))
-    }
+      for (const file of dxfFiles) {
+        dxfByStem.set(stem(file.name), await readFile(file))
+      }
 
-    const imported: Part[] = []
-    for (const file of gcodeFiles) {
-      const gcode = await readFile(file)
-      imported.push({ ...createPartFromGCode(file.name, gcode, dxfByStem.get(stem(file.name)), itemId), ownerId: userId })
-    }
+      const imported: Part[] = []
+      for (const file of gcodeFiles) {
+        const gcode = await readFile(file)
+        imported.push({ ...createPartFromGCode(file.name, gcode, dxfByStem.get(stem(file.name)), itemId), ownerId: userId })
+      }
 
-    if (accountRef.current !== userId) return
-    setParts((current) => {
-      const item = targetItem
-      const itemSku = item?.sku ?? 'ITEM'
-      const existingCount = new Set([...catalogueComponents, ...current].filter(part => part.itemId === itemId).map(part => part.id)).size
-      const nextImported = imported.map((part, index) => normalizePart(part, itemSku, existingCount + index))
-      return [...current, ...nextImported]
-    })
-    setItems((current) => current.map((item) => (item.id === itemId ? { ...item, updatedAt: new Date().toISOString() } : item)))
-    setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
+      if (accountRef.current !== userId) return
+      setParts((current) => {
+        const item = targetItem
+        const itemSku = item?.sku ?? 'ITEM'
+        const existingCount = new Set([...catalogueComponents, ...current].filter(part => part.itemId === itemId).map(part => part.id)).size
+        const nextImported = imported.map((part, index) => normalizePart(part, itemSku, existingCount + index))
+        return [...current, ...nextImported]
+      })
+      setItems((current) => current.map((item) => (item.id === itemId ? { ...item, updatedAt: new Date().toISOString() } : item)))
+      setStatus(imported.length > 0 ? `Imported ${imported.length} component file(s).` : 'No supported G-code files found.')
+    } catch (error) { if (accountRef.current === userId) setStatus(errorMessage(error)) }
   }
 
   function saveGeneratedComponent(value: CamSave) {
-    const target = items.find(item => item.id === value.itemId)
+    const selected = items.find(item => item.id === value.itemId)
+    const target = items.find(item => itemFamily(item) === (selected ? itemFamily(selected) : value.itemId) && defaultItem(item))
     if (!canEditItem(target) || accountRef.current !== userId) throw new Error('The selected item is not available in this session.')
-    const reserved = new Set([...catalogueComponents.filter(p => p.itemId === value.itemId).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId).map(job => job.id)]).size
+    const reserved = new Set([...catalogueComponents.filter(p => p.itemId === target!.id).map(p => p.id), ...componentSaves.jobs.filter(job => job.part?.itemId === value.itemId && job.status !== 'saved').map(job => job.id)]).size
     const part = normalizePart({ ...createPartFromGCode(value.filename, value.gcode, value.source, value.itemId), id: value.id, ownerId: userId }, target!.sku, reserved)
     part.name = part.name.replace(/-(?:6|12|15|18)mm(?:-2pass)?$/, '')
     part.metadata.materialVariants = materialVariantsSchema.parse(value.materialVariants)
@@ -906,14 +936,13 @@ function App() {
   }
 
   async function persistGeneratedComponent(part: Part) {
-    const target = items.find(item => item.id === part.itemId)
+    const selected = items.find(item => item.id === part.itemId)
+    const target = items.find(item => itemFamily(item) === (selected ? itemFamily(selected) : part.itemId) && defaultItem(item))
     if (!canEditItem(target) || part.ownerId !== userId || accountRef.current !== userId) throw new Error('The selected item is not available in this session.')
     const result = await saveRemoteComponent(part, userId!)
     if (!result.ok) throw new Error(result.error ?? 'Component could not be saved. Try again.')
     if (accountRef.current !== userId) return
-    persistedComponentIds.current.add(part.id)
-    setParts(current => [...current.filter(p => p.id !== part.id), part])
-    setItems(current => current.map(item => item.id === part.itemId ? { ...item, updatedAt: new Date().toISOString() } : item))
+    persistedComponentIds.current.add(result.part?.id ?? part.id)
     setStatus(`Generated component added to ${target!.name}.`)
   }
 
@@ -954,10 +983,9 @@ function App() {
     if (!item || !canEditItem(item) || !userId || accountRef.current !== userId) throw new Error('This shared item is not available in this session.')
     await saveRemoteItemImage(item, image, userId)
     if (accountRef.current !== userId) return
-    setItems(current => current.map(value => value.id === itemId ? { ...value, image, updatedAt: new Date().toISOString() } : value))
   }
 
-  function deleteComponent(partId: string) {
+  async function deleteComponent(partId: string) {
     const part = parts.find((candidate) => candidate.id === partId)
     const item = part?.itemId ? items.find((candidate) => candidate.id === part.itemId) : undefined
     if (!canEditItem(item)) {
@@ -966,19 +994,22 @@ function App() {
     }
 
     const isPlaced = sheet.instances.some((instance) => instance.partId === partId)
-    if (isPlaced) {
+    if (isPlaced && !item?.version) {
       setStatus('Remove this component from the sheet before deleting it from the item.')
       return
     }
 
-    setParts((current) => current.filter((part) => part.id !== partId))
-    setComponentIndex(current => current.filter(part => part.id !== partId))
-    void deleteRemoteComponent(partId)
-    if (selectedPartId === partId) setSelectedPartId(undefined)
-    setStatus('Removed component from item.')
+    try {
+      await deleteRemoteComponent(partId, userId, item!.id)
+      if (accountRef.current !== userId) return
+      if (selectedPartId === partId) setSelectedPartId(undefined)
+      setStatus('Removed component from item.')
+    } catch (error) { if (accountRef.current === userId) setStatus(`Component was not removed: ${errorMessage(error)}`) }
   }
 
   function addPart(partId: string, x = sheet.borderSpacing, y = sheet.borderSpacing) {
+    const parent = items.find(item => item.id === parts.find(part => part.id === partId)?.itemId)
+    if (parent?.version?.status === 'draft') { setStatus('This item version is incomplete. Reload the catalogue before adding it.'); return }
     setSheet((current) => numberSheetParts({
       ...current,
       instances: [...current.instances, newInstance(partId, x, y, currentSheetIndex)],
@@ -988,6 +1019,7 @@ function App() {
   async function addAllItemComponents(itemId: string): Promise<number> {
     const item = items.find(value => value.id === itemId)
     if (!item || !userId || accountRef.current !== userId) throw new Error('This shared item is not available in this session.')
+    if (item.version?.status === 'draft') throw new Error('This item version is incomplete. Reload the catalogue before adding it.')
     if (!loadedItems.current.has(itemId)) throw new Error('Wait for all item components to load before adding them.')
     const initial = orderSheetInputs.current, epoch = componentEpoch.current
     const obstacles = new Set(initial.sheet.instances.flatMap(instance => {
@@ -1213,8 +1245,17 @@ function App() {
     }
   }
 
+  function requirePublishedItems(): boolean {
+    const placed = new Set(sheet.instances.map(instance => instance.partId))
+    const parentIds = new Set(parts.filter(part => placed.has(part.id)).map(part => part.itemId))
+    const draft = items.find(item => parentIds.has(item.id) && item.version?.status === 'draft')
+    if (draft) { setStatus(`${draft.name} has an incomplete version. Reload the catalogue before exporting.`); return false }
+    return true
+  }
+
   function prepareCombinedExport() {
     if (!requirePrograms()) return
+    if (!requirePublishedItems()) return
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
@@ -1247,6 +1288,7 @@ function App() {
 
   function prepareSheetExports() {
     if (!requirePrograms()) return
+    if (!requirePublishedItems()) return
     if (errors.length > 0) {
       setStatus('Export blocked by validation errors.')
       return
@@ -1449,7 +1491,7 @@ function App() {
       </header>
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={items} /></Suspense> : page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={items} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items, parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1473,7 +1515,7 @@ function App() {
       ) : !sheetReady ? <main className="items-page"><p role={sheetLoadError ? 'alert' : 'status'}>{sheetLoadError ?? 'Loading sheet components...'}</p>{sheetLoadError && <button type="button" onClick={() => setComponentRetry(value => value + 1)}>Retry sheet components</button>}</main> : (
         <div className="workspace">
           <PartLibrary
-            items={items}
+            items={items.filter(item => defaultItem(item) || item.id === selectedItemId)}
             parts={visibleParts}
             title={selectedItem ? selectedItem.name : 'Components'}
             emptyText={componentLoads[selectedItemId ?? '']?.error ?? (componentLoads[selectedItemId ?? '']?.state === 'loading' ? 'Loading components...' : 'Select an item above or upload components to add them to the sheet.')}

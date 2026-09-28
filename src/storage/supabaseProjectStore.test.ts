@@ -9,10 +9,14 @@ const mock = vi.hoisted(() => ({ userId: 'alice', conflict: false, error: null a
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
-    rpc: async (name: string, input: { p_id: string; p_expected: Record<string, string>; p_next: unknown }) => {
-      expect(name).toBe('update_shared_item_metadata')
-      mock.queries.push({ table: 'marketplace_items', write: input.p_next, filters: [['id', input.p_id], ...Object.entries(input.p_expected)] })
-      return { data: !mock.conflict, error: mock.error }
+    rpc: async (name: string, input: { p_actor: string; p_item: string; p_action: string; p_payload: { components?: Record<string, unknown>[]; expected?: Record<string, string>; next?: Record<string, unknown>; image?: unknown } }) => {
+      expect(name).toBe('update_item_version')
+      const payload = input.p_payload
+      mock.queries.push({ table: input.p_action === 'add_components' ? 'cnc_components' : 'marketplace_items', write: payload.components ?? payload.next ?? payload, filters: [['id', input.p_item], ...Object.entries(input.p_action === 'metadata' ? payload.expected ?? {} : {})] })
+      if (mock.error || mock.conflict) return { data: null, error: mock.error ?? { message: 'ITEM_VERSION_CONFLICT' } }
+      const previous = { id: input.p_item, owner_id: 'alice', name: 'Test', sku: 'TEST', description: '', packing: {}, created_at: '', updated_at: '', ...(mock.rows.find(row => (row as { id: string }).id === input.p_item) as object ?? {}), version_family_id: input.p_item, version_number: 1, version_status: 'published', version_default: false }
+      const current = { ...previous, ...payload.next, ...(input.p_action === 'image' ? { image: payload.image } : {}), id: `${input.p_item}-v2`, version_number: 2, version_default: true }
+      return { data: { changed: true, previous, current, components: (payload.components ?? []).map(row => ({ ...row, component_family_id: row.id, item_id: current.id })) }, error: null }
     },
     auth: { getUser: async () => ({ data: { user: { id: mock.userId } } }) },
     from: (table: string) => {
@@ -30,6 +34,7 @@ vi.mock('./supabaseClient', () => ({
         then: (resolve: (value: unknown) => unknown) => {
           const rows = table === 'sheet_projects' ? null : table === 'marketplace_items' ? mock.rows : table === 'cnc_components' ? mock.components.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value)) : []
           const data = query.write ? mock.conflict ? [] : (Array.isArray(query.write) ? query.write : [query.write]) : query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
+          if (query.write && Array.isArray(query.write) && table === 'marketplace_items' && !mock.conflict && !mock.error) mock.rows = [...mock.rows, ...query.write]
           const error = table === 'cnc_components' && query.range?.[0] === mock.failOffset && mock.failOffset !== undefined ? { message: 'Response too large' } : mock.error
           return Promise.resolve({ data, error }).then(resolve)
         },
@@ -111,13 +116,13 @@ describe('cloud account boundaries', () => {
     const item = { id: 'item', ownerId: 'alice', name: 'Cabinet', sku: 'CAB', description: '', createdAt: '', updatedAt: '', image: testImage }
     await saveRemoteItemImage(item, testImage, 'alice')
     expect(mock.queries[0].options).toEqual({ onConflict: 'id', ignoreDuplicates: true })
-    expect(mock.queries[1].write).toEqual({ image: testImage, updated_at: expect.any(String) })
+    expect(mock.queries[1].write).toEqual({ image: testImage, expected: testImage })
     expect(mock.queries[1].filters).toEqual([['id', 'item']])
     mock.queries = []
     await saveRemoteProject([item], [], sheet, item.id, 'alice')
     expect(mock.queries.some(query => query.table === 'marketplace_items')).toBe(false)
     await saveRemoteItemImage(item, null, 'alice')
-    expect(mock.queries.at(-1)?.write).toEqual({ image: null, updated_at: expect.any(String) })
+    expect(mock.queries.at(-1)?.write).toEqual({ image: null, expected: testImage })
   })
 
   it('inserts new imports without overwriting existing programs during sheet autosave', async () => {
@@ -127,14 +132,8 @@ describe('cloud account boundaries', () => {
     const item = { id: legacy.itemId!, ownerId: 'alice', name: 'Test', sku: 'TEST', description: '', createdAt: '', updatedAt: '' }
     expect((await saveRemoteProject([item], [legacy, generated], sheet, item.id, 'alice')).ok).toBe(true)
     const writes = mock.queries.filter(query => query.table === 'cnc_components').map(query => query.write)
-    expect(writes).toEqual([
-      [expect.not.objectContaining({ material_variants: expect.anything() })],
-      [expect.objectContaining({ material_variants: materialVariants })],
-    ])
-    expect(mock.queries.filter(query => query.table === 'cnc_components').map(query => query.options)).toEqual([
-      { onConflict: 'id', ignoreDuplicates: true },
-      { onConflict: 'id', ignoreDuplicates: true },
-    ])
+    expect(writes).toEqual([[expect.not.objectContaining({ material_variants: expect.anything() }), expect.objectContaining({ material_variants: materialVariants })]])
+    expect(mock.queries.filter(query => query.table === 'cnc_components')).toHaveLength(1)
   })
 
   it('loads validated shared images and rejects stale sessions and failed saves', async () => {
@@ -154,7 +153,7 @@ describe('cloud account boundaries', () => {
 
   it('saves a confirmed component independently, with a stable ID for retries', async () => {
     const part = { ...testParts[0], ownerId: 'alice' }
-    expect(await saveRemoteComponent(part, 'alice')).toEqual({ ok: true })
+    expect(await saveRemoteComponent(part, 'alice')).toMatchObject({ ok: true, part: { id: part.id, itemId: `${part.itemId}-v2` } })
     expect(mock.queries).toHaveLength(1)
     expect(mock.queries[0].table).toBe('cnc_components')
     expect(mock.queries[0].write).toEqual([expect.objectContaining({ id: part.id, owner_id: 'alice', item_id: part.itemId, gcode: part.gcode })])
@@ -209,7 +208,7 @@ describe('cloud account boundaries', () => {
     expect(write.write).not.toHaveProperty('owner_id')
     expect(write.filters).toContainEqual(['name', 'Shared'])
     mock.conflict = true
-    expect((await saveRemoteProject([{ ...item, name: 'Conflicting edit' }], [], sheet, item.id, 'alice')).error).toContain('shared item changed')
+    expect((await saveRemoteProject([{ ...item, name: 'Conflicting edit' }], [], sheet, item.id, 'alice')).error).toContain('changed in another session')
   })
   it('updates images on another creator’s shared item', async () => {
     mock.rows = [{ id: 'shared', owner_id: 'bob', name: 'Shared', sku: 'SHARED' }]
@@ -217,7 +216,7 @@ describe('cloud account boundaries', () => {
     mock.queries = []
     await saveRemoteItemImage(loaded!.items[0], testImage, 'alice')
     expect(mock.queries).toHaveLength(1)
-    expect(mock.queries[0].write).toEqual({ image: testImage, updated_at: expect.any(String) })
+    expect(mock.queries[0].write).toEqual({ image: testImage, expected: null })
     expect(mock.queries[0].filters).toEqual([['id', 'shared']])
   })
   it('persists packing measurements on the owner item without changing components', async () => {

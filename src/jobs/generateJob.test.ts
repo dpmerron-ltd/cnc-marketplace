@@ -38,6 +38,15 @@ describe('automated job generation', () => {
     expect(job.manifest.items[0].quantity).toBe(3)
     expect(job.manifest.sources).toHaveLength(2)
   })
+  it('pins an explicit historical version while SKU lines use the current default', async () => {
+    const previous = { ...testItem, version: { familyId: testItem.id, number: 1, status: 'published' as const, isDefault: false } }
+    const latest = { ...testItem, id: '00000000-0000-4000-8000-000000000099', version: { ...previous.version, number: 2, isDefault: true } }
+    const request = parseJobRequest({ ...testRequest, items: [{ itemId: previous.id, quantity: 1 }, { sku: latest.sku, quantity: 1 }] })
+    const components = [...testParts, ...testParts.map(part => ({ ...part, id: `${part.id}-latest`, itemId: latest.id }))]
+    const job = await generateJob(request, [previous, latest], components)
+    expect(job.manifest.items.map(item => ({ id: item.id, quantity: item.quantity }))).toEqual([{ id: previous.id, quantity: 1 }, { id: latest.id, quantity: 1 }])
+    expect(job.manifest.cuts).toHaveLength(4)
+  })
   it('rejects missing, ambiguous and empty items', async () => {
     const request = parseJobRequest(testRequest)
     await expect(generateJob(request, [], testParts)).rejects.toThrow('missing')

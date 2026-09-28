@@ -12,4 +12,11 @@ export interface MarketplaceItem {
   updatedAt: string
   packing?: PackingSettings
   image?: ItemImage | null
+  version?: {
+    familyId: string
+    number: number
+    status: 'draft' | 'published'
+    isDefault: boolean
+    publishedAt?: string
+  }
 }

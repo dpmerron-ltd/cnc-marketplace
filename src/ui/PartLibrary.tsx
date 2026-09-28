@@ -1,6 +1,7 @@
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import { LayoutGrid } from 'lucide-react'
+import { versionLabel } from '../models/itemVersions'
 
 interface PartLibraryProps {
   items?: MarketplaceItem[]
@@ -36,7 +37,7 @@ export function PartLibrary({
       {items.length > 0 && onSelectItem && (
         <div className="library-items">
           <div className="panel-header"><h2>Item</h2>{onManageItems && <button type="button" aria-label="Manage items" title="Manage items" onClick={onManageItems}><LayoutGrid size={17} /></button>}</div>
-          <select aria-label="Sheet item" value={selectedItemId ?? ''} onChange={event => onSelectItem(event.target.value)} style={{ width: '100%' }}><option value="" disabled>Select an item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name} ({item.sku})</option>)}</select>
+          <select aria-label="Sheet item" value={selectedItemId ?? ''} onChange={event => onSelectItem(event.target.value)} style={{ width: '100%' }}><option value="" disabled>Select an item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name} ({item.sku}){item.version ? ` - ${versionLabel(item)}` : ''}</option>)}</select>
         </div>
       )}
       <div className="panel-header">

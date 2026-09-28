@@ -5,7 +5,7 @@ import { documentKinds, type DocumentKind, type ItemDocument } from '../document
 import { downloadItemDocument, listItemDocuments, removeItemDocument, uploadItemDocument } from '../storage/itemDocumentsStore'
 import './ItemDocuments.css'
 
-export function ItemDocuments({ userId, item }: { userId: string; item: MarketplaceItem }) {
+export function ItemDocuments({ userId, item, readOnly = false }: { userId: string; item: MarketplaceItem; readOnly?: boolean }) {
   const [documents, setDocuments] = useState<ItemDocument[]>()
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -29,14 +29,14 @@ export function ItemDocuments({ userId, item }: { userId: string; item: Marketpl
   return <section className="item-documents" aria-label="Item documents" aria-busy={busy}>
     <h3>Documents</h3>
     {(Object.entries(documentKinds) as [DocumentKind, string][]).map(([kind, label]) => <div className="item-document-group" key={kind}>
-      <div className="document-heading"><h4>{label}</h4><label className="file-button"><FileUp size={16} /> Upload PDF<input type="file" accept="application/pdf,.pdf" aria-label={`Upload ${label.toLowerCase()}`} disabled={busy} onChange={e => {
+      <div className="document-heading"><h4>{label}</h4>{!readOnly && <label className="file-button"><FileUp size={16} /> Upload PDF<input type="file" accept="application/pdf,.pdf" aria-label={`Upload ${label.toLowerCase()}`} disabled={busy} onChange={e => {
         const file = e.currentTarget.files?.[0]; e.currentTarget.value = ''
         if (file) void run(async () => { await uploadItemDocument(userId, item, kind, file); if (active.current) { setRevision(v => v + 1); setMessage(`${label} uploaded.`) } })
-      }} /></label></div>
+      }} /></label>}</div>
       {documents?.filter(d => d.kind === kind).map(d => <div className="item-document-row" key={d.id}>
         <span><strong>{d.filename}</strong><small>{d.pages} {d.pages === 1 ? 'page' : 'pages'}</small></span>
         <button type="button" className="icon-button" title={`Open ${d.filename}`} aria-label={`Open ${d.filename}`} disabled={busy} onClick={() => void run(async () => { const blob = await downloadItemDocument(userId, d); if (active.current) setOpened({ url: URL.createObjectURL(blob), name: d.filename }) })}><Printer size={18} /></button>
-        {d.owner_id === userId && <button type="button" className="icon-button" title={`Remove ${d.filename}`} aria-label={`Remove ${d.filename}`} disabled={busy} onClick={() => {
+        {!readOnly && d.owner_id === userId && <button type="button" className="icon-button" title={`Remove ${d.filename}`} aria-label={`Remove ${d.filename}`} disabled={busy} onClick={() => {
           if (window.confirm(`Remove ${d.filename} from this item?`)) void run(async () => { const warning = await removeItemDocument(userId, d); if (active.current) { setRevision(v => v + 1); setMessage(warning ?? 'Document removed.') } })
         }}><Trash2 size={18} /></button>}
       </div>)}

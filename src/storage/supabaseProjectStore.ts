@@ -6,6 +6,8 @@ import type { SheetHistoryEntry } from '../models/Project'
 import type { GCodePreset, Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
+import { editableItem, itemFamily } from '../models/itemVersions'
+import { emitCatalogueChange, versionItem, type VersionUpdateResult } from './catalogueChanges'
 
 interface ComponentRow {
   id: string
@@ -58,6 +60,7 @@ export interface RemoteProjectState {
 export interface RemoteSaveResult {
   ok: boolean
   error?: string
+  part?: Part
 }
 
 export function canUseSupabase(): boolean {
@@ -82,8 +85,11 @@ export async function saveRemoteComponent(part: Part, expectedUserId: string): P
     return { ok: false, error: 'New components must be attributed to your current session and linked to a shared item.' }
   }
   // New components are attributed to their creator; the parent item is shared.
-  const result = await supabase.from('cnc_components').upsert([componentRow(part)])
-  return result.error ? { ok: false, error: result.error.message } : { ok: true }
+  try {
+    const result = await updateRemoteItem(userId, part.itemId, 'add_components', { components: [componentRow(part)] }, undefined, [part])
+    const saved = result.components.find(component => component.component_family_id === part.id)
+    return { ok: true, part: { ...part, id: saved?.id ?? part.id, itemId: result.current.id } }
+  } catch (error) { return { ok: false, error: (error as Error).message } }
 }
 
 export async function saveRemoteItemImage(item: MarketplaceItem, image: ItemImage | null, expectedUserId: string): Promise<void> {
@@ -95,8 +101,7 @@ export async function saveRemoteItemImage(item: MarketplaceItem, image: ItemImag
   const saved = await saveCatalogueItem(item, userId)
   if (!saved.ok) throw new Error(saved.error)
   if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
-  const result = await supabase.from('marketplace_items').update({ image, updated_at: new Date().toISOString() }).eq('id', item.id).select('id').single()
-  if (result.error) throw new Error(result.error.message)
+  await updateRemoteItem(userId, itemFamily(item), 'image', { image, expected: item.image ?? null })
 }
 
 async function getUserId(): Promise<string | undefined> {
@@ -167,6 +172,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     updatedAt: row.updated_at,
     packing: row.packing ?? undefined,
     image: itemImageSchema.safeParse(row.image).success ? row.image : undefined,
+    ...(row.version_family_id ? { version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } } : {}),
   }))
 
   if (await getUserId() !== expectedUserId) return undefined
@@ -241,6 +247,36 @@ function editableMetadata(item: MarketplaceItem) {
   return { sku: item.sku, name: item.name, description: item.description, packing: item.packing ?? {} }
 }
 let catalogueWriteQueue: Promise<RemoteSaveResult> = Promise.resolve({ ok: true })
+const componentSuccessors = new Map<string, string>()
+function currentPacking(packing: MarketplaceItem['packing']) {
+  if (!packing?.components) return packing ?? {}
+  return { ...packing, components: Object.fromEntries(Object.entries(packing.components).map(([id, value]) => {
+    let current = id
+    const visited = new Set<string>()
+    while (componentSuccessors.has(current) && !visited.has(current)) { visited.add(current); current = componentSuccessors.get(current)! }
+    return [current, value]
+  })) }
+}
+export function updateRemoteItem(userId: string, itemId: string, action: string, payload: unknown, submittedItem?: MarketplaceItem, parts: Part[] = []): Promise<VersionUpdateResult> {
+  const next = catalogueWriteQueue.then(() => applyItemUpdate(userId, itemId, action, payload, submittedItem, parts))
+  catalogueWriteQueue = next.then(() => ({ ok: true }), error => ({ ok: false, error: String(error) }))
+  return next
+}
+async function applyItemUpdate(userId: string, itemId: string, action: string, payload: unknown, submittedItem?: MarketplaceItem, parts: Part[] = []): Promise<VersionUpdateResult> {
+  if (!supabase || await getUserId() !== userId) throw new Error('Your account changed. Reload before saving.')
+  const response = await supabase.rpc('update_item_version', { p_actor: userId, p_item: itemId, p_action: action, p_payload: payload })
+  if (response.error) throw new Error(response.error.message.includes('CONFLICT') ? 'This item changed in another session. Reload before saving your changes.' : response.error.message)
+  const result = response.data as VersionUpdateResult
+  if (!result?.current?.id || !Array.isArray(result.components)) throw new Error('The saved version could not be confirmed. Reload the catalogue.')
+  if (await getUserId() !== userId) throw new Error('Your account changed. Reload to see the saved version.')
+  const current = versionItem(result.current), previous = result.previous ? versionItem(result.previous) : undefined
+  const snapshots = catalogueSnapshots.get(userId) ?? new Map<string, MarketplaceItem>()
+  if (previous) snapshots.set(previous.id, structuredClone(previous))
+  snapshots.set(current.id, structuredClone(current)); catalogueSnapshots.set(userId, snapshots)
+  for (const part of result.components) if (part.component_source_id) componentSuccessors.set(part.component_source_id, part.id)
+  emitCatalogueChange({ userId, current, previous, submittedItem, parts, components: result.components.map(part => ({ id: part.id, ownerId: part.owner_id, itemId: part.item_id, sku: part.sku, name: part.name, originalFilename: part.original_filename, width: part.width, height: part.height, sourceId: part.component_source_id ?? undefined, materialThicknessMm: materialProfiles.find(profile => profile.id === part.material_profile)?.thickness })) })
+  return result
+}
 export function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
   const next = catalogueWriteQueue.then(() => persistCatalogueItem(item, userId))
   catalogueWriteQueue = next.catch(error => ({ ok: false, error: String(error) }))
@@ -264,11 +300,11 @@ async function persistCatalogueItem(item: MarketplaceItem, userId: string): Prom
     if (!result.data?.length) return { ok: false, error: 'Item already exists. Reload the shared catalogue before editing it.' }
   } else {
     if (JSON.stringify(editableMetadata(previous)) === JSON.stringify(editableMetadata(item))) return { ok: true }
-    const result = await supabase!.rpc('update_shared_item_metadata', {
-      p_id: item.id, p_expected: editableMetadata(previous), p_next: editableMetadata(item),
-    })
-    if (result.error) return { ok: false, error: result.error.message }
-    if (!result.data) return { ok: false, error: 'This shared item changed. Reload the catalogue before saving your edits.' }
+    if (item.version && !item.version.isDefault) return { ok: false, error: 'Previous versions are read-only.' }
+    const latest = [...snapshots.values()].find(value => itemFamily(value) === itemFamily(item) && editableItem(value)) ?? previous
+    try { await applyItemUpdate(userId, itemFamily(item), 'metadata', { expected: editableMetadata(latest), next: { ...editableMetadata(item), packing: currentPacking(item.packing) } }, item) }
+    catch (error) { return { ok: false, error: (error as Error).message } }
+    return { ok: true }
   }
   snapshots.set(item.id, structuredClone(item))
   return { ok: true }
@@ -302,16 +338,10 @@ async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], she
 
   // Sheet autosaves may carry stale programs from before an API correction.
   // Insert new imports only; existing programs are changed through revision-checked API writes.
-  for (const group of [saveableParts.filter(part => !part.metadata.materialVariants), saveableParts.filter(part => part.metadata.materialVariants)]) {
-    if (!group.length) continue
-    const componentsResult = await supabase.from('cnc_components').upsert(
-      group.map(componentRow),
-      { onConflict: 'id', ignoreDuplicates: true },
-    )
-    if (componentsResult.error) {
-      console.warn('Supabase component save failed.', componentsResult.error)
-      return { ok: false, error: componentsResult.error.message }
-    }
+  for (const itemId of new Set(saveableParts.map(part => part.itemId!))) {
+    const group = saveableParts.filter(part => part.itemId === itemId)
+    try { await updateRemoteItem(userId, itemId, 'add_components', { components: group.map(componentRow) }, undefined, group) }
+    catch (error) { return { ok: false, error: (error as Error).message } }
   }
 
   const projectResult = await supabase.from('sheet_projects').upsert({
@@ -330,12 +360,12 @@ async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], she
   return { ok: true }
 }
 
-export async function deleteRemoteComponent(partId: string): Promise<void> {
-  if (!supabase) return
+export async function deleteRemoteComponent(partId: string, expectedUserId?: string, itemId?: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured.')
   const userId = await getUserId()
-  if (!userId) return
-  const result = await supabase.from('cnc_components').delete().eq('id', partId)
-  if (result.error) console.warn('Supabase component delete failed.', result.error)
+  if (!userId || (expectedUserId && expectedUserId !== userId)) throw new Error('Your account changed. Reload before deleting components.')
+  if (!itemId) throw new Error('The item is required to create a revised version.')
+  await updateRemoteItem(userId, itemId, 'remove_component', { id: partId })
 }
 
 export async function saveRemoteSheetHistory(entry: SheetHistoryEntry, expectedUserId: string): Promise<RemoteSaveResult> {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, CircleAlert, Download, FileUp, Save, SkipForward, TriangleAlert } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
+import { itemFamily } from '../models/itemVersions'
 import type { CamResult, CamSettings, OperationKind, OperationOverride } from '../cam/types'
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from '../cam/types'
 import { materialPreset } from '../cam/generate'
@@ -36,7 +37,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string>()
   const [reviewed, setReviewed] = useState(false)
-  const [itemId, setItemId] = useState(items[0]?.id ?? '')
+  const [itemId, setItemId] = useState(items[0] ? itemFamily(items[0]) : '')
   const [saved, setSaved] = useState(false)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const ramp = rampPreset(settings.rampProfile)
@@ -122,7 +123,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const saveStatus = saveJobs.find(job => job.id === componentId)?.status
   const savedLabel = saveStatus === 'saved' ? 'Added to item' : saveStatus === 'failed' ? 'Save failed' : saveStatus ? 'Queued for saving' : 'Confirmed'
   function confirm(action: 'download' | 'save') {
-    if (!ready || confirming.current || action === 'save' && (saved || !items.some(item => item.id === itemId))) return
+    if (!ready || confirming.current || action === 'save' && (saved || !items.some(item => itemFamily(item) === itemId))) return
     confirming.current = true
     setSaving(true); setActionError('')
     const id = loadId.current
@@ -192,7 +193,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
     <footer className="cam-export">
       <label className="cam-review"><input type="checkbox" checked={reviewed} disabled={!result?.gcode || busy || saving || problems.length > 0} onChange={e => setReviewed(e.target.checked)} />Units, operations, hole sizes, tabs, stock, cutter, origin, clamps and DDCS spindle delay reviewed</label>
       {actionError && <p className="cam-action-error" role="alert"><CircleAlert size={16} aria-hidden="true" />{actionError}</p>}
-      <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => i.id === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? savedLabel : batch ? 'Confirm & add component' : 'Add component'}</button></div>
+      <div className="cam-export-actions"><button type="button" className={`${batch ? '' : 'primary '}icon-text-button`} disabled={!ready} onClick={() => void confirm('download')}><Download size={17} />Download G-code</button><label>Item<select aria-label="Save generated component to item" disabled={saving} value={itemId} onChange={e => { setItemId(e.target.value); setSaved(false); setComponentId(crypto.randomUUID()) }}><option value="">Select item</option>{items.map(item => <option key={itemFamily(item)} value={itemFamily(item)}>{item.name}</option>)}</select></label><button type="button" className={`${batch ? 'primary ' : ''}icon-text-button`} disabled={!ready || !items.some(i => itemFamily(i) === itemId) || saved} onClick={() => void confirm('save')}><Save size={17} />{saving ? 'Confirming...' : saved ? savedLabel : batch ? 'Confirm & add component' : 'Add component'}</button></div>
     </footer>
   </main>
 }

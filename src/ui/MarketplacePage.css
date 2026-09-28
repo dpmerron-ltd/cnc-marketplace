@@ -70,3 +70,9 @@
   .items-component-bar .items-search { width: 100%; box-sizing: border-box; }
   .items-actions { flex-shrink: 1; }
 }
+
+.items-version-bar { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
+.items-version-bar label { display: grid; gap: 6px; font-size: 12px; max-width: 100%; }
+.items-version-bar select { min-width: 180px; max-width: 100%; }
+.items-version-bar > span { font-size: 12px; color: #61707b; padding-bottom: 10px; }
+.items-version-image { display: block; width: 240px; max-width: 100%; height: 160px; object-fit: contain; margin: 20px 0; }
