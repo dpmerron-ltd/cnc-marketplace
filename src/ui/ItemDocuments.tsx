@@ -6,18 +6,19 @@ import { downloadItemDocument, listItemDocuments, removeItemDocument, uploadItem
 import './ItemDocuments.css'
 
 export function ItemDocuments({ userId, item, readOnly = false }: { userId: string; item: MarketplaceItem; readOnly?: boolean }) {
-  const [documents, setDocuments] = useState<ItemDocument[]>()
+  const [loaded, setLoaded] = useState<{ itemId: string; documents: ItemDocument[] }>()
+  const documents = loaded?.itemId === item.id ? loaded.documents : undefined
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [opened, setOpened] = useState<{ url: string; name: string }>()
+  const [opened, setOpened] = useState<{ url: string; name: string; itemId: string }>()
   const active = useRef(false), pending = useRef(false)
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   useEffect(() => { return () => { if (opened) URL.revokeObjectURL(opened.url) } }, [opened])
   useEffect(() => {
     const controller = new AbortController()
-    void listItemDocuments(userId, item.id, controller.signal).then(rows => { if (!controller.signal.aborted) setDocuments(rows) }).catch(e => { if (!controller.signal.aborted) setError(e.message) })
+    void listItemDocuments(userId, item.id, controller.signal).then(rows => { if (!controller.signal.aborted) setLoaded({ itemId: item.id, documents: rows }) }).catch(e => { if (!controller.signal.aborted) setError(e.message) })
     return () => controller.abort()
   }, [userId, item.id, revision])
   async function run(action: () => Promise<void>) {
@@ -35,7 +36,7 @@ export function ItemDocuments({ userId, item, readOnly = false }: { userId: stri
       }} /></label>}</div>
       {documents?.filter(d => d.kind === kind).map(d => <div className="item-document-row" key={d.id}>
         <span><strong>{d.filename}</strong><small>{d.pages} {d.pages === 1 ? 'page' : 'pages'}</small></span>
-        <button type="button" className="icon-button" title={`Open ${d.filename}`} aria-label={`Open ${d.filename}`} disabled={busy} onClick={() => void run(async () => { const blob = await downloadItemDocument(userId, d); if (active.current) setOpened({ url: URL.createObjectURL(blob), name: d.filename }) })}><Printer size={18} /></button>
+        <button type="button" className="icon-button" title={`Open ${d.filename}`} aria-label={`Open ${d.filename}`} disabled={busy} onClick={() => void run(async () => { const blob = await downloadItemDocument(userId, d); if (active.current) setOpened({ url: URL.createObjectURL(blob), name: d.filename, itemId: item.id }) })}><Printer size={18} /></button>
         {!readOnly && d.owner_id === userId && <button type="button" className="icon-button" title={`Remove ${d.filename}`} aria-label={`Remove ${d.filename}`} disabled={busy} onClick={() => {
           if (window.confirm(`Remove ${d.filename} from this item?`)) void run(async () => { const warning = await removeItemDocument(userId, d); if (active.current) { setRevision(v => v + 1); setMessage(warning ?? 'Document removed.') } })
         }}><Trash2 size={18} /></button>}
@@ -46,6 +47,6 @@ export function ItemDocuments({ userId, item, readOnly = false }: { userId: stri
     {busy && <p role="status">Preparing document...</p>}
     {error && <div role="alert"><p>{error}</p><button type="button" disabled={busy} onClick={() => { setError(''); setRevision(v => v + 1) }}>Refresh documents</button></div>}
     {message && <p role="status">{message}</p>}
-    {opened && <div className="document-links"><a href={opened.url} target="_blank" rel="noopener noreferrer"><Printer size={16} /> Open / print PDF</a><a href={opened.url} download={opened.name}><Download size={16} /> Download PDF</a></div>}
+    {opened?.itemId === item.id && <div className="document-links"><a href={opened.url} target="_blank" rel="noopener noreferrer"><Printer size={16} /> Open / print PDF</a><a href={opened.url} download={opened.name}><Download size={16} /> Download PDF</a></div>}
   </section>
 }
