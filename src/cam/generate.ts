@@ -51,7 +51,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const rampSettings = rampPreset(settings.rampProfile)
   const slope = Math.tan(rampSettings.rampDegrees * Math.PI / 180)
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
-  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp profile requires 12 mm stock, one pass and standard drills.')
+  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, or 18 mm stock with 9 mm drills.')
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)

@@ -11,13 +11,16 @@ import { createPartFromGCode } from '../gcode/importPart'
 import { testItem } from '../test/jobFixtures'
 
 const rectangle = (kind: CamFeature['kind'], width = 180, height = 100): CamFeature => ({ id: 'f0', name: 'Test', layer: kind, kind, closed: true, points: [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }] })
-const settings: CamSettings = { thickness: 12, units: 'mm', operations: {}, rampProfile: '20mm-s-5deg' }
 const drawingFor = (feature: CamFeature): CamDrawing => ({ features: [feature], units: 'mm', warnings: [], errors: [] })
 const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
 
-describe('12 mm one-pass 20 mm/s, 5 degree ramp profile', () => {
+describe.each([
+  { thickness: 12 as const, drillDepthMm: undefined, drill: 4.5, depth: 12.2, id: '12-ramp20-5deg' as const, baseId: '12' as const, suffix: '12mm-ramp20-5deg', invalid: [{ thicknessMm: 18 }, { thicknessMm: 6 }, { profilePasses: 2 }, { drillDepthMm: 2 }, { rampProfile: 'unknown' }] },
+  { thickness: 18 as const, drillDepthMm: 9 as const, drill: 9, depth: 18.4, id: '18-9mm-ramp20-5deg' as const, baseId: '18-9mm' as const, suffix: '18mm-9mm-holes-ramp20-5deg', invalid: [{ drillDepthMm: undefined }, { thicknessMm: 6 }, { profilePasses: 2 }, { drillDepthMm: 2 }, { rampProfile: 'unknown' }] },
+])('$id ramp profile', profile => {
+  const settings: CamSettings = { thickness: profile.thickness, drillDepthMm: profile.drillDepthMm, units: 'mm', operations: {}, rampProfile: '20mm-s-5deg' }
   it.each([
-    rectangle('outside'), rectangle('inside'), rectangle('inside', 60, 6),
+    rectangle('outside'), rectangle('inside'), rectangle('inside', 40, 6),
     { ...rectangle('pocket'), depthMm: 5 },
     { ...rectangle('pocket'), depthMm: 5, circle: { center: { x: 90, y: 50 }, radius: 20 } },
   ])('uses the configured feed and angle for $kind entries and tab re-entries', feature => {
@@ -46,43 +49,58 @@ describe('12 mm one-pass 20 mm/s, 5 degree ramp profile', () => {
     const original = generateCam(drawing, { ...settings, rampProfile: undefined })
     expect(result.errors).toEqual([])
     expect(result.gcode.replace('Ramp 5 degrees F1200', 'Ramp 3 degrees F600')).toBe(original.gcode)
-    expect(result.gcode).toContain('G01 Z-4.5 F600\nG00 Z20')
+    expect(result.gcode).toContain(`G01 Z-${profile.drill} F600\nG00 Z20`)
   })
 
   it('supports API conversion and sheet jobs without leaking ramp settings to other variants', async () => {
-    const result = await generateDxfNc({ dxf, thicknessMm: 12, rampProfile: settings.rampProfile })
-    const original = await generateDxfNc({ dxf, thicknessMm: 12 })
+    const result = await generateDxfNc({ dxf, thicknessMm: profile.thickness, drillDepthMm: profile.drillDepthMm, rampProfile: settings.rampProfile })
+    const original = await generateDxfNc({ dxf, thicknessMm: profile.thickness, drillDepthMm: profile.drillDepthMm })
     expect(result.settings).toEqual({ ...original.settings, rampDegrees: 5, rampFeedMmPerMinute: 1200 })
-    expect(result.filename).toBe('component-12mm-ramp20-5deg.nc')
-    expect(result.materialVariants.primaryProfile).toBe('12-ramp20-5deg')
+    expect(result.settings.passDepthsMm).toEqual(profile.thickness === 18 ? [9.2, 18.4] : [12.2])
+    expect(result.filename).toBe(`component-${profile.suffix}.nc`)
+    expect(result.materialVariants.primaryProfile).toBe(profile.id)
     expect(result.materialVariants.profiles).toEqual(original.materialVariants.profiles)
-    expect(result.materialVariants.profiles['12-ramp20-5deg']?.gcode).toBe(result.gcode)
+    expect(result.materialVariants.profiles[profile.id]?.gcode).toBe(result.gcode)
     expect(materialVariantsSchema.safeParse(result.materialVariants).success).toBe(true)
     const part = createPartFromGCode('panel.nc', original.gcode, dxf, testItem.id)
     part.metadata.materialVariants = result.materialVariants
-    const request = parseJobRequest({ jobName: 'Ramp test', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: 12, rampProfile: settings.rampProfile, screwMarks: false } })
+    const request = parseJobRequest({ jobName: 'Ramp test', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: profile.thickness, drillDepthMm: profile.drillDepthMm, rampProfile: settings.rampProfile, screwMarks: false } })
     const job = await generateJob(request, [testItem], [part])
-    expect(job.sheet.materialProfile).toBe('12-ramp20-5deg')
-    expect(job.parts[0].originalFilename).toBe('panel-12mm-ramp20-5deg.nc')
+    expect(job.sheet.materialProfile).toBe(profile.id)
+    expect(job.parts[0].originalFilename).toBe(`panel-${profile.suffix}.nc`)
     expect(job.exported[0].gcode).toContain('F1200')
-    expect(simulateGCode(job.exported[0].gcode).deepestCutMm).toBe(12.2)
+    expect(simulateGCode(job.exported[0].gcode).deepestCutMm).toBe(profile.depth)
     const older = structuredClone(result.materialVariants)
-    delete older.profiles['12-ramp20-5deg']
-    older.primaryProfile = '12'
+    delete older.profiles[profile.id]
+    older.primaryProfile = profile.baseId
     expect(materialVariantsSchema.safeParse(older).success).toBe(true)
+    expect(materialVariantsSchema.safeParse({ ...older, primaryProfile: profile.id }).success).toBe(false)
     part.metadata.materialVariants = older
     await expect(generateJob(request, [testItem], [part])).rejects.toThrow('unavailable')
   })
 
-  it.each([{ thicknessMm: 18 }, { thicknessMm: 6 }, { profilePasses: 2 }, { drillDepthMm: 2 }, { rampProfile: 'unknown' }])('rejects incompatible API profile options %j', async patch => {
-    await expect(generateDxfNc({ dxf, thicknessMm: 12, rampProfile: settings.rampProfile, ...patch })).rejects.toMatchObject({ status: 400 })
-    expect(() => parseJobRequest({ jobName: 'Test', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: 12, rampProfile: settings.rampProfile, ...patch } })).toThrow()
+  it.each(profile.invalid)('rejects incompatible API profile options %j', async patch => {
+    await expect(generateDxfNc({ dxf, thicknessMm: profile.thickness, drillDepthMm: profile.drillDepthMm, rampProfile: settings.rampProfile, ...patch })).rejects.toMatchObject({ status: 400 })
+    expect(() => parseJobRequest({ jobName: 'Test', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', thicknessMm: profile.thickness, drillDepthMm: profile.drillDepthMm, rampProfile: settings.rampProfile, ...patch } })).toThrow()
   })
 
   it('generates the new profile when not primary and respects requested variant limits', () => {
-    const result = generateMaterialVariants(readDxf(dxf), { ...settings, rampProfile: undefined }, undefined, ['12', '12-ramp20-5deg'])
-    expect(result.primaryProfile).toBe('12')
-    expect(result.profiles['12-ramp20-5deg']?.gcode).toContain('Ramp 5 degrees F1200')
+    const result = generateMaterialVariants(readDxf(dxf), { ...settings, rampProfile: undefined }, undefined, [profile.baseId, profile.id])
+    expect(result.primaryProfile).toBe(profile.baseId)
+    expect(result.profiles[profile.id]?.gcode).toContain('Ramp 5 degrees F1200')
     expect(result.profiles['18'].gcode).toBe('')
   })
+})
+
+it('keeps 18 mm hinge pockets at 12 mm and 9 mm drills in the new ramp profile', () => {
+  const settings: CamSettings = { thickness: 18, drillDepthMm: 9, rampProfile: '20mm-s-5deg', units: 'mm', operations: {} }
+  const hinge = { ...rectangle('pocket'), hinge: true, depthMm: 12, circle: { center: { x: 50, y: 50 }, radius: 17.5 } }
+  const result = generateCam(drawingFor(hinge), settings)
+  expect(result.errors).toEqual([])
+  expect(result.operations[0].depthMm).toBe(12)
+  expect(result.simulation.deepestCutMm).toBe(12)
+  const drill = generateCam(drawingFor({ ...rectangle('drill'), circle: { center: { x: 50, y: 50 }, radius: 3.175 } }), settings)
+  expect(drill.errors).toEqual([])
+  for (const depth of [2, 4, 6, 8, 9]) expect(drill.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${depth === 9 ? 20 : 0.5}`)
+  expect(drill.gcode).not.toContain('Z-9.2')
 })
