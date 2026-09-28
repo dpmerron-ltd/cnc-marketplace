@@ -1,6 +1,7 @@
 import type { Point } from '../models/geometry'
 import type { GCodeSimulation } from '../gcode/simulator'
 import type { ProgramSettings } from '../gcode/programSettings'
+import type { RampProfile } from './materialProfiles'
 import { minimumOpeningWidth, rectangleGeometry, relievedRectangleGeometry } from './rectangle'
 
 export type OperationKind = 'outside' | 'inside' | 'drill' | 'pocket' | 'ignore' | 'unassigned'
@@ -23,6 +24,7 @@ export interface CamSettings {
   thickness: 6 | 12 | 15 | 18
   profilePasses?: 1 | 2
   drillDepthMm?: 2 | 9
+  rampProfile?: RampProfile
   units: 'auto' | 'mm' | 'inches'
   operations: Record<string, OperationOverride>
   programs?: ProgramSettings

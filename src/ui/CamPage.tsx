@@ -10,7 +10,7 @@ import { operationNames } from './camAppearance'
 import { CamOperationSwatch } from './CamOperationSwatch'
 import './CamPage.css'
 import { spindleRpm, type ProgramSettings } from '../gcode/programSettings'
-import { materialProfileId, materialProfiles, type MaterialVariants } from '../cam/materialProfiles'
+import { materialProfileId, materialProfiles, rampPreset, type MaterialVariants } from '../cam/materialProfiles'
 import type { ComponentSaveJob } from './useComponentSaveQueue'
 
 const kinds = Object.keys(operationNames) as OperationKind[]
@@ -39,6 +39,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const [itemId, setItemId] = useState(items[0]?.id ?? '')
   const [saved, setSaved] = useState(false)
   const [view, setView] = useState<'preview' | 'code'>('preview')
+  const ramp = rampPreset(settings.rampProfile)
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
   useEffect(() => {
     if (!source) return
@@ -114,7 +115,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const layers = [...new Set(features.map(f => f.layer))]
   const problems = [error, ...(result?.errors ?? [])].filter(Boolean)
   const ready = Boolean(result?.gcode) && !busy && !saving && !problems.length && reviewed
-  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
+  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.rampProfile ? '-ramp20-5deg' : settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
   const batch = queue.length > 1
   const currentFile = queue[fileIndex]
   const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')
@@ -144,12 +145,12 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
       <details><summary>{complete ? 'Processed files' : 'Queued files'}</summary><ol>{queue.map((entry, index) => <li key={index} aria-current={index === fileIndex && entry.status === 'pending' ? 'step' : undefined}><span>{index + 1}. {entry.file.name}</span><span>{entry.status === 'confirmed' ? <><Check size={14} />Confirmed</> : entry.status === 'skipped' ? 'Skipped' : index === fileIndex ? 'In review' : 'Waiting'}</span></li>)}</ol></details>
     </section>}
     <div className="cam-settings">
-      <label>Material thickness<select value={materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm)} onChange={e => {
+      <label>Material thickness<select value={materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)} onChange={e => {
         const profile = materialProfiles.find(profile => profile.id === e.target.value)!
-        update({ thickness: profile.thickness, profilePasses: profile.thickness === 12 && profile.profilePasses === 2 ? 2 : undefined, drillDepthMm: profile.drillDepthMm })
+        update({ thickness: profile.thickness, profilePasses: profile.thickness === 12 && profile.profilePasses === 2 ? 2 : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile })
       }}>{[...materialProfiles].reverse().map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label>
       <label>DXF units<select value={settings.units} onChange={e => update({ units: e.target.value as CamSettings['units'] })}><option value="auto">From DXF{result ? ` (${result.drawing.units})` : ''}</option><option value="mm">Millimetres</option><option value="inches">Inches</option></select></label>
-      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{programs.spindleStartGcode.trim() ? `${spindleRpm(programs).toLocaleString()} rpm` : 'Manual control'}</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {material.passes[0]} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>3 deg / 600 mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
+      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{programs.spindleStartGcode.trim() ? `${spindleRpm(programs).toLocaleString()} rpm` : 'Manual control'}</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {material.passes[0]} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>{ramp.rampDegrees} deg / {ramp.rampFeed} mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
     </div>
     <div className="cam-workspace">
       <aside className="cam-operations" aria-label="Machining operations">

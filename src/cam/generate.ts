@@ -8,10 +8,9 @@ import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, 
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
-import { materialProfileId } from './materialProfiles'
+import { materialProfileId, rampPreset } from './materialProfiles'
 
 const toolRadius = camPreset.diameter / 2
-const slope = Math.tan(camPreset.rampDegrees * Math.PI / 180)
 const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
@@ -49,7 +48,10 @@ function rotatePath(path: Point[], start: number): Point[] {
 }
 
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
+  const rampSettings = rampPreset(settings.rampProfile)
+  const slope = Math.tan(rampSettings.rampDegrees * Math.PI / 180)
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
+  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp profile requires 12 mm stock, one pass and standard drills.')
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
@@ -139,7 +141,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
               let current = previous
               for (let turn = 0; turn < turns; turn++) {
                 const next = Math.min(target, current + metric.length * slope)
-                for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, camPreset.rampFeed)
+                for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, rampSettings.rampFeed)
                 current = next
               }
               for (const entry of metric.between(0, metric.length)) linear(entry.point, target, camPreset.cutFeed)
@@ -167,7 +169,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
             const start = { x: center.x + Math.cos(angle) * entryRadius, y: center.y + Math.sin(angle) * entryRadius }
             angle -= Math.PI * 2 / 3
             const end = { x: center.x + Math.cos(angle) * entryRadius, y: center.y + Math.sin(angle) * entryRadius }
-            emit(`G02 ${xy(end)} Z-${n(nextDepth)} I${n(center.x - start.x)} J${n(center.y - start.y)} F600`)
+            emit(`G02 ${xy(end)} Z-${n(nextDepth)} I${n(center.x - start.x)} J${n(center.y - start.y)} F${rampSettings.rampFeed}`)
             currentDepth = nextDepth
           }
           for (let r = entryRadius; ; r = Math.min(radius, r + camPreset.diameter * 0.4)) {
@@ -210,7 +212,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
             let current = previous
             for (let turn = 0; turn < turns; turn++) {
               const next = Math.min(depth, current + metric.length * slope)
-              for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, camPreset.rampFeed)
+              for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, rampSettings.rampFeed)
               current = next
             }
           }
@@ -263,8 +265,8 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
           if (++cycles > 1000) throw new Error('Ramp requires too many reversals. Reduce tabs or simplify geometry.')
           const length = Math.min(available, (to - depth) / (2 * slope))
           const next = Math.min(to, depth + 2 * length * slope), halfway = (depth + next) / 2
-          follow(position, position + length, depth, halfway, camPreset.rampFeed)
-          follow(position + length, position, halfway, next, camPreset.rampFeed)
+          follow(position, position + length, depth, halfway, rampSettings.rampFeed)
+          follow(position + length, position, halfway, next, rampSettings.rampFeed)
           depth = next
         }
       }
@@ -317,7 +319,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, '(Ramp 3 degrees F600 / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)', `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
+  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
   const candidate = [...header, ...lines, 'G00 Z20', 'M05', ...programLines(programs.endGcode), ''].join('\n')
   const simulation = simulateGCode(candidate)

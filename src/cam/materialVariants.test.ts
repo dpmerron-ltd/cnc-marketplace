@@ -28,7 +28,7 @@ const sheet: Sheet = { name: 'Thickness test', width: 500, height: 400, spacing:
 
 describe('material variants', () => {
   it.each(materialProfiles)('generates $label with the same operations, tabs and account programs', profile => {
-    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
+    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
     const variant = bundle.profiles[profile.id]!
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)
@@ -60,7 +60,7 @@ describe('material variants', () => {
   it('retains valid hinge variants and blocks thin-stock variants rather than dropping the hinge', () => {
     const hinge = readDxf(dxf([rectangle(0, 0, 300, 200), rectangle(80, 60, 120, 80, 'DOOR'), circle(110, 100, 17.5, 'HINGE')]))
     const variants = generateMaterialVariants(hinge, { ...settings, operations: {} })
-    for (const id of ['6', '12', '12-2mm', '12-2pass'] as const) {
+    for (const id of ['6', '12', '12-2mm', '12-2pass', '12-ramp20-5deg'] as const) {
       expect(variants.profiles[id]!.gcode).toBe('')
       expect(variants.profiles[id]!.errors.join(' ')).toContain('hinge pockets')
     }

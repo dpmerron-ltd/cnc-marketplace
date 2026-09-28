@@ -1,3 +1,4 @@
+import type { RampProfile } from '../cam/materialProfiles'
 import type { PartLabel } from '../labels/partLabels'
 import type { Bounds } from '../models/geometry'
 import type { ProgramSettings } from '../gcode/programSettings'
@@ -8,7 +9,7 @@ export interface JobRequest {
   orderNumber: string
   notes: string
   items: Array<{ itemId?: string; sku?: string; quantity: number }>
-  sheet: { widthMm: number; heightMm: number; material: string; thicknessMm?: number; profilePasses?: 1 | 2; drillDepthMm?: 2 | 9; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
+  sheet: { widthMm: number; heightMm: number; material: string; thicknessMm?: number; profilePasses?: 1 | 2; drillDepthMm?: 2 | 9; rampProfile?: RampProfile; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
   labels: { widthMm: number; heightMm: number }
 }
 export interface JobCut extends PartLabel {

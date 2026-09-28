@@ -5,7 +5,7 @@ import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/t
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
 import { generateMaterialVariants } from '../src/cam/materialVariants'
-import { materialProfileId, materialProfiles, materialProfileSchema } from '../src/cam/materialProfiles'
+import { materialProfileId, materialProfiles, materialProfileSchema, rampPreset, rampProfileSchema } from '../src/cam/materialProfiles'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -20,12 +20,13 @@ const schema = z.strictObject({
   thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]),
   profilePasses: z.union([z.literal(1), z.literal(2)]).optional(),
   drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(),
+  rampProfile: rampProfileSchema.optional(),
   variantProfiles: z.array(materialProfileSchema).min(1).max(materialProfiles.length).refine(value => new Set(value).size === value.length, 'Use each profile once.').optional(),
   filename: z.string().max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*\.dxf$/i, 'Use a DXF filename without a directory.').default('component.dxf'),
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,
   operations: overrides,
-}).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm) !== undefined, { path: ['drillDepthMm'], message: 'Use 12 mm stock and 1 pass for 2 mm drills, or 18 mm stock for 9 mm drills.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
+}).refine(value => value.rampProfile === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['rampProfile'], message: 'The 20 mm/s, 5 degree ramp profile requires 12 mm stock, one pass and standard drills.' }).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['drillDepthMm'], message: 'Use 12 mm stock and 1 pass for 2 mm drills, or 18 mm stock for 9 mm drills.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
 
 export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
@@ -55,14 +56,15 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
     if (operations[feature.id].tabs !== undefined && !['inside', 'outside'].includes(effective.kind)) throw new JobError(`${feature.id}: tabs are only supported for inside/outside contours.`, 400)
     if (operations[feature.id].cornerOvercuts !== undefined && (!['inside', 'pocket'].includes(effective.kind) || effective.circle)) throw new JobError(`${feature.id}: cornerOvercuts is only supported for non-circular pockets and inside contours.`, 400)
   }
-  const result = generateCam(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs })
+  const result = generateCam(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, rampProfile: input.rampProfile, units: input.units, operations, programs })
   if (result.errors.length) throw new JobError('DXF machining validation failed.', 422, result.errors)
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 20000 || bytes > 2000000) throw new JobError('Generated NC exceeds 20,000 lines or 2 MB. Split the drawing.', 422)
+  const ramp = rampPreset(input.rampProfile)
   const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm)
-  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, units: input.units, operations, programs }, result, input.variantProfiles)
+  const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, rampProfile: input.rampProfile, units: input.units, operations, programs }, result, input.variantProfiles)
   return {
-    filename: input.filename.replace(/\.dxf$/i, input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
+    filename: input.filename.replace(/\.dxf$/i, input.rampProfile ? '-12mm-ramp20-5deg.nc' : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true, materialVariants,
     programSettings: { ...programs },
@@ -71,7 +73,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
       thicknessMm: input.thicknessMm, drawingUnits: (input.units === 'auto' ? drawing.units : input.units) === 'inches' ? 'inches' : 'mm',
       cutterDiameterMm: camPreset.diameter, spindleRpm: spindleRpm(programs), clearanceMm: camPreset.clearance,
       cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2, drillPeckRetractMm: 0.5,
-      rampDegrees: camPreset.rampDegrees, rampFeedMmPerMinute: camPreset.rampFeed, cutFeedMmPerMinute: camPreset.cutFeed,
+      rampDegrees: ramp.rampDegrees, rampFeedMmPerMinute: ramp.rampFeed, cutFeedMmPerMinute: camPreset.cutFeed,
       reachCheck: false, screwMarking: false,
     },
     drawingShiftMm: result.shift,
