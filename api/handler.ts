@@ -13,11 +13,12 @@ import { shopifyReader, type ShopifyReader } from './shopify'
 import { boxInputSchema, boxCountSchema, type BoxStock, type BoxInput, type BoxCount } from '../src/packing/boxStock'
 import { orderService, type OrderRepository } from './orderAssignments'
 import { documentBodyLimit, parseDocument, type DocumentRepository } from './documents'
+import { itemImportSchema, parseImportComponent, parseImportProfile, type ItemImportRepository } from './itemImports'
 
 export interface Artifact { name: string; contentType: string; dataBase64: string }
 export interface Identity { ownerId: string; actor: string }
 export interface StoredJob extends CuttingJob { request_hash: string }
-export interface JobRepository extends OrderRepository, DocumentRepository {
+export interface JobRepository extends OrderRepository, DocumentRepository, ItemImportRepository {
   boxes(owner: string): Promise<BoxStock[]>
   createBox(owner: string, input: BoxInput): Promise<BoxStock>
   countBox(owner: string, id: string, input: BoxCount): Promise<BoxStock>
@@ -113,6 +114,35 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       const limit = Number(url.searchParams.get('limit') ?? 25), offset = Number(url.searchParams.get('offset') ?? 0)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new JobError('Invalid pagination: limit 1-100, offset 0-100000.', 400)
       if (path === '/v1/items' && request.method === 'GET') return json({ items: await repository.catalog(owner, limit, offset), limit, offset })
+      const importMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/imports(?:\/([0-9a-f-]{36})(?:\/(components|profiles|documents|publish))?)?$/i)
+      if (importMatch && importMatch.slice(1, 3).filter(Boolean).every(id => z.uuid().safeParse(id).success)) {
+        const [, item, id, action] = importMatch
+        if (!id && request.method === 'POST') {
+          const input = itemImportSchema.safeParse(await body(request, itemImageBodyLimit))
+          if (!input.success) throw new JobError('Supply import id, expectedVersionId, complete item metadata/image, componentIds and documentIds.', 400)
+          return json(await repository.beginItemImport(owner, item, input.data))
+        }
+        if (id) {
+          const state = await repository.itemImport(owner, item, id)
+          if (!action && request.method === 'GET') return json(state)
+          if (request.method === 'POST') {
+            if (action === 'components') {
+              const input = parseImportComponent(await body(request, componentBodyLimit), owner, item)
+              return json(await repository.stageItemImport(owner, item, id, 'component', input.id, input))
+            }
+            if (action === 'profiles') {
+              const input = parseImportProfile(await body(request, componentBodyLimit), owner, item)
+              return json(await repository.stageItemImport(owner, item, id, 'profile', `${input.componentId}/${input.profileId}`, input))
+            }
+            if (action === 'documents') return json(await repository.stageImportDocument(owner, item, id, await parseDocument(await body(request, documentBodyLimit))))
+            if (action === 'publish') {
+              const input = z.strictObject({ reviewConfirmed: z.literal(true) }).safeParse(await body(request))
+              if (!input.success) throw new JobError('Confirm review of the complete import before publishing.', 400)
+              return json(await repository.publishItemImport(owner, item, id))
+            }
+          }
+        }
+      }
       const versionMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/versions$/i)
       if (versionMatch && z.uuid().safeParse(versionMatch[1]).success) {
         if (request.method === 'GET') return json({ versions: await repository.itemVersions(owner, versionMatch[1], limit, offset), limit, offset })

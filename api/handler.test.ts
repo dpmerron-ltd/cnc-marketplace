@@ -27,6 +27,11 @@ function fixture() {
     programSettings: vi.fn(async () => ({ ...defaultProgramSettings })),
     catalog: async () => [testItem],
     itemVersions: vi.fn(async () => []),
+    beginItemImport: vi.fn(async (_owner, _item, input) => ({ id: input.id, expectedVersionId: input.expectedVersionId, publishedItemId: null, componentIds: input.componentIds, documentIds: input.documentIds, staged: [] })),
+    itemImport: vi.fn(async (_owner, _item, id) => ({ id, expectedVersionId: testItem.id, publishedItemId: null, componentIds: [], documentIds: [], staged: [] })),
+    stageItemImport: vi.fn(async (_owner, _item, id) => ({ id, expectedVersionId: testItem.id, publishedItemId: null, componentIds: [], documentIds: [], staged: [] })),
+    stageImportDocument: vi.fn(async () => { throw new Error('Not configured') }),
+    publishItemImport: vi.fn(async (_owner, _item, id) => ({ id, expectedVersionId: testItem.id, publishedItemId: testItem.id, componentIds: [], documentIds: [], staged: [] })),
     createItem: vi.fn(async (_owner, input) => ({ ...input, id: input.id ?? crypto.randomUUID() })),
     itemImage: vi.fn(async () => undefined),
     updateItemImage: vi.fn(async () => undefined),
@@ -63,6 +68,34 @@ function fixture() {
 }
 
 describe('jobs HTTP API', () => {
+  it('authenticates and validates private revision staging and requires explicit publication review', async () => {
+    const f = fixture(), id = '10000000-0000-4000-8000-000000000001', path = `/items/${testItem.id}/imports`
+    const input = { id, expectedVersionId: testItem.id, item: { name: 'Revision C', sku: 'RACK', image: null }, componentIds: [id], documentIds: [] }
+    expect((await f.call(path, 'POST', input, 'anonymous')).status).toBe(401)
+    expect(f.repo.beginItemImport).not.toHaveBeenCalled()
+    expect((await f.call(path, 'POST', { ...input, owner: 'bob' })).status).toBe(400)
+    expect((await f.call(path, 'POST', input)).status).toBe(200)
+    expect(f.repo.beginItemImport).toHaveBeenCalledWith('alice', testItem.id, expect.objectContaining({ id }))
+    expect((await f.call(`${path}/${id}/publish`, 'POST', {})).status).toBe(400)
+    expect(f.repo.publishItemImport).not.toHaveBeenCalled()
+    expect((await f.call(`${path}/${id}/publish`, 'POST', { reviewConfirmed: true })).status).toBe(200)
+    expect(f.repo.publishItemImport).toHaveBeenCalledWith('alice', testItem.id, id)
+    vi.mocked(f.repo.itemImport).mockRejectedValue(new JobError('Not found', 404))
+    expect((await f.call(`${path}/${id}/components`, 'POST', {})).status).toBe(404)
+    expect(f.repo.stageItemImport).not.toHaveBeenCalled()
+    expect(f.repo.createComponent).not.toHaveBeenCalled()
+  })
+  it('stages validated primary NC and individually bounded variants without changing the catalogue', async () => {
+    const f = fixture(), id = '10000000-0000-4000-8000-000000000001', path = `/items/${testItem.id}/imports/${id}`
+    const gcode = 'G21 G90 G17\nG0 Z20\nG0 X0 Y0\nG1 Z-2 F600\nG1 X10 Y10 F3000\nG0 Z20\nM30'
+    const component = { id, sku: 'SIDE', name: 'Side', filename: 'side.nc', gcode, primaryProfile: '12-2mm' }
+    expect((await f.call(`${path}/components`, 'POST', component)).status).toBe(200)
+    expect(f.repo.stageItemImport).toHaveBeenCalledWith('alice', testItem.id, id, 'component', id, expect.objectContaining({ gcode, primaryProfile: '12-2mm', width: 10 }))
+    expect((await f.call(`${path}/profiles`, 'POST', { componentId: id, profileId: '12-2mm', gcode, warnings: [], errors: [] })).status).toBe(200)
+    expect((await f.call(`${path}/profiles`, 'POST', { componentId: id, profileId: '6', gcode: gcode.replace('Z-2', 'Z-18'), warnings: [], errors: [] })).status).toBe(422)
+    expect(f.repo.createComponent).not.toHaveBeenCalled()
+    expect(f.repo.publishItemImport).not.toHaveBeenCalled()
+  })
   it('lists automatic versions without exposing a draft/publish workflow', async () => {
     const f = fixture()
     const path = `/items/${testItem.id}`

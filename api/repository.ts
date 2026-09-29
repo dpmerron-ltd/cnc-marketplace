@@ -9,6 +9,7 @@ import { materialVariantsSchema } from '../src/cam/materialProfiles'
 import { parseComponent } from './components'
 import { boxStockSchema } from '../src/packing/boxStock'
 import { documentRepository } from './documentRepository'
+import { itemImportRepository } from './itemImportRepository'
 import type { VersionUpdateResult } from '../src/storage/catalogueChanges'
 
 function checked<T>(result: { data: T; error: { message: string } | null }): T {
@@ -42,6 +43,7 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
   }
   return {
     ...documentRepository(db),
+    ...itemImportRepository(db),
     async orderAdmin() {
       return checked(await db.from('cnc_order_admin').select('user_id').eq('singleton', true).maybeSingle())?.user_id ?? null
     },

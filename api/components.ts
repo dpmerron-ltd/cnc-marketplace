@@ -28,7 +28,7 @@ export const replaceComponentSchema = z.strictObject({
   expectedDxf: z.string().nullable().optional(),
 }).refine(value => value.dxf === undefined || Object.hasOwn(value, 'expectedDxf'), { message: 'Replacing source DXF requires expectedDxf.' })
 export type ComponentReplacement = z.infer<typeof replaceComponentSchema>
-const schema = z.strictObject({
+export const componentInputSchema = z.strictObject({
   id: z.uuid(),
   name: z.string().trim().min(1).max(200),
   sku: z.string().trim().min(1).max(100),
@@ -39,7 +39,7 @@ const schema = z.strictObject({
 })
 
 export function parseComponent(value: unknown, ownerId: string, itemId: string, storedVariants?: MaterialVariants) {
-  const parsed = schema.safeParse(value)
+  const parsed = componentInputSchema.safeParse(value)
   if (!parsed.success) throw new JobError('Invalid component. Supply a stable UUID id, name, sku, filename and gcode, with optional source dxf.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
   const input = parsed.data
   if (new TextEncoder().encode(input.gcode).length > 2000000 || new TextEncoder().encode(input.dxf ?? '').length > 2000000 || input.gcode.split('\n').length > 20000) throw new JobError('Component limit: 2 MB NC, 20,000 NC lines and 2 MB optional DXF.', 413)

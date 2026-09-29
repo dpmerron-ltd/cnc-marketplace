@@ -33,4 +33,5 @@ jobs:
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/printables.sql
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/item-documents.sql
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/item-versions.sql
+          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --file supabase/item-imports.sql
           psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "notify pgrst, 'reload schema';"

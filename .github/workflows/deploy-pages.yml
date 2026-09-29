@@ -32,7 +32,7 @@ jobs:
         run: |
           if [ "$EVENT_NAME" != "push" ] || [ -z "$BEFORE_SHA" ] || [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
             echo "schema=true" >> "$GITHUB_OUTPUT"
-          elif git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- supabase/schema.sql supabase/api.sql supabase/orders.sql supabase/printables.sql supabase/item-documents.sql supabase/item-versions.sql; then
+          elif git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- supabase/schema.sql supabase/api.sql supabase/orders.sql supabase/printables.sql supabase/item-documents.sql supabase/item-versions.sql supabase/item-imports.sql; then
             echo "schema=false" >> "$GITHUB_OUTPUT"
           else
             echo "schema=true" >> "$GITHUB_OUTPUT"
@@ -84,6 +84,9 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-documents-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-versions-migration.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-versions.sql
+          psql --set ON_ERROR_STOP=on --file supabase/item-imports.sql
+          psql --set ON_ERROR_STOP=on --file supabase/item-imports.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/item-imports.sql
 
   build:
     runs-on: ubuntu-latest

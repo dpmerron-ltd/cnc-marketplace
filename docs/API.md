@@ -8,6 +8,8 @@ It also converts uploaded DXF text into new component NC through `POST /dxf-to-n
 
 Catalogue edits create [automatic item versions](ITEM_VERSIONS.md). Each successful update becomes the new default, without a draft or Publish step. `GET /items` lists defaults; `GET /items/{id}/versions` lists history. Previous components and documents remain read-only. SKU job requests use the default; an explicit item ID pins that saved version. Retain the new item/component IDs returned by write endpoints.
 
+For a complete redesigned product, use [complete revision imports](ITEM_IMPORTS.md): privately stage validated components, individual cutting profiles and PDFs, then publish the entire replacement in one transaction with an expected-default check.
+
 Shopify orders and shared workshop box inventory are also available. See [Shopify and shared boxes](SHOPIFY-AND-BOXES.md) for routes, assignment permissions, server-side connection setup and packing assumptions. Dan sees all orders and assigns users with a fixed GBP cutting fee (record only); other users see only assigned orders. Shopify prices/customer details remain hidden. Box stock is deliberately shared by all authenticated users; changing a count requires its current revision.
 
 ## Authentication
