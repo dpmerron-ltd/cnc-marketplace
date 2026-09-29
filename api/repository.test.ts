@@ -6,6 +6,7 @@ import { sha256 } from '../src/jobs/generateJob'
 import { testImage } from '../src/test/imageFixture'
 import { testItem, testParts } from '../src/test/jobFixtures'
 import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
+import * as simulation from '../src/gcode/simulator'
 
 function fixture() {
   const query = { select: vi.fn(), eq: vi.fn(), is: vi.fn(), gt: vi.fn(), maybeSingle: vi.fn(async () => ({ data: { id: 'key-id', owner_id: 'alice' }, error: null })) }
@@ -85,6 +86,24 @@ describe('API credential verification', () => {
     found = false; rpc.mockClear()
     await expect(repo.replaceComponent('bob', testItem.id, id, input)).rejects.toMatchObject({ status: 404 })
     expect(rpc).not.toHaveBeenCalled()
+  })
+  it('reuses stored validation only when the request expects that exact stored revision', async () => {
+    const id = '20000000-0000-4000-8000-000000000001', gcode = testParts[0].gcode
+    const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode, errors: [], warnings: [] }])) })
+    const row = { id, name: 'Side', sku: 'SIDE', original_filename: 'side.nc', dxf: 'DXF', material_variants: materialVariants }
+    const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: row, error: null })) }
+    query.select.mockReturnValue(query); query.eq.mockReturnValue(query)
+    const rpc = vi.fn(async () => ({ data: { current: { id: 'version-2' }, components: [{ id: 'part-version-2', component_family_id: id }] }, error: null }))
+    const repo = supabaseRepository({ from: () => query, rpc } as unknown as SupabaseClient)
+    const input = { gcode, materialVariants, expectedSha256: 'a'.repeat(64), expectedMaterialVariants: materialVariants }
+    const simulate = vi.spyOn(simulation, 'simulateGCode')
+    try {
+      await repo.replaceComponent('alice', testItem.id, id, input)
+      expect(simulate).toHaveBeenCalledTimes(1)
+      simulate.mockClear()
+      await repo.replaceComponent('alice', testItem.id, id, { ...input, expectedMaterialVariants: null })
+      expect(simulate.mock.calls.length).toBeGreaterThan(1)
+    } finally { simulate.mockRestore() }
   })
   it('attributes new components to the caller and replays identical shared uploads', async () => {
     const part = { ...testParts[0], ownerId: 'alice', itemId: testItem.id }

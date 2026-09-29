@@ -149,11 +149,14 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       }
     },
     async replaceComponent(owner, itemId, id, input) {
-      const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf,component_family_id').eq('item_id', itemId).eq('id', id).maybeSingle())
+      const row = checked(await db.from('cnc_components').select('id,name,sku,original_filename,dxf,component_family_id,material_variants').eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) throw new JobError('Component not found.', 404)
       if (input.dxf !== undefined && row.dxf !== input.expectedDxf) throw new JobError('Component source changed; reload before replacing it.', 409)
       // Validate content using a new-version UUID; the stored source ID can predate UUID imports.
-      const result = parseComponent({ id: crypto.randomUUID(), name: row.name, sku: row.sku, filename: row.original_filename, dxf: input.dxf ?? row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId)
+      const storedVariants = row.material_variants == null ? undefined : materialVariantsSchema.parse(row.material_variants)
+      // The transaction checks this expected bundle against the current default before publishing.
+      const unchangedVariants = storedVariants && JSON.stringify(storedVariants) === JSON.stringify(input.expectedMaterialVariants) ? storedVariants : undefined
+      const result = parseComponent({ id: crypto.randomUUID(), name: row.name, sku: row.sku, filename: row.original_filename, dxf: input.dxf ?? row.dxf ?? undefined, gcode: input.gcode, materialVariants: input.materialVariants }, owner, itemId, unchangedVariants)
       const { materialVariants, ...metadata } = result.part.metadata
       const revision = await revise(owner, itemId, 'replace_component', { id, expectedSha256: input.expectedSha256, expectedMaterialVariants: input.expectedMaterialVariants, expectedDxf: row.dxf,
         component: { gcode: result.part.gcode, dxf: result.part.dxf ?? null, material_variants: materialVariants, width: result.part.width, height: result.part.height, bounding_box: result.part.boundingBox, original_bounds: result.part.originalBounds, metadata } })

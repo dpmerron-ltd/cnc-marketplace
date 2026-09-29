@@ -1,11 +1,31 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseComponent } from './components'
 import { testItem, testParts } from '../src/test/jobFixtures'
 import { materialProfiles, materialVariantsSchema } from '../src/cam/materialProfiles'
+import * as simulation from '../src/gcode/simulator'
 
 const input = { id: '20000000-0000-4000-8000-000000000001', name: 'Side', sku: 'SIDE', filename: 'side.nc', gcode: testParts[0].gcode }
 describe('component uploads', () => {
+  it('reuses only identical server-stored variants while validating primary and changed NC', () => {
+    const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: input.gcode, errors: [], warnings: [] }])) })
+    const simulate = vi.spyOn(simulation, 'simulateGCode')
+    try {
+      const result = parseComponent({ ...input, materialVariants }, 'alice', testItem.id, materialVariants)
+      expect(result.part.metadata.materialVariants).toEqual(materialVariants)
+      expect(simulate).toHaveBeenCalledTimes(1)
+      const changed = structuredClone(materialVariants)
+      changed.profiles['6'].gcode = input.gcode.replace('Z-2', 'Z-18.4')
+      expect(() => parseComponent({ ...input, materialVariants: changed }, 'alice', testItem.id, materialVariants)).toThrow('6 mm variant cuts deeper')
+      changed.profiles['6'].gcode = input.gcode.replace('G21', 'G20')
+      expect(() => parseComponent({ ...input, materialVariants: changed }, 'alice', testItem.id, materialVariants)).toThrow('metric and absolute')
+      expect(() => parseComponent({ ...input, materialVariants, gcode: 'G20\nG91\n' }, 'alice', testItem.id, materialVariants)).toThrow()
+      expect(() => parseComponent({ ...input, materialVariants, storedVariants: materialVariants }, 'alice', testItem.id)).toThrow('Invalid component')
+      simulate.mockClear()
+      parseComponent({ ...input, materialVariants }, 'alice', testItem.id)
+      expect(simulate.mock.calls.length).toBeGreaterThan(1)
+    } finally { simulate.mockRestore() }
+  })
   it('stores all validated material variants and rejects mismatches or unsafe alternate programs', () => {
     const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: input.gcode, errors: [], warnings: [] }])) })
     const parsed = parseComponent({ ...input, materialVariants }, 'alice', testItem.id)

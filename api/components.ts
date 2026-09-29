@@ -38,7 +38,7 @@ const schema = z.strictObject({
   materialVariants: materialVariantsSchema.optional(),
 })
 
-export function parseComponent(value: unknown, ownerId: string, itemId: string) {
+export function parseComponent(value: unknown, ownerId: string, itemId: string, storedVariants?: MaterialVariants) {
   const parsed = schema.safeParse(value)
   if (!parsed.success) throw new JobError('Invalid component. Supply a stable UUID id, name, sku, filename and gcode, with optional source dxf.', 400, parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`))
   const input = parsed.data
@@ -56,6 +56,8 @@ export function parseComponent(value: unknown, ownerId: string, itemId: string) 
     for (const profile of materialProfiles) {
       const variant = input.materialVariants.profiles[profile.id]
       if (!variant?.gcode) continue
+      // Only the repository supplies this trusted snapshot; requests cannot mark NC as validated.
+      if (storedVariants?.profiles[profile.id]?.gcode === variant.gcode) continue
       parseComponent({ ...input, materialVariants: undefined, gcode: variant.gcode }, ownerId, itemId)
       if (simulateGCode(variant.gcode).deepestCutMm > materialPreset(profile.thickness, profile.thickness === 12 ? profile.profilePasses : undefined, profile.drillDepthMm, profile.rampProfile).depth + 0.001) throw new JobError(`${profile.label} variant cuts deeper than its material preset.`, 422)
     }
