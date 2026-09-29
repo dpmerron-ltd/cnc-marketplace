@@ -150,9 +150,8 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   if (!userId || userId !== expectedUserId) return undefined
 
   const client = supabase
-  const [itemRows, componentRows, projectResult, historyResult, presetsResult] = await Promise.all([
+  const [itemRows, projectResult, historyResult, presetsResult] = await Promise.all([
     readLibraryPages((from, to) => client.from('marketplace_items').select('*').order('created_at').order('id').range(from, to), 'items', onProgress),
-    readLibraryPages((from, to) => client.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,width,height,material_profile:material_variants->>primaryProfile').order('id').range(from, to), 'component index', onProgress, 500),
     supabase.from('sheet_projects').select('*').eq('owner_id', userId).eq('id', userId).maybeSingle<ProjectRow>(),
     supabase.from('sheet_history').select('*').eq('owner_id', userId).order('saved_at', { ascending: false }),
     supabase.from('gcode_presets').select('*').eq('owner_id', userId).order('name'),
@@ -160,6 +159,35 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 
   const stateError = presetsResult.error ?? projectResult.error ?? historyResult.error
   if (stateError) throw new Error(`Could not load your saved library settings: ${stateError.message}`)
+
+  // A JSONB profile projection still decompresses the NC bundle. Never scan
+  // every historical bundle at startup; old versions load when opened.
+  const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height'
+  const readIndex = async (column: 'item_id' | 'id', ids: string[]) => {
+    const rows = []
+    for (let offset = 0; offset < ids.length; offset += 40) {
+      if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
+      rows.push(...await readLibraryPages((from, to) => client.from('cnc_components')
+        .select(indexColumns).in(column, ids.slice(offset, offset + 40)).order('id').range(from, to), 'component index', onProgress))
+    }
+    return rows
+  }
+  const currentItemIds = itemRows.filter(row => !row.version_family_id || row.version_default || row.version_status === 'draft').map(row => row.id)
+  const componentRows = await readIndex('item_id', currentItemIds)
+  const indexedIds = new Set(componentRows.map(row => row.id))
+  // Saved sheets deliberately retain the exact revisions they were built with.
+  const savedSheets = [projectResult.data?.sheet, ...((historyResult.data ?? []) as SheetHistoryRow[]).map(row => row.sheet)]
+  const pinnedIds = [...new Set(savedSheets.flatMap(sheet => sheet?.instances.map(instance => instance.partId) ?? []))].filter(id => !indexedIds.has(id))
+  componentRows.push(...await readIndex('id', pinnedIds))
+  // Fetch profiles by the exact page IDs so PostgreSQL cannot decompress a
+  // whole item's bundles before sorting/limiting the summary query.
+  const profileRows = await readLibraryPages((from, to) => {
+    const ids = componentRows.slice(from, to + 1).map(row => row.id)
+    return ids.length ? client.from('cnc_components').select('id,material_profile:material_variants->>primaryProfile').in('id', ids)
+      : Promise.resolve({ data: [], error: null })
+  }, 'component profiles', onProgress)
+  if (profileRows.length !== componentRows.length) throw new Error('The component index changed while loading. Please retry.')
+  const profileById = new Map(profileRows.map(row => [row.id, materialProfiles.find(profile => profile.id === row.material_profile)]))
 
   const items: MarketplaceItem[] = itemRows.map((row) => ({
     id: row.id,
@@ -183,7 +211,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     id: row.id, ownerId: row.owner_id, itemId: row.item_id,
     sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
     originalFilename: row.original_filename, width: row.width, height: row.height,
-    ...(materialProfiles.some(profile => profile.id === row.material_profile) ? { materialThicknessMm: materialProfiles.find(profile => profile.id === row.material_profile)!.thickness } : {}),
+    ...(profileById.get(row.id) ? { materialThicknessMm: profileById.get(row.id)!.thickness } : {}),
   }))
 
   const project = projectResult.error ? undefined : projectResult.data

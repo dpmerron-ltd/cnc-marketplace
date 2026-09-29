@@ -117,6 +117,22 @@ describe('account switching', () => {
     expect(screen.queryByRole('heading', { name: 'Panel 1' })).not.toBeInTheDocument()
   })
 
+  it('loads a previous version on selection even when its components were not indexed at startup', async () => {
+    const { remote, components } = lazyLibrary()
+    remote.items[0].version = { familyId: 'rack', number: 1, status: 'published', isDefault: false }
+    remote.items[1].version = { familyId: 'rack', number: 2, status: 'published', isDefault: true }
+    remote.componentIndex = [summarizePart(components[1])]
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Second item' }))
+    await screen.findByRole('heading', { name: 'Panel 1' })
+    fireEvent.change(screen.getByLabelText('Item version'), { target: { value: remote.items[0].id } })
+    expect(await screen.findByRole('heading', { name: 'Panel 0' })).toBeInTheDocument()
+    expect(mock.loadItem).toHaveBeenCalledWith(remote.items[0], 'alice')
+    expect(screen.queryByText('No components yet')).not.toBeInTheDocument()
+  })
+
   it('preserves unloaded saved placements and history, blocks machining until loaded, and retries failures', async () => {
     const { remote, components } = lazyLibrary()
     remote.sheet = { name: 'Saved layout', width: 1220, height: 1220, spacing: 30, borderSpacing: 10, instances: [{ id: 'placed', partId: components[1].id, x: 40, y: 50, rotation: 0, locked: true, sheetIndex: 0 }], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 20 } }

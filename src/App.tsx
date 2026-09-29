@@ -791,7 +791,8 @@ function App() {
       const project = privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
       const loaded = projectToAppState(project)
       setComponentIndex(project.componentIndex ?? loaded.parts)
-      resetComponentLoading(loaded.items, loaded.items.filter(item => index.filter(part => part.itemId === item.id).every(summary => loaded.parts.some(part => part.id === summary.id))).map(item => item.id))
+      // An unindexed historical version is not an empty, already-loaded item.
+      resetComponentLoading(loaded.items, loaded.items.filter(item => loaded.parts.some(part => part.itemId === item.id) && index.filter(part => part.itemId === item.id).every(summary => loaded.parts.some(part => part.id === summary.id))).map(item => item.id))
       setItems(loaded.items)
       setParts(loaded.parts)
       setSheetHistory(loaded.sheetHistory)
