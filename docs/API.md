@@ -392,3 +392,24 @@ at up to 5 degrees. Clearance remains Z20. Existing profiles are unchanged.
 New DXF generation includes this tenth variant automatically; older components
 need explicit regeneration before this profile can be selected for sheet export.
 Saved components and queued jobs are not rewritten.
+
+## 12 mm Three-Pass Profile at 60 mm/s
+
+For DXF conversion, or inside a job's `sheet` object, use:
+
+```json
+{ "thicknessMm": 12, "profilePasses": 3, "drillDepthMm": 2, "rampProfile": "20mm-s-5deg" }
+```
+
+Profile ID: `12-3pass-2mm-feed60-ramp20-5deg`. Cumulative through-cut depths
+are 4, 8 and 12.2 mm (4 + 4 + 4.2 mm, including 0.2 mm breakthrough).
+Cutting feed is 60 mm/s (F3600); ramps use 20 mm/s (F1200) at up to 5 degrees.
+Drills are 2 mm deep at F600; cutter diameter 6.35 mm and clearance Z20 remain
+unchanged. Blind pockets use the same depth schedule capped at their assigned
+depth. Account spindle settings and existing tab rules are retained.
+
+The generator and sheet selectors expose this profile. New automatic variant
+bundles include it; old bundles remain valid but cannot use this profile until
+regenerated. No existing components, sheet exports or queued jobs are rewritten.
+Three passes without the matching 12 mm stock, 2 mm drills and ramp selection
+are rejected, as are arbitrary feed overrides. All older profiles retain F3000.

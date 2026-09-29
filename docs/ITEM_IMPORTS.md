@@ -26,11 +26,13 @@ account API key or MFA session. Keep all UUIDs and exact request bodies for retr
    `filename`, `gcode`, optional original `dxf`, and `primaryProfile`. Use the
    generated primary program verbatim. Do not include `materialVariants` here.
    Dimensions and bounds are computed by the server, not supplied by the caller.
-3. For each of the ten cutting profiles, `POST /imports/{id}/profiles` with
+3. For each supported cutting profile, `POST /imports/{id}/profiles` with
    `componentId`, `profileId`, `gcode`, `warnings`, `errors`. Copy each entry from
    the generator's variant bundle. Available NC is independently validated for
    machining, size and cutting depth. Unavailable profiles require empty NC and
    nonempty blocking errors. Do not substitute NC from another thickness.
+   The new `12-3pass-2mm-feed60-ramp20-5deg` profile is supported; older imports
+   with the original ten profiles remain publishable without fabricating it.
 4. `POST /imports/{id}/documents` with the usual PDF upload: `id`, `kind`
    (`instructions` or `packing`), `filename`, `dataBase64`. Original PDF bytes are
    retained, maximum 20 MB/200 pages. The UUID must be in the manifest.

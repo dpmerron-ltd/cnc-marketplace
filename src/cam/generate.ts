@@ -8,7 +8,7 @@ import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, 
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
-import { materialProfileId, rampPreset } from './materialProfiles'
+import { cutFeedPreset, materialProfileId, rampPreset } from './materialProfiles'
 import { profileEntry, routeOperations, type RouteOperation } from './routing'
 
 const toolRadius = camPreset.diameter / 2
@@ -16,6 +16,7 @@ const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
 export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1, drillDepthMm?: CamSettings['drillDepthMm'], rampProfile?: CamSettings['rampProfile']) => {
+  if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-3pass-2mm-feed60-ramp20-5deg') return { depth: 12.2, passes: [4, 8, 12.2], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [6, 12.2], drill: 2 }
   return thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: drillDepthMm ?? 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : thickness === 6 ? { depth: 6.2, passes: [6.2], drill: 4.5 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: drillDepthMm ?? 4.5 }
 }
@@ -78,15 +79,17 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
 
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
   const rampSettings = rampPreset(settings.rampProfile)
+  const cutFeed = cutFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile))
   const slope = Math.tan(rampSettings.rampDegrees * Math.PI / 180)
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
-  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, 12 mm stock with two passes and 2 mm drills, or 18 mm stock with 9 mm drills.')
+  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Use a supported material, pass, drill depth and ramp combination.')
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
   if (settings.drillDepthMm !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Use a supported material, pass, drill depth and ramp combination.')
   if (![6, 12, 15, 18].includes(settings.thickness)) errors.push('Select 6 mm, 12 mm, 15 mm or 18 mm material.')
-  if (settings.profilePasses !== undefined && (settings.thickness !== 12 || ![1, 2].includes(settings.profilePasses))) errors.push('Profile pass selection is only supported for 12 mm stock: choose 1 or 2 passes.')
+  if (settings.profilePasses !== undefined && (settings.thickness !== 12 || ![1, 2, 3].includes(settings.profilePasses))) errors.push('Profile pass selection is only supported for 12 mm stock: choose 1, 2 or 3 passes.')
+  if (settings.profilePasses === 3 && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Profile pass selection: three passes require 12 mm stock, 2 mm drills and the 20 mm/s, 5 degree ramp; cutting feed is 60 mm/s.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
   const features = drawing.features.map(f => ({ ...f, points: f.points.map(p => ({ x: p.x * factor, y: p.y * factor })), circle: f.circle ? { center: { x: f.circle.center.x * factor, y: f.circle.center.y * factor }, radius: f.circle.radius * factor } : undefined, ...settings.operations[f.id] }))
   const active = features.filter(f => f.kind !== 'ignore')
@@ -197,7 +200,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       if (f.kind === 'pocket') {
         const depth = f.depthMm
         if (depth === undefined || !Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind pocket depth greater than 0 and less than ${settings.thickness} mm. Use an inside cut for a through-hole.`)
-        const passes = depth > material.passes[0] ? [material.passes[0], depth] : [depth]
+        const passes = [...material.passes.filter(pass => pass < depth), depth]
         if (!f.circle) {
           const paths = relieve(f, pockets.get(f.id)!)
           let previous = 0
@@ -216,7 +219,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
                 for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, rampSettings.rampFeed)
                 current = next
               }
-              for (const entry of metric.between(0, metric.length)) linear(entry.point, target, camPreset.cutFeed)
+              for (const entry of metric.between(0, metric.length)) linear(entry.point, target, cutFeed)
               emit('G00 Z20')
             }
             previous = target
@@ -248,7 +251,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
             linear({ x: center.x + r, y: center.y }, target, camPreset.rampFeed)
             for (let third = 1; third <= 3; third++) {
               const a = -(third - 1) * Math.PI * 2 / 3, b = -third * Math.PI * 2 / 3
-              emit(`G02 ${xy({ x: center.x + r * Math.cos(b), y: center.y + r * Math.sin(b) })} I${n(-r * Math.cos(a))} J${n(-r * Math.sin(a))} F3000`)
+              emit(`G02 ${xy({ x: center.x + r * Math.cos(b), y: center.y + r * Math.sin(b) })} I${n(-r * Math.cos(a))} J${n(-r * Math.sin(a))} F${cutFeed}`)
             }
             if (r >= radius - 1e-6) break
           }
@@ -288,7 +291,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
               current = next
             }
           }
-          if (metric.length > 1e-6) for (const entry of metric.between(0, metric.length)) linear(entry.point, depth, camPreset.cutFeed)
+          if (metric.length > 1e-6) for (const entry of metric.between(0, metric.length)) linear(entry.point, depth, cutFeed)
           previous = depth
           if (pointHole && depth !== material.depth) emit('G00 Z0.5')
         }
@@ -339,14 +342,14 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         let position = 0
         for (let i = 0; i < intervals.length; i++) {
           const [a, b] = intervals[i]
-          follow(position, a, depth, depth, camPreset.cutFeed)
+          follow(position, a, depth, depth, cutFeed)
           const tabDepth = Math.min(depth, material.depth - camPreset.tabHeight)
           emit(`(Tab ${i + 1})`, `G01 Z-${n(tabDepth)} F600`)
-          follow(a, b, tabDepth, tabDepth, camPreset.cutFeed)
+          follow(a, b, tabDepth, tabDepth, cutFeed)
           ramp(b, tabDepth, depth, (intervals[i + 1]?.[0] ?? metric.length) - b)
           position = b
         }
-        follow(position, metric.length, depth, depth, camPreset.cutFeed)
+        follow(position, metric.length, depth, depth, cutFeed)
         previousDepth = depth
       }
       emit('G00 Z20')
@@ -380,7 +383,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F3000 / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
+  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F${cutFeed} / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
   const candidate = [...header, ...lines, 'G00 Z20', 'M05', ...programLines(programs.endGcode), ''].join('\n')
   const simulation = simulateGCode(candidate)

@@ -17,7 +17,7 @@
 .cam-action-error svg { flex-shrink: 0; }
 .cam-settings { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #dce3e7; background: #f5f8f8; }
 .cam-page label { display: flex; gap: 5px; font-size: 12px; color: #4e5c65; }
-.cam-settings > label, .cam-export-actions > label { flex-direction: column; }
+.cam-settings > label, .cam-export-actions > label { flex-direction: column; min-width: 0; max-width: 100%; }
 .cam-page select, .cam-page input[type=number] { min-width: 0; max-width: 100%; border: 1px solid #c4cfd4; border-radius: 4px; background: white; color: #22313a; padding: 7px; font: inherit; }
 .cam-settings dl { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0; }
 .cam-settings dt { font-size: 11px; color: #62717b; }

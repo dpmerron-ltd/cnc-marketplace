@@ -70,6 +70,8 @@
 .sheet-controls label {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   gap: 5px;
   color: #52606f;
   font-size: 12px;
@@ -80,9 +82,15 @@
   width: 74px;
 }
 
+.sheet-controls select {
+  min-width: 0;
+}
+
 .sheet-controls {
   flex-wrap: wrap;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .sheet-controls .sheet-name-control input {

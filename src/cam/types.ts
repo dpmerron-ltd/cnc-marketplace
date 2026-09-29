@@ -22,7 +22,7 @@ export interface CamDrawing { features: CamFeature[]; warnings: string[]; errors
 export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number; cornerOvercuts?: boolean }
 export interface CamSettings {
   thickness: 6 | 12 | 15 | 18
-  profilePasses?: 1 | 2
+  profilePasses?: 1 | 2 | 3
   drillDepthMm?: 2 | 9
   rampProfile?: RampProfile
   units: 'auto' | 'mm' | 'inches'
