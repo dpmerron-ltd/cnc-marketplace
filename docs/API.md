@@ -365,6 +365,12 @@ still contain only lightweight component summaries.
 
 ### Correct a component source drawing
 
+Component G-code GET/PATCH routes also accept legacy component IDs containing
+letters, digits, dots, underscores and hyphens (up to 200 characters, starting
+with a letter or digit). Item IDs and new component upload IDs remain UUIDs.
+Replacement creates a new version and returns its new IDs; it never changes
+the historical component. Existing revision and machining checks still apply.
+
 `PATCH /v1/items/:itemId/components/:componentId/gcode` also accepts optional `dxf` and `expectedDxf`. Supply both when correcting geometry. The current DXF, NC hash and material-variant bundle must match the supplied expected values; source DXF, NC, variants and derived geometry are then replaced atomically, preserving the component ID, item ID, SKU and name. Omit both DXF fields for a program-only repair. Read back the same endpoint to verify the stored files.
 
 `PATCH /v1/items/:itemId/description` accepts `{expectedDescription, description}`. It replaces only a shared item's description, with a conflict if the description has changed. Image changes continue to use the existing `/image` endpoint. Neither action creates a cutting job.

@@ -56,8 +56,7 @@ describe('API credential verification', () => {
     await expect(repo.countBox('bob', row.id, { quantity: 9, expectedVersion: 1 })).rejects.toMatchObject({ status: 409 })
     expect(rpc).toHaveBeenCalledWith('count_cnc_boxes', { p_actor: 'bob', p_id: row.id, p_quantity: 9, p_expected_version: 1 })
   })
-  it('validates replacements before a shared compare-and-swap, preserving source and identity', async () => {
-    const id = '20000000-0000-4000-8000-000000000001'
+  it.each(['20000000-0000-4000-8000-000000000001', 'peg-board-18mm-138ac2cd'])('validates replacement of %s before a shared compare-and-swap, preserving source and identity', async id => {
     const row = { id, name: 'Side', sku: 'SIDE', original_filename: 'side.nc', dxf: 'original DXF' }
     let found = true
     const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: found ? row : null, error: null })) }

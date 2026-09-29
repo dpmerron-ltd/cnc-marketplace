@@ -158,8 +158,8 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         return json({ id: saved.id ?? part.id, itemId: saved.itemId ?? id, name: part.name, sku: part.sku, filename: part.originalFilename, widthMm: part.width, heightMm: part.height, sha256: await sha256(part.gcode), reviewRequired: true, warnings }, saved.created ? 201 : 200, saved.created ? {} : { 'Idempotent-Replayed': 'true' })
       }
       const imageMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/image$/i)
-      const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([0-9a-f-]{36})\/gcode$/i)
-      if (replacementMatch && replacementMatch.slice(1).every(id => z.uuid().safeParse(id).success) && ['GET', 'PATCH'].includes(request.method)) {
+      const replacementMatch = path.match(/^\/v1\/items\/([0-9a-f-]{36})\/components\/([a-z0-9][a-z0-9._-]{0,199})\/gcode$/i)
+      if (replacementMatch && z.uuid().safeParse(replacementMatch[1]).success && ['GET', 'PATCH'].includes(request.method)) {
         const [, itemId, id] = replacementMatch
         if (!await repository.itemExists(owner, itemId)) throw new JobError('Item not found.', 404)
         if (request.method === 'GET') {

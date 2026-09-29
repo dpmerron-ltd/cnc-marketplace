@@ -123,9 +123,8 @@ describe('jobs HTTP API', () => {
     expect((await f.call(description, 'PATCH', { expectedDescription: 'Rev B', description: 'Rev C' })).status).toBe(409)
   })
 
-  it('reads a shared component revision for repairs without writes or program generation', async () => {
+  it.each(['20000000-0000-4000-8000-000000000001', 'peg-board-18mm-138ac2cd'])('reads component %s for repairs without writes or program generation', async id => {
     const f = fixture()
-    const id = '20000000-0000-4000-8000-000000000001'
     const path = `/items/${testItem.id}/components/${id}/gcode`
     const source = { id, itemId: testItem.id, name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'source DXF', materialVariants: null, sha256: 'a'.repeat(64) }
     f.repo.componentSource = vi.fn(async () => source)
@@ -173,8 +172,8 @@ describe('jobs HTTP API', () => {
     expect(f.repo.countBox).toHaveBeenCalledWith('bob', id, { quantity: 9, expectedVersion: 1 })
     expect((await f.call('/boxes', 'GET', undefined, 'invalid')).status).toBe(401)
   })
-  it('supports shared program replacement and requires an expected revision', async () => {
-    const f = fixture(), id = '20000000-0000-4000-8000-000000000001'
+  it.each(['20000000-0000-4000-8000-000000000001', 'peg-board-18mm-138ac2cd'])('supports replacement of %s and requires an expected revision', async id => {
+    const f = fixture()
     const path = `/items/${testItem.id}/components/${id}/gcode`
     const variants = materialVariantsSchema.parse({ version: 1, primaryProfile: '12', profiles: Object.fromEntries(materialProfiles.map(p => [p.id, { gcode: testParts[0].gcode, warnings: [], errors: [] }])) })
     const input = { expectedSha256: 'a'.repeat(64), expectedMaterialVariants: null, gcode: testParts[0].gcode, materialVariants: variants }
@@ -186,6 +185,14 @@ describe('jobs HTTP API', () => {
     expect(f.repo.replaceComponent).toHaveBeenCalledWith('alice', testItem.id, id, input)
     f.repo.replaceComponent = vi.fn(async () => { throw new JobError('Changed', 409) })
     expect((await f.call(path, 'PATCH', input)).status).toBe(409)
+  })
+  it.each(['bad%20id', 'bad%2Fid', 'bad:id', 'a'.repeat(201)])('rejects malformed component route %s before reading or writing', async id => {
+    const f = fixture()
+    const path = `/items/${testItem.id}/components/${id}/gcode`
+    expect((await f.call(path, 'GET')).status).toBe(404)
+    expect((await f.call(path, 'PATCH', {})).status).toBe(404)
+    expect(f.repo.componentSource).not.toHaveBeenCalled()
+    expect(f.repo.replaceComponent).not.toHaveBeenCalled()
   })
   it('uploads validated components to shared items and supports stable retries', async () => {
     const f = fixture()
