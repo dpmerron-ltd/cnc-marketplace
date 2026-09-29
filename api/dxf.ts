@@ -26,7 +26,7 @@ const schema = z.strictObject({
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,
   operations: overrides,
-}).refine(value => value.rampProfile === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['rampProfile'], message: 'The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, or 18 mm stock with 9 mm drills.' }).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['drillDepthMm'], message: 'Use 12 mm stock and 1 pass for 2 mm drills, or 18 mm stock for 9 mm drills.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
+}).refine(value => value.rampProfile === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['rampProfile'], message: 'The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, 12 mm stock with two passes and 2 mm drills, or 18 mm stock with 9 mm drills.' }).refine(value => value.profilePasses === undefined || value.thicknessMm === 12, { path: ['profilePasses'], message: 'Profile pass selection is only supported for 12 mm stock.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['drillDepthMm'], message: 'Use a supported material, pass, drill depth and ramp combination.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
 
 export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
@@ -61,10 +61,10 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const bytes = new TextEncoder().encode(result.gcode).length
   if (result.gcode.split('\n').length > 20000 || bytes > 2000000) throw new JobError('Generated NC exceeds 20,000 lines or 2 MB. Split the drawing.', 422)
   const ramp = rampPreset(input.rampProfile)
-  const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm)
+  const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm, input.rampProfile)
   const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, rampProfile: input.rampProfile, units: input.units, operations, programs }, result, input.variantProfiles)
   return {
-    filename: input.filename.replace(/\.dxf$/i, input.rampProfile ? `-${input.thicknessMm}mm${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
+    filename: input.filename.replace(/\.dxf$/i, input.rampProfile ? `-${input.thicknessMm}mm${input.profilePasses === 2 ? '-2pass' : ''}${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true, materialVariants,
     programSettings: { ...programs },

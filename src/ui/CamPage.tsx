@@ -41,7 +41,9 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const [saved, setSaved] = useState(false)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const ramp = rampPreset(settings.rampProfile)
-  const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
+  const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
+  const passIncrements = material.passes.map((depth, index) => Number((depth - (material.passes[index - 1] ?? 0)).toFixed(4)))
+  const passDescription = passIncrements.every(depth => depth === passIncrements[0]) ? `${passIncrements.length} x ${passIncrements[0]}` : passIncrements.join(' + ')
   useEffect(() => {
     if (!source) return
     let active = true
@@ -116,7 +118,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const layers = [...new Set(features.map(f => f.layer))]
   const problems = [error, ...(result?.errors ?? [])].filter(Boolean)
   const ready = Boolean(result?.gcode) && !busy && !saving && !problems.length && reviewed
-  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.rampProfile ? `${settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : ''}-ramp20-5deg` : settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
+  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.rampProfile ? `${settings.profilePasses === 2 ? '-2pass' : ''}${settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : ''}-ramp20-5deg` : settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
   const batch = queue.length > 1
   const currentFile = queue[fileIndex]
   const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')
@@ -151,7 +153,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
         update({ thickness: profile.thickness, profilePasses: profile.thickness === 12 && profile.profilePasses === 2 ? 2 : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile })
       }}>{[...materialProfiles].reverse().map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label>
       <label>DXF units<select value={settings.units} onChange={e => update({ units: e.target.value as CamSettings['units'] })}><option value="auto">From DXF{result ? ` (${result.drawing.units})` : ''}</option><option value="mm">Millimetres</option><option value="inches">Inches</option></select></label>
-      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{programs.spindleStartGcode.trim() ? `${spindleRpm(programs).toLocaleString()} rpm` : 'Manual control'}</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{material.passes.length} x {material.passes[0]} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>{ramp.rampDegrees} deg / {ramp.rampFeed} mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
+      <dl><div><dt>Cutter</dt><dd>6.35 mm</dd></div><div><dt>Spindle</dt><dd>{programs.spindleStartGcode.trim() ? `${spindleRpm(programs).toLocaleString()} rpm` : 'Manual control'}</dd></div><div><dt>Clearance</dt><dd>20 mm</dd></div><div><dt>Cut depth</dt><dd>{material.depth} mm</dd></div><div><dt>Passes</dt><dd>{passDescription} mm</dd></div><div><dt>Drill depth</dt><dd>{material.drill} mm</dd></div><div><dt>Ramp</dt><dd>{ramp.rampDegrees} deg / {ramp.rampFeed} mm/min</dd></div><div><dt>Cut feed</dt><dd>3,000 mm/min</dd></div></dl>
     </div>
     <div className="cam-workspace">
       <aside className="cam-operations" aria-label="Machining operations">

@@ -86,7 +86,7 @@ describe('Routed machining output', () => {
     const job = generateCam(source, settings)
     expect(job.errors).toEqual([])
     expect(job.operations.map(op => op.featureId)).toEqual(['near', 'middle', 'far', 'outer'])
-    const preset = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
+    const preset = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
     expect(job.operations.filter(op => op.kind === 'drill').every(op => op.depthMm === preset.drill)).toBe(true)
     const outer = job.operations.at(-1)!
     expect(outer.depthMm).toBe(preset.depth)

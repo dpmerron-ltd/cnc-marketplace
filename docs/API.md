@@ -368,3 +368,19 @@ still contain only lightweight component summaries.
 `PATCH /v1/items/:itemId/components/:componentId/gcode` also accepts optional `dxf` and `expectedDxf`. Supply both when correcting geometry. The current DXF, NC hash and material-variant bundle must match the supplied expected values; source DXF, NC, variants and derived geometry are then replaced atomically, preserving the component ID, item ID, SKU and name. Omit both DXF fields for a program-only repair. Read back the same endpoint to verify the stored files.
 
 `PATCH /v1/items/:itemId/description` accepts `{expectedDescription, description}`. It replaces only a shared item's description, with a conflict if the description has changed. Image changes continue to use the existing `/image` endpoint. Neither action creates a cutting job.
+
+## 12 mm Two-Pass Profile With Shallow Drills
+
+For DXF conversion, or inside a job's `sheet` object, use:
+
+```json
+{ "thicknessMm": 12, "profilePasses": 2, "drillDepthMm": 2, "rampProfile": "20mm-s-5deg" }
+```
+
+Profile ID: `12-2pass-2mm-ramp20-5deg`. It cuts to 12.2 mm in two
+passes (Z-6 then Z-12.2), including 0.2 mm breakthrough. Drills
+are 2 mm deep. Cutting feed is 50 mm/s (F3000); ramps use 20 mm/s (F1200)
+at up to 5 degrees. Clearance remains Z20. Existing profiles are unchanged.
+New DXF generation includes this tenth variant automatically; older components
+need explicit regeneration before this profile can be selected for sheet export.
+Saved components and queued jobs are not rewritten.

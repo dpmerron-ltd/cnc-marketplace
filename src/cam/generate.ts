@@ -15,7 +15,10 @@ const toolRadius = camPreset.diameter / 2
 const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
-export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1, drillDepthMm?: CamSettings['drillDepthMm']) => thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: drillDepthMm ?? 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : thickness === 6 ? { depth: 6.2, passes: [6.2], drill: 4.5 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: drillDepthMm ?? 4.5 }
+export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1, drillDepthMm?: CamSettings['drillDepthMm'], rampProfile?: CamSettings['rampProfile']) => {
+  if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [6, 12.2], drill: 2 }
+  return thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: drillDepthMm ?? 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : thickness === 6 ? { depth: 6.2, passes: [6.2], drill: 4.5 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: drillDepthMm ?? 4.5 }
+}
 
 function tabIntervals(path: Point[], count: number, circular: boolean): Array<[number, number]> {
   const metric = pathMetric(path), width = camPreset.tabWidth + camPreset.diameter
@@ -77,11 +80,11 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const rampSettings = rampPreset(settings.rampProfile)
   const slope = Math.tan(rampSettings.rampDegrees * Math.PI / 180)
   const errors = [...drawing.errors], warnings = [...drawing.warnings]
-  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, or 18 mm stock with 9 mm drills.')
+  if (settings.rampProfile !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('The 20 mm/s, 5 degree ramp requires 12 mm stock with one pass and standard drills, 12 mm stock with two passes and 2 mm drills, or 18 mm stock with 9 mm drills.')
   const programs = settings.programs ?? defaultProgramSettings
   errors.push(...validatePrograms(programs, camPreset.clearance))
-  const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm)
-  if (settings.drillDepthMm !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm)) errors.push('Use 12 mm stock and 1 pass for 2 mm drills, or 18 mm stock for 9 mm drills.')
+  const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
+  if (settings.drillDepthMm !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Use a supported material, pass, drill depth and ramp combination.')
   if (![6, 12, 15, 18].includes(settings.thickness)) errors.push('Select 6 mm, 12 mm, 15 mm or 18 mm material.')
   if (settings.profilePasses !== undefined && (settings.thickness !== 12 || ![1, 2].includes(settings.profilePasses))) errors.push('Profile pass selection is only supported for 12 mm stock: choose 1 or 2 passes.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1

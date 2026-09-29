@@ -33,8 +33,8 @@ describe('material variants', () => {
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)
     expect(expected.operations.find(operation => operation.kind === 'outside')?.tabs).toHaveLength(2)
-    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, undefined, profile.drillDepthMm).drill)
-    expect(simulateGCode(variant.gcode).deepestCutMm).toBe(materialPreset(profile.thickness).depth)
+    expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).drill)
+    expect(simulateGCode(variant.gcode).deepestCutMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).depth)
   })
 
   it.each(materialProfiles)('selects $label for every placed copy, export and tab map without modifying originals', profile => {
@@ -47,10 +47,10 @@ describe('material variants', () => {
     expect(validateSheet([part], selectedSheet).filter(issue => issue.level === 'error')).toEqual([])
     const combined = exportCombinedGCode([part], selectedSheet, defaultProgramSettings)
     expect(combined.errors).toEqual([])
-    expect(simulateGCode(combined.gcode).deepestCutMm).toBe(materialPreset(profile.thickness).depth)
+    expect(simulateGCode(combined.gcode).deepestCutMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).depth)
     for (const file of exportPhysicalSheetGCodes([part], selectedSheet, defaultProgramSettings)) {
       expect(file.errors).toEqual([])
-      expect(simulateGCode(file.gcode).deepestCutMm).toBe(materialPreset(profile.thickness).depth)
+      expect(simulateGCode(file.gcode).deepestCutMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).depth)
     }
     expect(buildTabMap([part], selectedSheet).parts.every(part => part.tabs.length === 2)).toBe(true)
     expect(part.gcode).toBe(bundle.profiles['18'].gcode)
@@ -60,7 +60,7 @@ describe('material variants', () => {
   it('retains valid hinge variants and blocks thin-stock variants rather than dropping the hinge', () => {
     const hinge = readDxf(dxf([rectangle(0, 0, 300, 200), rectangle(80, 60, 120, 80, 'DOOR'), circle(110, 100, 17.5, 'HINGE')]))
     const variants = generateMaterialVariants(hinge, { ...settings, operations: {} })
-    for (const id of ['6', '12', '12-2mm', '12-2pass', '12-ramp20-5deg'] as const) {
+    for (const id of ['6', '12', '12-2mm', '12-2pass', '12-ramp20-5deg', '12-2pass-2mm-ramp20-5deg'] as const) {
       expect(variants.profiles[id]!.gcode).toBe('')
       expect(variants.profiles[id]!.errors.join(' ')).toContain('hinge pockets')
     }
