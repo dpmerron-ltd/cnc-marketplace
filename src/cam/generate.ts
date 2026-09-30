@@ -16,6 +16,7 @@ const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
 export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1, drillDepthMm?: CamSettings['drillDepthMm'], rampProfile?: CamSettings['rampProfile']) => {
+  if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-depth12p4') return { depth: 12.4, passes: [6.2, 12.4], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-3pass-2mm-feed60-ramp20-5deg') return { depth: 12.2, passes: [4, 8, 12.2], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [6, 12.2], drill: 2 }
   return thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: drillDepthMm ?? 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : thickness === 6 ? { depth: 6.2, passes: [6.2], drill: 4.5 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: drillDepthMm ?? 4.5 }

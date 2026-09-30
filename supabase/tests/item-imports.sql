@@ -32,7 +32,7 @@ do $$ declare imp uuid; manifest jsonb; result jsonb; profile text; begin
     if result is distinct from public.begin_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,manifest) then raise exception 'Start retry differs'; end if;
     perform public.stage_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,'component','92000000-0000-4000-8000-000000000031',
       '{"id":"92000000-0000-4000-8000-000000000031","sku":"SIDE-RC","name":"New side","original_filename":"new.nc","gcode":"NEW NC","dxf":"NEW DXF","width":30,"height":40,"bounding_box":{},"original_bounds":{},"metadata":{},"primaryProfile":"12-2mm"}');
-    foreach profile in array array['6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg'] loop
+    foreach profile in array array['6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg','12-2pass-2mm-depth12p4'] loop
       perform public.stage_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,'profile','92000000-0000-4000-8000-000000000031/'||profile,
         jsonb_build_object('componentId','92000000-0000-4000-8000-000000000031','profileId',profile,'gcode','NEW NC','warnings','[]'::jsonb,'errors','[]'::jsonb));
     end loop;

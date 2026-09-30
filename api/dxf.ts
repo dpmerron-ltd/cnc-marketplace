@@ -64,7 +64,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm, input.rampProfile)
   const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, rampProfile: input.rampProfile, units: input.units, operations, programs }, result, input.variantProfiles)
   return {
-    filename: input.filename.replace(/\.dxf$/i, input.profilePasses === 3 ? '-12mm-3pass-2mm-holes-feed60-ramp20-5deg.nc' : input.rampProfile ? `-${input.thicknessMm}mm${input.profilePasses === 2 ? '-2pass' : ''}${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
+    filename: input.filename.replace(/\.dxf$/i, materialVariants.primaryProfile === '12-2pass-2mm-depth12p4' ? '-12mm-2pass-2mm-holes-depth12p4.nc' : input.profilePasses === 3 ? '-12mm-3pass-2mm-holes-feed60-ramp20-5deg.nc' : input.rampProfile ? `-${input.thicknessMm}mm${input.profilePasses === 2 ? '-2pass' : ''}${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true, materialVariants,
     programSettings: { ...programs },

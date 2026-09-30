@@ -118,7 +118,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const layers = [...new Set(features.map(f => f.layer))]
   const problems = [error, ...(result?.errors ?? [])].filter(Boolean)
   const ready = Boolean(result?.gcode) && !busy && !saving && !problems.length && reviewed
-  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${settings.profilePasses === 3 ? '-3pass-2mm-holes-feed60-ramp20-5deg' : settings.rampProfile ? `${settings.profilePasses === 2 ? '-2pass' : ''}${settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : ''}-ramp20-5deg` : settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
+  const outputName = `${filename.replace(/\.dxf$/i, '') || 'component'}-${settings.thickness}mm${materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile) === '12-2pass-2mm-depth12p4' ? '-2pass-2mm-holes-depth12p4' : settings.profilePasses === 3 ? '-3pass-2mm-holes-feed60-ramp20-5deg' : settings.rampProfile ? `${settings.profilePasses === 2 ? '-2pass' : ''}${settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : ''}-ramp20-5deg` : settings.drillDepthMm !== undefined ? `-${settings.drillDepthMm}mm-holes` : settings.profilePasses === 2 ? '-2pass' : ''}.nc`
   const batch = queue.length > 1
   const currentFile = queue[fileIndex]
   const complete = queue.length > 0 && queue.every(entry => entry.status !== 'pending')

@@ -413,3 +413,16 @@ bundles include it; old bundles remain valid but cannot use this profile until
 regenerated. No existing components, sheet exports or queued jobs are rewritten.
 Three passes without the matching 12 mm stock, 2 mm drills and ramp selection
 are rejected, as are arbitrary feed overrides. All older profiles retain F3000.
+
+## 12 mm Two-Pass Profile With 0.4 mm Breakthrough
+
+Use `{ "thicknessMm": 12, "profilePasses": 2, "drillDepthMm": 2 }` in DXF
+conversion or a job's `sheet` object. Omit `rampProfile` for this profile.
+Profile ID: `12-2pass-2mm-depth12p4`. Cuts reach 6.2 and 12.4 mm in two equal
+6.2 mm passes, using F3000 (50 mm/s) cutting and F600 (10 mm/s) ramps at up
+to 3 degrees. Drills are 2 mm deep. Cutter diameter remains 6.35 mm, clearance
+Z20, with existing tabs and account program settings retained.
+
+This is a separate profile; existing 12.2 mm profiles are unchanged. New DXF
+variant bundles include it automatically. Older bundles remain valid but need
+regeneration before they can use this profile on a sheet.

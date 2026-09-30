@@ -76,7 +76,7 @@ describe('DXF API generation', () => {
     delete older.profiles['12-2mm']
     expect(parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Old panel', sku: 'OLD', filename: normal.filename, gcode: normal.gcode, materialVariants: older }, 'alice', '10000000-0000-4000-8000-000000000001').part.metadata.materialVariants?.profiles['12-2mm']).toBeUndefined()
   })
-  it.each([{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }, { thicknessMm: 12, profilePasses: 2 }])('rejects unsupported 2 mm drilling combinations %j', async patch => {
+  it.each([{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }])('rejects unsupported 2 mm drilling combinations %j', async patch => {
     await expect(generateDxfNc({ dxf: drawing, drillDepthMm: 2, ...patch })).rejects.toMatchObject({ status: 400 })
   })
   it('supports opt-in two-pass 12 mm generation with exact browser parity', async () => {

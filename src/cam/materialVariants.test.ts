@@ -105,7 +105,7 @@ it('uses 2 mm drills and one 12.2 mm contour pass for API jobs, without silently
   delete olderBundle.profiles['12-2mm']
   const legacy = { ...part, metadata: { ...part.metadata, materialVariants: olderBundle } }
   await expect(generateJob(request, [testItem], [legacy])).rejects.toThrow('unavailable')
-  for (const patch of [{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }, { profilePasses: 2 }, { thicknessMm: undefined }]) {
+  for (const patch of [{ thicknessMm: 6 }, { thicknessMm: 15 }, { thicknessMm: 18 }, { profilePasses: 3 }, { thicknessMm: undefined }]) {
     expect(() => parseJobRequest({ ...request, sheet: { ...request.sheet, ...patch } })).toThrow()
   }
 })
