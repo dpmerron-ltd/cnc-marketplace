@@ -42,7 +42,7 @@ account API key or MFA session. Keep all UUIDs and exact request bodies for retr
    one new default version. Missing entries, duplicate component SKUs, mismatched
    primary NC, missing PDF objects, or a changed default prevent publication.
 
-Component/profile bodies are limited to 12 MiB, with 2 MB and 20,000 lines per NC
+Component/profile bodies are limited to 12 MiB, with 2 MB and 30,000 lines per NC
 and 2 MB per DXF. Uploading profiles separately bounds server work for complex
 parts. At most 100 components and 20 documents are allowed per import; at most
 20 unpublished imports may be pending in one account. Respect `429` Retry-After.

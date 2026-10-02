@@ -244,7 +244,7 @@ describe('jobs HTTP API', () => {
     expect((await f.call(path, 'POST', input, 'bob')).status).toBe(200)
     expect((await f.call(path, 'POST', { ...input, ownerId: 'bob' })).status).toBe(400)
     expect((await f.call(path, 'POST', { ...input, gcode: 'G21\nG90\nM30' })).status).toBe(422)
-    expect((await f.call(path, 'POST', { ...input, gcode: 'x\n'.repeat(20001) })).status).toBe(413)
+    expect((await f.call(path, 'POST', { ...input, gcode: 'x\n'.repeat(30001) })).status).toBe(413)
     expect(f.repo.createComponent).toHaveBeenCalledTimes(2)
   })
   it('creates shared items with optional images accessible to other authenticated users', async () => {

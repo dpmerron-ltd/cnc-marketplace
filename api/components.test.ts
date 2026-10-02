@@ -45,7 +45,7 @@ describe('component uploads', () => {
   })
   it('rejects invalid identities, excessive payloads and unsupported or malformed machining', () => {
     for (const patch of [{ id: 'part' }, { filename: '../side.nc' }, { ownerId: 'bob' }]) expect(() => parseComponent({ ...input, ...patch }, 'alice', testItem.id)).toThrow('Invalid component')
-    expect(() => parseComponent({ ...input, gcode: 'x\n'.repeat(20001) }, 'alice', testItem.id)).toThrow('Component limit')
+    expect(() => parseComponent({ ...input, gcode: 'x\n'.repeat(30001) }, 'alice', testItem.id)).toThrow('Component limit')
     expect(() => parseComponent({ ...input, gcode: input.gcode.replace('G21', 'G20') }, 'alice', testItem.id)).toThrow('metric and absolute')
     expect(() => parseComponent({ ...input, gcode: input.gcode.replace('G90', 'G91') }, 'alice', testItem.id)).toThrow('metric and absolute')
     expect(() => parseComponent({ ...input, gcode: 'G21\nG90\nG00 Z20\nG00 X0 Y0\nG01 Z-2 F600\nG02 X20 Y20\nG00 Z20\nM30' }, 'alice', testItem.id)).toThrow('failed machining validation')
@@ -53,10 +53,21 @@ describe('component uploads', () => {
 })
 
 it('retains large bounded panel programs without dropping movements or validation', () => {
-  const moves = Array.from({ length: 12000 }, (_, index) => `G01 X${index % 2 ? 20 : 10} Y10 Z-2 F600`).join('\n')
+  const moves = Array.from({ length: 22522 }, (_, index) => `G01 X${index % 2 ? 20 : 10} Y10 Z-2 F600`).join('\n')
   const gcode = `G21\nG90\nG00 Z20\nG00 X10 Y10\nG01 Z-2 F600\n${moves}\nG00 Z20\nM30`
   const part = parseComponent({ ...input, gcode }, 'alice', testItem.id).part
   expect(part.gcode).toBe(gcode)
   expect(() => parseComponent({ ...input, gcode: gcode.replace('G21', 'G20') }, 'alice', testItem.id)).toThrow('metric and absolute')
-  expect(() => parseComponent({ ...input, gcode: gcode + '\n'.repeat(20000) }, 'alice', testItem.id)).toThrow('Component limit')
+  expect(() => parseComponent({ ...input, gcode: gcode + '\n'.repeat(30000) }, 'alice', testItem.id)).toThrow('Component limit')
+})
+
+ it('accepts exactly 30,000 NC lines and rejects the next line for primary and staged profiles', async () => {
+  const { parseImportProfile } = await import('./itemImports')
+  const gcode = input.gcode + '\n(comment)'.repeat(30000 - input.gcode.split('\n').length)
+  expect(gcode.split('\n')).toHaveLength(30000)
+  expect(parseComponent({ ...input, gcode }, 'alice', testItem.id).part.gcode).toBe(gcode)
+  const profile = { componentId: input.id, profileId: '14-4pass-2mm-ramp10-5deg', gcode, warnings: [], errors: [] }
+  expect(parseImportProfile(profile, 'alice', testItem.id).gcode).toBe(gcode)
+  expect(() => parseComponent({ ...input, gcode: gcode + '\n(comment)' }, 'alice', testItem.id)).toThrow('Component limit')
+  expect(() => parseImportProfile({ ...profile, gcode: gcode + '\n(comment)' }, 'alice', testItem.id)).toThrow('Component limit')
 })
