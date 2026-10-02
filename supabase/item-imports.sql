@@ -78,7 +78,7 @@ begin
   elsif p_kind='profile' then
     component_id := p_payload->>'componentId';
     if not(imp.manifest->'componentIds' ? component_id) or p_key is distinct from component_id || '/' || (p_payload->>'profileId')
-      or p_payload->>'profileId' not in ('6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg','12-2pass-2mm-depth12p4')
+      or p_payload->>'profileId' not in ('6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg','12-2pass-2mm-depth12p4','14-4pass-2mm-ramp10-5deg')
       or not exists(select 1 from public.item_import_entries where import_id=p_id and kind='component' and key=component_id) then raise exception 'IMPORT_INVALID'; end if;
   else raise exception 'IMPORT_INVALID'; end if;
   insert into public.item_import_entries(import_id,kind,key,payload) values(p_id,p_kind,p_key,p_payload);

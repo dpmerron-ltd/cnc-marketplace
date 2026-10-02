@@ -10,7 +10,12 @@ Variants retain their own material depths/passes, blind-drill depths, ramps and 
 
 **Original NC** preserves the existing workflow for old components without variants. Selecting a thickness requires a variant for every placed component; old NC-only components must be regenerated from DXF first. Existing files, queued jobs and saved sheet settings are not retroactively rewritten. Variants are stored in the shared component's separate `material_variants` field and included in project exports/backups. Apply the additive schema update before publishing this version.
 
-Open **Generate** while signed in. Upload an ASCII DXF, select 6 mm, 12 mm, 15 mm or 18 mm stock, review operations and the toolpath preview, then download a component program or add it to an item in your own account. The drawing stays in the browser until you explicitly add the generated component to an item. Switching accounts unmounts the generator and clears its draft.
+Open **Generate** while signed in. Upload an ASCII DXF, select 6 mm, 12 mm, 14 mm, 15 mm or 18 mm stock, review operations and the toolpath preview, then download a component program or add it to an item in your own account. The drawing stays in the browser until you explicitly add the generated component to an item. Switching accounts unmounts the generator and clears its draft.
+
+The 14 mm preset uses four 3.6 mm passes to 14.4 mm, 2 mm drills, 50 mm/s
+cutting and 10 mm/s ramps at up to 5 degrees, with a 6.35 mm cutter and Z20
+clearance. It is also available on the sheet selector for regenerated components.
+Automatic 35 mm hinge pockets remain restricted to the existing 15/18 mm presets.
 
 You can select multiple DXFs together. Files are reviewed in selection order; **Confirm & add component** adds the current component to the selected catalogue item and opens the next. Downloading NC is a separate action and does not advance the queue. Each drawing requires its own review. Material thickness and the selected catalogue item carry forward, while units, operation overrides and preview state reset. **Add DXFs** appends to an unfinished queue; **Skip file** moves past a file without adding its component. The queue shows confirmed/skipped counts and remains browser-only; leaving Generate or switching accounts clears unprocessed uploads. Each file retains the same individual size and geometry limits.
 

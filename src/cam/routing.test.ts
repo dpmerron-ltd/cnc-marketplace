@@ -82,7 +82,7 @@ describe('Profile entries', () => {
 describe('Routed machining output', () => {
   const source = drawing([rectangle('outer', 0, 0, 600, 300), drill('far', 550, 30), drill('near', 30, 30), drill('middle', 300, 30)])
   it.each(materialProfiles)('preserves machining rules for $label', profile => {
-    const settings: CamSettings = { thickness: profile.thickness, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: {} }
+    const settings: CamSettings = { thickness: profile.thickness, profilePasses: (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: {} }
     const job = generateCam(source, settings)
     expect(job.errors).toEqual([])
     expect(job.operations.map(op => op.featureId)).toEqual(['near', 'middle', 'far', 'outer'])

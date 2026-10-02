@@ -46,7 +46,7 @@ export function parseImportComponent(value: unknown, owner: string, item: string
 }
 function checkDepth(id: string, gcode: string) {
   const profile = materialProfiles.find(p => p.id === id)!
-  if (simulateGCode(gcode).deepestCutMm > materialPreset(profile.thickness, profile.thickness === 12 ? profile.profilePasses : undefined, profile.drillDepthMm, profile.rampProfile).depth + 0.001) {
+  if (simulateGCode(gcode).deepestCutMm > materialPreset(profile.thickness, (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined, profile.drillDepthMm, profile.rampProfile).depth + 0.001) {
     throw new JobError(`${profile.label} variant cuts deeper than its material preset.`, 422)
   }
 }

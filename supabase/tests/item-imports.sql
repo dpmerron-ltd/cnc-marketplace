@@ -32,7 +32,7 @@ do $$ declare imp uuid; manifest jsonb; result jsonb; profile text; begin
     if result is distinct from public.begin_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,manifest) then raise exception 'Start retry differs'; end if;
     perform public.stage_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,'component','92000000-0000-4000-8000-000000000031',
       '{"id":"92000000-0000-4000-8000-000000000031","sku":"SIDE-RC","name":"New side","original_filename":"new.nc","gcode":"NEW NC","dxf":"NEW DXF","width":30,"height":40,"bounding_box":{},"original_bounds":{},"metadata":{},"primaryProfile":"12-2mm"}');
-    foreach profile in array array['6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg','12-2pass-2mm-depth12p4'] loop
+    foreach profile in array array['6','12','12-2mm','12-2pass','15','18','18-9mm','12-ramp20-5deg','18-9mm-ramp20-5deg','12-2pass-2mm-ramp20-5deg','12-3pass-2mm-feed60-ramp20-5deg','12-2pass-2mm-depth12p4','14-4pass-2mm-ramp10-5deg'] loop
       perform public.stage_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001',imp,'profile','92000000-0000-4000-8000-000000000031/'||profile,
         jsonb_build_object('componentId','92000000-0000-4000-8000-000000000031','profileId',profile,'gcode','NEW NC','warnings','[]'::jsonb,'errors','[]'::jsonb));
     end loop;
@@ -62,6 +62,7 @@ do $$ declare result jsonb; new_id uuid; begin
   if not exists(select 1 from public.marketplace_items where id=new_id and version_default and version_number=2 and name='Revision C') then raise exception 'New default missing'; end if;
   if (select count(*) from public.cnc_components where item_id=new_id)<>1 or (select count(*) from public.item_documents where item_id=new_id)<>1 then raise exception 'Complete replacement failed'; end if;
   if not exists(select 1 from public.cnc_components where item_id=new_id and sku='SIDE-RC' and dxf='NEW DXF' and material_variants->>'primaryProfile'='12-2mm') then raise exception 'New geometry/metadata missing'; end if;
+  if not exists(select 1 from public.cnc_components where item_id=new_id and material_variants->'profiles'->'14-4pass-2mm-ramp10-5deg'->>'gcode'='NEW NC') then raise exception 'Four-pass profile missing'; end if;
 end $$;
 select pg_temp.expect_import_error($q$select public.publish_item_import('00000000-0000-4000-8000-000000000009','92000000-0000-4000-8000-000000000001','92000000-0000-4000-8000-000000000102')$q$,'IMPORT_CONFLICT');
 reset role;

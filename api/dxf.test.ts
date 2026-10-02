@@ -21,7 +21,7 @@ describe('DXF API generation', () => {
     expect(result.materialVariants.profiles['6'].gcode).toBe(result.gcode)
     for (const profile of materialProfiles) {
       expect(result.materialVariants.profiles[profile.id]!.errors).toEqual([])
-      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
+      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
     }
     const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: 'panel.nc', dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
     expect(uploaded.part.metadata.materialVariants).toEqual(result.materialVariants)

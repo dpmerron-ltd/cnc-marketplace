@@ -28,7 +28,7 @@ const sheet: Sheet = { name: 'Thickness test', width: 500, height: 400, spacing:
 
 describe('material variants', () => {
   it.each(materialProfiles)('generates $label with the same operations, tabs and account programs', profile => {
-    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: profile.thickness === 12 ? profile.profilePasses : undefined })
+    const expected = generateCam(drawing, { ...settings, thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined })
     const variant = bundle.profiles[profile.id]!
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)

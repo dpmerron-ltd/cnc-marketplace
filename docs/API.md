@@ -131,8 +131,8 @@ Request fields:
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `dxf` | Yes | ASCII DXF text, at most 2,000,000 UTF-8 bytes |
-| `thicknessMm` | Yes | `6`, `12`, `15` or `18` |
-| `profilePasses` | No | Only for 12 mm stock: `1` (default) or `2` (depths 6.1, then 12.2 mm). Omit for 6/15/18 mm stock. |
+| `thicknessMm` | Yes | `6`, `12`, `14`, `15` or `18` |
+| `profilePasses` | No | For 12 mm stock: `1` (default), `2`, or `3` with the matching preset selectors below. For 14 mm: `4` with `drillDepthMm: 2` and `rampProfile: "10mm-s-5deg"`. Omit for 6/15/18 mm stock. |
 | `filename` | No | DXF basename, default `component.dxf`; no directories; letters, digits, spaces, dots, underscores and hyphens |
 | `units` | No | `auto` (default), `mm`, or `inches`; output is always metric |
 | `layerOperations` | No | Exact DXF layer names mapped to operation overrides |
@@ -426,3 +426,25 @@ Z20, with existing tabs and account program settings retained.
 This is a separate profile; existing 12.2 mm profiles are unchanged. New DXF
 variant bundles include it automatically. Older bundles remain valid but need
 regeneration before they can use this profile on a sheet.
+
+## 14 mm Four-Pass Profile
+
+Use the following selectors in a DXF conversion request or a job's `sheet` object:
+
+```json
+{ "thicknessMm": 14, "profilePasses": 4, "drillDepthMm": 2, "rampProfile": "10mm-s-5deg" }
+```
+
+Profile ID: `14-4pass-2mm-ramp10-5deg`. Four equal 3.6 mm passes reach
+3.6, 7.2, 10.8 and 14.4 mm, including 0.4 mm breakthrough. Cutting feed is
+50 mm/s (F3000); ramps are 10 mm/s (F600) at up to 5 degrees. Drills are
+2 mm deep at F600. The cutter remains 6.35 mm, clearance Z20, with account
+program settings and existing tab rules retained. Blind pockets use the same
+pass schedule capped at their assigned depth. Automatic hinge pockets remain
+restricted to 15 mm and 18 mm stock.
+
+All four selectors are required for this preset; unsupported combinations
+return 400. The generator and sheet selectors expose it, and new automatic
+variant bundles include it. Existing bundles remain valid but need regeneration
+before this profile can be selected for export. Saved components and queued
+jobs are not rewritten. Selecting a stock thickness does not resize DXF joints.

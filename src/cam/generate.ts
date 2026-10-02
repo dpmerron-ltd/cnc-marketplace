@@ -8,7 +8,7 @@ import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, 
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
-import { cutFeedPreset, materialProfileId, rampPreset } from './materialProfiles'
+import { cutFeedPreset, materialProfileId, rampPreset, validProfilePassSelection } from './materialProfiles'
 import { profileEntry, routeOperations, type RouteOperation } from './routing'
 
 const toolRadius = camPreset.diameter / 2
@@ -16,6 +16,7 @@ const n = (value: number) => Number(value.toFixed(4)).toString()
 const xy = (p: Point) => `X${n(p.x)} Y${n(p.y)}`
 const comment = (value: string) => value.replace(/[^a-zA-Z0-9 _.,:/-]/g, '_').slice(0, 120)
 export const materialPreset = (thickness: CamSettings['thickness'], profilePasses: CamSettings['profilePasses'] = 1, drillDepthMm?: CamSettings['drillDepthMm'], rampProfile?: CamSettings['rampProfile']) => {
+  if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '14-4pass-2mm-ramp10-5deg') return { depth: 14.4, passes: [3.6, 7.2, 10.8, 14.4], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-depth12p4') return { depth: 12.4, passes: [6.2, 12.4], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-3pass-2mm-feed60-ramp20-5deg') return { depth: 12.2, passes: [4, 8, 12.2], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [6, 12.2], drill: 2 }
@@ -88,9 +89,8 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   errors.push(...validatePrograms(programs, camPreset.clearance))
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
   if (settings.drillDepthMm !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Use a supported material, pass, drill depth and ramp combination.')
-  if (![6, 12, 15, 18].includes(settings.thickness)) errors.push('Select 6 mm, 12 mm, 15 mm or 18 mm material.')
-  if (settings.profilePasses !== undefined && (settings.thickness !== 12 || ![1, 2, 3].includes(settings.profilePasses))) errors.push('Profile pass selection is only supported for 12 mm stock: choose 1, 2 or 3 passes.')
-  if (settings.profilePasses === 3 && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Profile pass selection: three passes require 12 mm stock, 2 mm drills and the 20 mm/s, 5 degree ramp; cutting feed is 60 mm/s.')
+  if (![6, 12, 14, 15, 18].includes(settings.thickness)) errors.push('Select 6 mm, 12 mm, 14 mm, 15 mm or 18 mm material.')
+  if (!validProfilePassSelection(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Profile pass selection requires a supported preset: 12 mm with 1, 2 or 3 passes, or 14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
   const features = drawing.features.map(f => ({ ...f, points: f.points.map(p => ({ x: p.x * factor, y: p.y * factor })), circle: f.circle ? { center: { x: f.circle.center.x * factor, y: f.circle.center.y * factor }, radius: f.circle.radius * factor } : undefined, ...settings.operations[f.id] }))
   const active = features.filter(f => f.kind !== 'ignore')
@@ -180,7 +180,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const origin = hasControllerStart(programs.startGcode) ? { x: 0, y: 0 } : simulateGCode(startProgramLines(programs, 20).join('\n')).moves.at(-1)?.end ?? { x: 0, y: 0 }
   for (const { operation: { feature: f }, entry } of routeOperations(route, origin).steps) {
     try {
-      if (f.hinge && settings.thickness <= 12) throw new Error('35 mm hinge pockets are only supported in 15 mm or 18 mm stock. Select 15 mm or 18 mm stock or explicitly exclude the hinge geometry.')
+      if (f.hinge && ![15, 18].includes(settings.thickness)) throw new Error('35 mm hinge pockets are only supported in 15 mm or 18 mm stock. Select 15 mm or 18 mm stock or explicitly exclude the hinge geometry.')
       if (f.kind === 'unassigned') throw new Error('Assign an operation or explicitly exclude this geometry.')
       if (f.kind !== 'drill' && !f.closed) throw new Error('An open contour cannot be machined as a closed profile.')
       if (f.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x > 10000 || p.y > 10000)) throw new Error('Machining coordinates exceed 10,000 mm.')

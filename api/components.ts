@@ -59,7 +59,7 @@ export function parseComponent(value: unknown, ownerId: string, itemId: string, 
       // Only the repository supplies this trusted snapshot; requests cannot mark NC as validated.
       if (storedVariants?.profiles[profile.id]?.gcode === variant.gcode) continue
       parseComponent({ ...input, materialVariants: undefined, gcode: variant.gcode }, ownerId, itemId)
-      if (simulateGCode(variant.gcode).deepestCutMm > materialPreset(profile.thickness, profile.thickness === 12 ? profile.profilePasses : undefined, profile.drillDepthMm, profile.rampProfile).depth + 0.001) throw new JobError(`${profile.label} variant cuts deeper than its material preset.`, 422)
+      if (simulateGCode(variant.gcode).deepestCutMm > materialPreset(profile.thickness, (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined, profile.drillDepthMm, profile.rampProfile).depth + 0.001) throw new JobError(`${profile.label} variant cuts deeper than its material preset.`, 422)
     }
     part.metadata.materialVariants = input.materialVariants
   }

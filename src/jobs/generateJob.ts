@@ -14,7 +14,7 @@ import type { Part } from '../models/Part'
 import type { MarketplaceItem } from '../models/Item'
 import { defaultItem } from '../models/itemVersions'
 import type { JobManifest, JobRequest } from './types'
-import { materialProfileId, rampProfileSchema } from '../cam/materialProfiles'
+import { validProfilePassSelection, materialProfileId, rampProfileSchema } from '../cam/materialProfiles'
 import { selectMaterialParts } from '../gcode/materialSelection'
 
 export class JobError extends Error {
@@ -27,9 +27,9 @@ export const jobRequestSchema = z.strictObject({
   jobName: text(160), orderNumber: text(100), notes: z.string().trim().max(2000).default(''),
   items: z.array(z.strictObject({ itemId: z.uuid().optional(), sku: text(100).optional(), quantity: z.number().int().min(1).max(20) }).refine(value => Boolean(value.itemId) !== Boolean(value.sku), 'Supply either itemId or sku, not both.')).min(1).max(20),
   sheet: z.strictObject({
-    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(), drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(), rampProfile: rampProfileSchema.optional(),
+    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(14), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(), rampProfile: rampProfileSchema.optional(),
     spacingMm: z.number().min(0).max(100).default(30), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(true),
-  }).refine(value => value.rampProfile === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.').refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => value.profilePasses === undefined || (value.thicknessMm === 12 && (value.profilePasses !== 3 || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined)), 'Pass selection requires 12 mm stock; three passes require 2 mm drills and the 20 mm/s, 5 degree ramp.').refine(value => value.drillDepthMm === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.'),
+  }).refine(value => value.rampProfile === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.').refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => validProfilePassSelection(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile), 'Pass selection requires a supported 12 mm preset, or 14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.').refine(value => value.drillDepthMm === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.'),
   labels: z.strictObject({ widthMm: z.number().min(40).max(190).default(50), heightMm: z.number().min(20).max(277).default(25) }).default({ widthMm: 50, heightMm: 25 }),
 })
 

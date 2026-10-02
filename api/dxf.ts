@@ -5,7 +5,7 @@ import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/t
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
 import { generateMaterialVariants } from '../src/cam/materialVariants'
-import { materialProfileId, materialProfiles, materialProfileSchema, cutFeedPreset, rampPreset, rampProfileSchema } from '../src/cam/materialProfiles'
+import { validProfilePassSelection, materialProfileId, materialProfiles, materialProfileSchema, cutFeedPreset, rampPreset, rampProfileSchema } from '../src/cam/materialProfiles'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -17,8 +17,8 @@ const override = z.strictObject({
 const overrides = z.record(z.string().min(1).max(160), override).refine(value => Object.keys(value).length <= 100, 'At most 100 operation overrides are allowed.').default({})
 const schema = z.strictObject({
   dxf: z.string().min(1).max(2000000),
-  thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(15), z.literal(18)]),
-  profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(14), z.literal(15), z.literal(18)]),
+  profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
   drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(),
   rampProfile: rampProfileSchema.optional(),
   variantProfiles: z.array(materialProfileSchema).min(1).max(materialProfiles.length).refine(value => new Set(value).size === value.length, 'Use each profile once.').optional(),
@@ -26,7 +26,7 @@ const schema = z.strictObject({
   units: z.enum(['auto', 'mm', 'inches']).default('auto'),
   layerOperations: overrides,
   operations: overrides,
-}).refine(value => value.rampProfile === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['rampProfile'], message: 'Use a supported material, pass, drill depth and ramp combination.' }).refine(value => value.profilePasses === undefined || (value.thicknessMm === 12 && (value.profilePasses !== 3 || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined)), { path: ['profilePasses'], message: 'Pass selection requires 12 mm stock; three passes require 2 mm drills and the 20 mm/s, 5 degree ramp.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['drillDepthMm'], message: 'Use a supported material, pass, drill depth and ramp combination.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
+}).refine(value => value.rampProfile === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['rampProfile'], message: 'Use a supported material, pass, drill depth and ramp combination.' }).refine(value => validProfilePassSelection(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile), { path: ['profilePasses'], message: 'Pass selection requires a supported 12 mm preset, or 14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.' }).refine(value => value.drillDepthMm === undefined || materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined, { path: ['drillDepthMm'], message: 'Use a supported material, pass, drill depth and ramp combination.' }).refine(value => value.variantProfiles === undefined || value.variantProfiles.includes(materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile)!), { path: ['variantProfiles'], message: 'Requested variants must include the primary material profile.' })
 
 export async function generateDxfNc(value: unknown, programs: ProgramSettings = defaultProgramSettings) {
   const parsed = schema.safeParse(value)
@@ -64,7 +64,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
   const material = materialPreset(input.thicknessMm, input.profilePasses, input.drillDepthMm, input.rampProfile)
   const materialVariants = generateMaterialVariants(drawing, { thickness: input.thicknessMm, profilePasses: input.profilePasses, drillDepthMm: input.drillDepthMm, rampProfile: input.rampProfile, units: input.units, operations, programs }, result, input.variantProfiles)
   return {
-    filename: input.filename.replace(/\.dxf$/i, materialVariants.primaryProfile === '12-2pass-2mm-depth12p4' ? '-12mm-2pass-2mm-holes-depth12p4.nc' : input.profilePasses === 3 ? '-12mm-3pass-2mm-holes-feed60-ramp20-5deg.nc' : input.rampProfile ? `-${input.thicknessMm}mm${input.profilePasses === 2 ? '-2pass' : ''}${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
+    filename: input.filename.replace(/\.dxf$/i, materialVariants.primaryProfile === '14-4pass-2mm-ramp10-5deg' ? '-14mm-4pass-2mm-holes-ramp10-5deg.nc' : materialVariants.primaryProfile === '12-2pass-2mm-depth12p4' ? '-12mm-2pass-2mm-holes-depth12p4.nc' : input.profilePasses === 3 ? '-12mm-3pass-2mm-holes-feed60-ramp20-5deg.nc' : input.rampProfile ? `-${input.thicknessMm}mm${input.profilePasses === 2 ? '-2pass' : ''}${input.drillDepthMm !== undefined ? `-${input.drillDepthMm}mm-holes` : ''}-ramp20-5deg.nc` : input.drillDepthMm !== undefined ? `-${input.thicknessMm}mm-${input.drillDepthMm}mm-holes.nc` : input.profilePasses === 2 ? '-12mm-2pass.nc' : '.nc'),
     contentType: 'text/plain', bytes, sha256: await sha256(result.gcode), gcode: result.gcode,
     reviewRequired: true, materialVariants,
     programSettings: { ...programs },
