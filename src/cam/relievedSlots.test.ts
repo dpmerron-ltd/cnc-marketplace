@@ -41,7 +41,7 @@ describe('relieved 12 mm mortises', () => {
     expect(relievedRectangleGeometry(points, 6.35)).toBeUndefined()
     expect(defaultTabCount({ ...hole, points })).toBe(4)
   })
-  it('exports every slot tab-free across all five profiles, retaining outer tabs and drills', async () => {
+  it('exports every slot tab-free across every material profile, retaining outer tabs and drills', async () => {
     const result = await generateDxfNc({ dxf: source, thicknessMm: 12, layerOperations: { CUT_INNER_THROUGH: { cornerOvercuts: false, tabs: 4 } } })
     expect(result.operations.filter(op => op.kind === 'inside')).toHaveLength(13)
     expect(result.operations.filter(op => op.kind === 'inside').every(op => op.tabCount === 0)).toBe(true)

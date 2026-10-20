@@ -12,7 +12,7 @@ export function generateMaterialVariants(drawing: CamDrawing, settings: CamSetti
     }
     try {
       const result = profile.id === primaryProfile && primaryResult ? primaryResult : generateCam(drawing, {
-        ...settings, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, thickness: profile.thickness, profilePasses: (profile.thickness === 12 || profile.thickness === 14) ? profile.profilePasses : undefined,
+        ...settings, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined,
       })
       const errors = [...result.errors]
       if (result.gcode.split('\n').length > 30000 || new TextEncoder().encode(result.gcode).length > 2000000) errors.push('Generated NC exceeds 30,000 lines or 2 MB. Split the drawing.')

@@ -39,6 +39,7 @@ it('generates four 3.6 mm passes, 2 mm drills, F3000 cuts and F600 ramps at up t
   expect(result.operations.find(op => op.kind === 'outside')?.tabCount).toBe(4)
   expect(result.materialVariants.profiles['12-2pass'].gcode).toContain('Pass depth 6.1')
   expect(result.materialVariants.profiles['12-2pass-2mm-ramp20-5deg']?.gcode).toContain('Pass depth 12.2')
+  expect(result.materialVariants.profiles['13-4pass-2mm-ramp10-5deg']?.gcode).toContain('Pass depth 13.4')
 })
 
 it('validates uploads and selects the exact profile for jobs without changing older bundles', async () => {
