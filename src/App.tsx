@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { Download, UserRound } from 'lucide-react'
+import { Download, Trash2, UserRound } from 'lucide-react'
 import { ProfilePage } from './ui/ProfilePage'
 import { loadProgramSettings, saveProgramSettings } from './storage/programSettingsStore'
 import type { ProgramSettings } from './gcode/programSettings'
@@ -1086,12 +1086,26 @@ function App() {
     setSelectedInstanceId(undefined)
   }
 
-  function clearSheet() {
-    setSheet((current) => ({ ...current, instances: [] }))
+  function clearSheet(sheetIndex?: number) {
+    const instances = sheetIndex === undefined ? [] : sheet.instances.filter(instance => instance.sheetIndex !== sheetIndex)
+    const count = sheet.instances.length - instances.length
+    if (!count) return
+    const target = sheetIndex === undefined ? 'all sheets' : `Sheet ${sheetIndex + 1}`
+    if (!window.confirm(`Delete all ${count} part${count === 1 ? '' : 's'} from ${target}? This includes locked parts. Components will remain in the library. This cannot be undone.`)) return
+
+    const remainingIds = new Set(instances.map(instance => instance.id))
+    const nextSheet = {
+      ...sheet,
+      instances,
+      orderImports: sheet.orderImports?.map(entry => ({ ...entry, instanceIds: entry.instanceIds.filter(id => remainingIds.has(id)) })).filter(entry => entry.instanceIds.length > 0),
+    }
+    setSheet(nextSheet)
     setSelectedInstanceId(undefined)
-    setActiveSheetIndex(0)
+    setActiveSheetIndex(Math.min(currentSheetIndex, sheetCountFor(nextSheet) - 1))
     setPreview(undefined)
-    setStatus('Cleared placed parts from the sheet.')
+    setPreviewSimulation(undefined)
+    setPendingExport(undefined)
+    setStatus(`Deleted ${count} part${count === 1 ? '' : 's'} from ${target}.`)
   }
 
   function buildProject(): Project {
@@ -1479,7 +1493,7 @@ function App() {
               setActiveSheetIndex(0)
             }}
           />
-          <button type="button" onClick={clearSheet}>Clear Sheet</button>
+          <button type="button" className="danger" disabled={!sheet.instances.length} onClick={() => clearSheet()}>Clear All Sheets</button>
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
           <button type="button" onClick={previewGCode}>Preview</button>
@@ -1544,6 +1558,15 @@ function App() {
                   Sheet {index + 1}
                 </button>
               ))}
+              <button
+                type="button"
+                className="danger icon-text-button sheet-clear-button"
+                aria-label={`Delete all parts from Sheet ${currentSheetIndex + 1}`}
+                disabled={!sheet.instances.some(instance => instance.sheetIndex === currentSheetIndex)}
+                onClick={() => clearSheet(currentSheetIndex)}
+              >
+                <Trash2 size={16} /> Delete All Parts
+              </button>
             </div>
             <SheetEditor
               parts={sheetParts}

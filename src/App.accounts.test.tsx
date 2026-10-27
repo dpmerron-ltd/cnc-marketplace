@@ -5,6 +5,7 @@ import { testParts } from './test/jobFixtures'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
 import { summarizePart, type Part } from './models/Part'
+import { loadProject } from './storage/projectStorage'
 vi.mock('./ui/ItemDocuments', () => ({ ItemDocuments: () => <section aria-label="Item documents" /> }))
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
@@ -67,6 +68,31 @@ function lazyLibrary() {
 
 async function openSheet() {
   fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+}
+
+function placedLibrary() {
+  const remote = library('alice')
+  remote.parts = testParts.map(part => ({ ...part, ownerId: 'alice', itemId: 'alice-item' }))
+  return {
+    ...remote,
+    sheet: {
+      name: 'Cutting job', orderNumber: 'ORDER-42', material: 'Plywood',
+      width: 500, height: 500, spacing: 10, borderSpacing: 10, nextPartNumber: 12,
+      screwMarkingEnabled: false,
+      gcodeSettings: { ...defaultProgramSettings, safeZ: 20 },
+      instances: [
+        { id: 'first', partId: remote.parts[0].id, x: 20, y: 20, rotation: 0, locked: false, sheetIndex: 0, partNumber: 5 },
+        { id: 'middle-locked', partId: remote.parts[1].id, x: 20, y: 20, rotation: 0, locked: true, sheetIndex: 1, partNumber: 7 },
+        { id: 'middle', partId: remote.parts[0].id, x: 100, y: 20, rotation: 0, locked: false, sheetIndex: 1, partNumber: 8 },
+        { id: 'last', partId: remote.parts[1].id, x: 20, y: 20, rotation: 0, locked: false, sheetIndex: 2, partNumber: 11 },
+      ],
+      orderImports: [
+        { key: 'shared-order', name: 'ORDER-42', instanceIds: ['first', 'middle-locked'] },
+        { key: 'middle-order', name: 'ORDER-43', instanceIds: ['middle'] },
+        { key: 'last-order', name: 'ORDER-44', instanceIds: ['last'] },
+      ],
+    },
+  }
 }
 
 describe('account switching', () => {
@@ -245,6 +271,94 @@ describe('account switching', () => {
     await openSheet()
     fireEvent.change(screen.getByRole('textbox', { name: 'Job name' }), { target: { value: 'Updated sheet' } })
     await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ name: 'Updated sheet' }), expect.anything(), 'alice'))
+  })
+
+  it('confirms deleting all parts on the selected sheet, preserving other sheets and library components', async () => {
+    const remote = placedLibrary()
+    mock.load.mockResolvedValue(remote)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      const { container } = render(<App />)
+      await openSheet()
+      fireEvent.click(screen.getByRole('button', { name: 'Sheet 2' }))
+      fireEvent.pointerDown(container.querySelector('.part-outline')!)
+      expect(screen.getByRole('checkbox', { name: 'Locked' })).toBeChecked()
+      fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+      expect(screen.getByRole('heading', { name: 'Combined G-code Preview' })).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete all parts from Sheet 2' }))
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Delete all 2 parts from Sheet 2?'))
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(2)
+      expect(screen.getByRole('checkbox', { name: 'Locked' })).toBeChecked()
+      expect(screen.getByRole('heading', { name: 'Combined G-code Preview' })).toBeInTheDocument()
+
+      confirm.mockReturnValue(true)
+      fireEvent.click(screen.getByRole('button', { name: 'Delete all parts from Sheet 2' }))
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(0)
+      expect(screen.getByRole('button', { name: 'Delete all parts from Sheet 2' })).toBeDisabled()
+      expect(screen.queryByRole('checkbox', { name: 'Locked' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Combined G-code Preview' })).not.toBeInTheDocument()
+      expect(container.querySelector('.with-simulator')).not.toBeInTheDocument()
+      expect(screen.getByText('Deleted 2 parts from Sheet 2.')).toBeInTheDocument()
+
+      const remaining = [remote.sheet.instances[0], remote.sheet.instances[3]]
+      await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({
+        ...remote.sheet,
+        instances: remaining,
+        orderImports: [
+          { ...remote.sheet.orderImports[0], instanceIds: ['first'] },
+          remote.sheet.orderImports[2],
+        ],
+      }))
+      expect(loadProject('alice')?.sheet.instances).toEqual(remaining)
+      expect(loadProject('alice')?.parts).toHaveLength(2)
+      fireEvent.click(screen.getByRole('button', { name: 'Sheet 1' }))
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(1)
+      fireEvent.click(screen.getByRole('button', { name: 'Sheet 3' }))
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(1)
+    } finally { confirm.mockRestore() }
+  })
+
+  it('keeps a valid selected sheet when deleting the last sheet and disables deletion on an empty job', async () => {
+    mock.load.mockResolvedValue(placedLibrary())
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      const { container } = render(<App />)
+      await openSheet()
+      fireEvent.click(screen.getByRole('button', { name: 'Sheet 3' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete all parts from Sheet 3' }))
+      expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Delete all 1 part from Sheet 3?'))
+      expect(screen.queryByRole('button', { name: 'Sheet 3' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Sheet 2' })).toHaveClass('active-sheet-tab')
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(2)
+      fireEvent.click(screen.getByRole('button', { name: 'Delete all parts from Sheet 2' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete all parts from Sheet 1' }))
+      expect(screen.getByRole('button', { name: 'Sheet 1' })).toHaveClass('active-sheet-tab')
+      expect(screen.getByRole('button', { name: 'Delete all parts from Sheet 1' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Clear All Sheets' })).toBeDisabled()
+      expect(container.querySelectorAll('.part-outline')).toHaveLength(0)
+      await waitFor(() => expect(loadProject('alice')?.sheet.instances).toEqual([]))
+    } finally { confirm.mockRestore() }
+  })
+
+  it('clears every sheet only after confirming the separate job-wide action', async () => {
+    const remote = placedLibrary()
+    mock.load.mockResolvedValue(remote)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      render(<App />)
+      await openSheet()
+      fireEvent.click(screen.getByRole('button', { name: 'Sheet 2' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Clear All Sheets' }))
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Delete all 4 parts from all sheets?'))
+      expect(screen.getByRole('button', { name: 'Sheet 3' })).toBeInTheDocument()
+      confirm.mockReturnValue(true)
+      fireEvent.click(screen.getByRole('button', { name: 'Clear All Sheets' }))
+      expect(screen.queryByRole('button', { name: 'Sheet 2' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Sheet 1' })).toHaveClass('active-sheet-tab')
+      await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ ...remote.sheet, instances: [], orderImports: [] }))
+      expect(loadProject('alice')?.parts).toHaveLength(2)
+    } finally { confirm.mockRestore() }
   })
 
   it('can save sheet history to the cloud when the library exceeds browser backup capacity', async () => {

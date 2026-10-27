@@ -565,6 +565,10 @@ button.danger {
   color: #1f4fb8;
 }
 
+.sheet-tabs .sheet-clear-button {
+  margin-left: auto;
+}
+
 .sheet {
   background:
     linear-gradient(#eef2f6 1px, transparent 1px),
