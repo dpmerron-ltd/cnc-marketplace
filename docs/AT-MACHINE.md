@@ -16,10 +16,18 @@ Mark the export **Cutting**, then **Completed**, or cancel it. These are record-
 
 The layout is an inspection aid, not a safety certification or collision simulator. Verify the actual file, stock, tooling, workholding, origin and clearance. Original-NC exports without an explicitly selected material profile show thickness as unknown rather than guessing from machining depth.
 
+## Re-cut Parts
+
+Select a part on the bed layout or in the parts list, then choose **Re-cut**. This requests one replacement and saves it to **Queue → Re-cuts**. The request keeps the original part number, sheet, job/order, material and thickness from the saved export. A part already waiting for re-cut shows **Queued for re-cut**; repeated clicks, retries and requests from another device do not create another pending entry.
+
+In **Re-cuts**, use the part link to reopen its original sheet with that part selected. **Mark re-cut** completes the request; **Remove** cancels it. Completed and removed requests remain available through the status filter, and the same part can be requested again later. Requests are private to the exporting account and persist across devices and refreshes.
+
+These actions track replacement work. They do not change the original export, generate replacement NC files, or control the CNC.
+
 ## Scope and Deployment
 
 Only new sheet exports create these records. Existing sheet history cannot reconstruct exact previously exported NC files and is not backfilled. API-created jobs remain in the existing **Queue** workflow.
 
-`supabase/schema.sql` creates `cnc_machine_runs`. Deploy it before the frontend. Queue listing selects metadata only; full snapshots load only when opened and do not require component downloads. There are no changes to G-code generation or existing component records.
+`supabase/schema.sql` creates `cnc_machine_runs` and `cnc_machine_recuts`. Deploy it before the frontend. Queue listing selects metadata only; full snapshots load only when opened and do not require component downloads. There are no changes to G-code generation or existing component records.
 
 Verification includes snapshot/NC identity, material selection and placement mapping, failed-save retries, account isolation, immutable storage, legal status transitions, direct links, and desktop/mobile browser checks.

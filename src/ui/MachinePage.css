@@ -39,6 +39,10 @@
 .machine-part-list span { flex: 1; overflow-wrap: anywhere; }
 .machine-part-list small { flex-shrink: 0; }
 .machine-part-detail { padding-block: 12px; }
+.machine-recut-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.machine-recut-actions a { color: #1769aa; }
+.machine-map g[role=button] { cursor: pointer; }
+.machine-map g[role=button]:focus-visible { outline: 2px solid #1769aa; }
 .machine-part-detail table { width: 100%; text-align: left; border-collapse: collapse; }
 .machine-part-detail td, .machine-part-detail th { padding: 8px; border-bottom: 1px solid #d7dde2; }
 .machine-file { display: grid; gap: 10px; padding: 12px 0; }

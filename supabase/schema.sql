@@ -395,4 +395,76 @@ drop trigger if exists guard_machine_export on public.cnc_machine_runs;
 create trigger guard_machine_export before insert or update on public.cnc_machine_runs
   for each row execute function public.guard_machine_export();
 
+-- Replacement requests refer to the exact part in an immutable machine export.
+create table if not exists public.cnc_machine_recuts (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  source_run_id uuid not null references public.cnc_machine_runs(id) on delete cascade,
+  sheet_index integer not null check (sheet_index >= 0),
+  part_number text not null check (length(part_number) between 1 and 40),
+  part_name text not null default '',
+  job_name text not null default '',
+  order_number text not null default '',
+  material text not null default '',
+  thickness text not null default '',
+  status text not null default 'queued' check (status in ('queued', 'completed', 'cancelled')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists cnc_machine_recuts_owner_created on public.cnc_machine_recuts(owner_id, created_at, id);
+create unique index if not exists cnc_machine_recuts_pending_part
+  on public.cnc_machine_recuts(owner_id, source_run_id, sheet_index, part_number) where status = 'queued';
+alter table public.cnc_machine_recuts enable row level security;
+revoke all on public.cnc_machine_recuts from anon, authenticated;
+grant select on public.cnc_machine_recuts to authenticated;
+grant insert(owner_id, source_run_id, sheet_index, part_number) on public.cnc_machine_recuts to authenticated;
+grant update(status) on public.cnc_machine_recuts to authenticated;
+grant all on public.cnc_machine_recuts to service_role;
+drop policy if exists "own machine recuts" on public.cnc_machine_recuts;
+create policy "own machine recuts" on public.cnc_machine_recuts for all to authenticated
+  using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+  with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+drop policy if exists "machine recut account guard" on public.cnc_machine_recuts;
+create policy "machine recut account guard" on public.cnc_machine_recuts as restrictive for all
+  using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+  with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+
+create or replace function public.guard_machine_recut()
+returns trigger language plpgsql set search_path = '' as $$
+declare
+  source public.cnc_machine_runs;
+  source_part jsonb;
+begin
+  if tg_op = 'INSERT' then
+    if new.status <> 'queued' then raise exception 'New re-cuts must be queued' using errcode = '23514'; end if;
+    select * into source from public.cnc_machine_runs where id = new.source_run_id and owner_id = new.owner_id;
+    if not found then raise exception 'Source export is not available in this account' using errcode = '42501'; end if;
+    select part into source_part from jsonb_array_elements(coalesce(source.snapshot#>'{map,parts}', '[]'::jsonb)) part
+      where part->>'number' = new.part_number and part->>'sheetIndex' = new.sheet_index::text;
+    if source_part is null then raise exception 'The selected part is not on this exported sheet' using errcode = '23514'; end if;
+    new.part_name := coalesce(nullif(source_part->>'name', ''), 'Unnamed part');
+    new.job_name := source.name;
+    new.order_number := source.order_number;
+    new.material := source.material;
+    new.thickness := source.thickness;
+    new.created_at := now();
+    new.updated_at := new.created_at;
+  else
+    if (to_jsonb(new) - 'status') is distinct from (to_jsonb(old) - 'status') then
+      raise exception 'Re-cut source and part details cannot be changed' using errcode = '42501';
+    end if;
+    if new.status is distinct from old.status then
+      if old.status <> 'queued' or new.status not in ('completed', 'cancelled') then
+        raise exception 'Invalid re-cut status transition' using errcode = '23514';
+      end if;
+      new.updated_at := now();
+    end if;
+  end if;
+  return new;
+end $$;
+revoke all on function public.guard_machine_recut() from public, anon, authenticated;
+drop trigger if exists guard_machine_recut on public.cnc_machine_recuts;
+create trigger guard_machine_recut before insert or update on public.cnc_machine_recuts
+  for each row execute function public.guard_machine_recut();
+
 commit;

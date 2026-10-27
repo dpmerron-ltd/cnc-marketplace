@@ -3,12 +3,13 @@ import { Check, ChevronLeft, ChevronRight, Copy, Download, KeyRound, Plus, Refre
 import type { CuttingJob, JobStatus, JobSummary } from '../jobs/types'
 import { downloadJobFile, jobApiRequest, jobsApiUrl } from '../storage/jobsApi'
 import { supabase } from '../storage/supabaseClient'
+import { RecutQueue } from './RecutQueue'
 
 const statusNames: Record<JobStatus, string> = { awaiting_review: 'Awaiting review', ready: 'Ready', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
 interface ApiKey { id: string; name: string; token_prefix: string; expires_at: string; revoked_at: string | null; expired: boolean }
 
 export function QueuePage({ userId }: { userId: string }) {
-  const [tab, setTab] = useState<'queue' | 'keys'>('queue')
+  const [tab, setTab] = useState<'queue' | 'keys' | 'recuts'>(() => window.location.hash === '#queue/recuts' ? 'recuts' : 'queue')
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [job, setJob] = useState<CuttingJob>()
   const [status, setStatus] = useState('')
@@ -27,6 +28,14 @@ export function QueuePage({ userId }: { userId: string }) {
   const lifetime = useRef<AbortController | undefined>(undefined)
   const selection = useRef(0)
   useEffect(() => {
+    const update = () => {
+      if (window.location.hash === '#queue/recuts') setTab('recuts')
+      else if (window.location.hash === '#queue') setTab('queue')
+    }
+    window.addEventListener('hashchange', update)
+    return () => window.removeEventListener('hashchange', update)
+  }, [])
+  useEffect(() => {
     const controller = new AbortController()
     lifetime.current = controller
     return () => controller.abort()
@@ -39,7 +48,7 @@ export function QueuePage({ userId }: { userId: string }) {
           const response = await jobApiRequest(`/jobs?limit=25&offset=${offset}${status ? `&status=${status}` : ''}`, userId, { signal: abort.signal })
           const data = await response.json()
           if (!abort.signal.aborted) setJobs(data.jobs)
-        } else if (supabase) {
+        } else if (tab === 'keys' && supabase) {
           const result = await supabase.from('cnc_api_keys').select('id,name,token_prefix,expires_at,revoked_at').eq('owner_id', userId).order('created_at', { ascending: false }).abortSignal(abort.signal)
           if (result.error) throw new Error(result.error.message)
           if (!abort.signal.aborted) setKeys((result.data ?? []).map(key => ({ ...key, expired: Date.parse(key.expires_at) <= Date.now() })))
@@ -96,13 +105,14 @@ export function QueuePage({ userId }: { userId: string }) {
     <div className="queue-heading">
       <h2>Cutting Queue</h2>
       <div className="button-row">
-        <button type="button" className={tab === 'queue' ? 'active-nav' : ''} onClick={() => { setTab('queue'); setNewKey('') }}>Jobs</button>
+        <button type="button" className={tab === 'queue' ? 'active-nav' : ''} onClick={() => { setTab('queue'); setNewKey(''); window.location.hash = 'queue' }}>Jobs</button>
+        <button type="button" className={tab === 'recuts' ? 'active-nav' : ''} onClick={() => { setTab('recuts'); setNewKey(''); window.location.hash = 'queue/recuts' }}>Re-cuts</button>
         <button type="button" className={`icon-text-button ${tab === 'keys' ? 'active-nav' : ''}`} onClick={() => setTab('keys')}><KeyRound size={16} /> API Access</button>
         <button type="button" className="icon-button" title="Refresh queue" aria-label="Refresh queue" disabled={loading || busy} onClick={() => { setRevision(value => value + 1); if (job && tab === 'queue') void selectJob(job.id) }}><RefreshCw size={17} /></button>
       </div>
     </div>
     {error && <p className="queue-error" role="alert">{error}</p>}
-    {tab === 'keys' ? <section className="api-access">
+    {tab === 'recuts' ? <RecutQueue key={userId} userId={userId} refresh={revision} /> : tab === 'keys' ? <section className="api-access">
       <label>API base URL<input readOnly value={jobsApiUrl} /></label>
       <a href="https://github.com/dpmerron-ltd/cnc-marketplace/blob/main/docs/API.md" target="_blank" rel="noreferrer">API Reference</a>
       <div className="api-key-create"><label>Key name<input maxLength={80} value={keyName} onChange={event => setKeyName(event.target.value)} /></label><button type="button" className="icon-text-button" disabled={busy || !keyName.trim() || Boolean(newKey)} onClick={() => void createKey()}><Plus size={16} /> Create key</button></div>

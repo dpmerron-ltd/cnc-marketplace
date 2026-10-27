@@ -66,7 +66,7 @@ import { selectMaterialParts } from './gcode/materialSelection'
 
 const CamPage = lazy(() => import('./ui/CamPage').then(module => ({ default: module.CamPage })))
 const PrintablesPage = lazy(() => import('./ui/PrintablesPage').then(module => ({ default: module.PrintablesPage })))
-const pageFromHash = () => window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
+const pageFromHash = () => window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#queue' || window.location.hash.startsWith('#queue/') ? 'queue' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
 
 const defaultSheet: Sheet = {
   name: 'Untitled Sheet',

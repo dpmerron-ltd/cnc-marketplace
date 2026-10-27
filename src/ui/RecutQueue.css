@@ -1,0 +1,6 @@
+.recut-queue h3 { margin-top: 24px; }
+.recut-queue p { line-height: 1.5; }
+.recut-queue .queue-table a { color: #1769aa; font-weight: 600; overflow-wrap: anywhere; }
+.recut-queue .queue-table td { min-width: 100px; }
+.recut-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.recut-actions button { white-space: nowrap; min-height: 44px; }
