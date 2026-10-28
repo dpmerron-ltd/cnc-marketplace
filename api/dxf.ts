@@ -52,7 +52,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
     const specific = Object.hasOwn(input.operations, feature.id) ? input.operations[feature.id] : {}
     operations[feature.id] = { ...layer, ...specific }
     const effective = { ...feature, ...operations[feature.id] }
-    if (operations[feature.id].depthMm !== undefined && effective.kind !== 'pocket') throw new JobError(`${feature.id}: depthMm is only supported for pockets; drill and profile depths use the material preset.`, 400)
+    if (operations[feature.id].depthMm !== undefined && !['pocket', 'drill'].includes(effective.kind)) throw new JobError(`${feature.id}: depthMm is only supported for blind pockets and drills; profile depths use the material preset.`, 400)
     if (operations[feature.id].tabs !== undefined && !['inside', 'outside'].includes(effective.kind)) throw new JobError(`${feature.id}: tabs are only supported for inside/outside contours.`, 400)
     if (operations[feature.id].cornerOvercuts !== undefined && (!['inside', 'pocket'].includes(effective.kind) || effective.circle)) throw new JobError(`${feature.id}: cornerOvercuts is only supported for non-circular pockets and inside contours.`, 400)
   }

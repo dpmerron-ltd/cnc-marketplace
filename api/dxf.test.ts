@@ -168,7 +168,7 @@ describe('DXF API generation', () => {
   it.each([
     { thicknessMm: 16 }, { ownerId: 'someone' }, { feed: 2000 }, { filename: '../part.dxf' }, { filename: 'part.nc' },
     { layerOperations: { TYPO: { kind: 'drill' } } }, { operations: { f999: { kind: 'drill' } } },
-    { operations: { f0: { tabs: 5 } } }, { operations: { f1: { depthMm: 3 } } }, { operations: { f1: { tabs: 2 } } },
+    { operations: { f0: { tabs: 5 } } }, { operations: { f0: { depthMm: 3 } } }, { operations: { f1: { tabs: 2 } } },
     { operations: { f1: { useToolDiameter: true } } },
   ])('rejects invalid or silently ineffective request overrides: %j', async patch => {
     await expect(generateDxfNc({ dxf: drawing, thicknessMm: 18, ...patch })).rejects.toMatchObject({ status: 400 })
@@ -245,4 +245,36 @@ it('limits optional variant generation without changing the primary program or f
   }
   expect(() => parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Dense panel', sku: 'DENSE', filename: selected.filename, gcode: selected.gcode, dxf: drawing, materialVariants: selected.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')).not.toThrow()
   for (const variantProfiles of [[], ['18'], ['12', '12'], ['unknown']]) await expect(generateDxfNc({ dxf: drawing, thicknessMm: 12, variantProfiles })).rejects.toMatchObject({ status: 400 })
+})
+
+it('retains shallow centre marks beside normal drills and through profiles across variants', async () => {
+  const source = dxf([profile, circle('MARK_RUNNER_D2_DEPTH2'), circle('BORE', 80)])
+  const result = await generateDxfNc({ dxf: source, thicknessMm: 18, layerOperations: { MARK_RUNNER_D2_DEPTH2: { kind: 'drill', depthMm: 2 } } })
+  expect(result.operations.find(op => op.featureId === 'f1')).toMatchObject({ depthMm: 2, tabCount: 0 })
+  expect(result.operations.find(op => op.featureId === 'f2')).toMatchObject({ depthMm: 9.2 })
+  expect(result.operations.find(op => op.featureId === 'f0')).toMatchObject({ depthMm: 18.4, tabCount: 4 })
+  for (const p of materialProfiles) {
+    const nc = result.materialVariants.profiles[p.id]!
+    expect(nc.errors).toEqual([])
+    const mark = nc.gcode.split('(Feature: f1 / Layer: MARK_RUNNER_D2_DEPTH2)')[1].split('(No.')[0]
+    expect(mark.match(/G01 Z-\d+(?:\.\d+)? F600/g)).toEqual(['G01 Z-2 F600'])
+    expect(nc.gcode).toBe(generateCam(readDxf(source), { thickness: p.thickness, profilePasses: [12, 13, 14].includes(p.thickness) ? p.profilePasses : undefined, drillDepthMm: p.drillDepthMm, rampProfile: p.rampProfile, units: 'auto', operations: { f1: { kind: 'drill', depthMm: 2 } } }).gcode)
+  }
+  const override = await generateDxfNc({ dxf: source, thicknessMm: 18, layerOperations: { MARK_RUNNER_D2_DEPTH2: { depthMm: 2 } }, operations: { f1: { depthMm: 1 } }, variantProfiles: ['18'] })
+  expect(override.operations.find(op => op.featureId === 'f1')?.depthMm).toBe(1)
+})
+
+it('rejects invalid blind drill depths and blocks variants thinner than an explicit depth', async () => {
+  for (const depthMm of [0, -1, 18, 18.4]) {
+    await expect(generateDxfNc({ dxf: drawing, thicknessMm: 18, operations: { f1: { depthMm } } })).rejects.toBeDefined()
+  }
+  for (const depthMm of [NaN, Infinity, 0, -1, 18]) {
+    const result = generateCam(readDxf(drawing), { thickness: 18, units: 'auto', operations: { f1: { depthMm } } })
+    expect(result.gcode).toBe('')
+    expect(result.errors.join()).toContain('blind drill depth')
+  }
+  const result = await generateDxfNc({ dxf: drawing, thicknessMm: 18, operations: { f1: { depthMm: 7 } } })
+  expect(result.materialVariants.profiles['6'].gcode).toBe('')
+  expect(result.materialVariants.profiles['6'].errors.join()).toContain('blind drill depth')
+  expect(result.materialVariants.profiles['18'].errors).toEqual([])
 })

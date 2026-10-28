@@ -172,10 +172,10 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
                 <div className="cam-operation-fields">
                   {(f.kind === 'inside' || f.kind === 'outside') && <label>Tabs<input aria-label={`Tabs for ${f.name}`} type="number" min={requiresHoldingTabs(f) ? 1 : 0} max={tabFreeOpening(f) ? 0 : 4} disabled={tabFreeOpening(f)} step="1" value={tabFreeOpening(f) || result?.operations.find(op => op.featureId === f.id)?.tabs.length === 0 ? 0 : override.tabs ?? defaultTabCount(f)} onChange={e => operation([f.id], { tabs: Number(e.target.value) })} /></label>}
                   {cutterWidthOpening(f) && <span>{camPreset.diameter} mm cutter-width hole</span>}
-                  {f.kind === 'pocket' && <label>Depth (mm)<input aria-label={`Pocket depth for ${f.name}`} type="number" min="0.1" max={settings.thickness - 0.1} step="0.1" value={override.depthMm ?? f.depthMm ?? ''} onChange={e => operation([f.id], { depthMm: Number(e.target.value) })} /></label>}
+                  {['pocket', 'drill'].includes(f.kind) && <label>Depth (mm)<input aria-label={`${f.kind === 'drill' ? 'Drill' : 'Pocket'} depth for ${f.name}`} type="number" min="0.1" max={settings.thickness - 0.1} step="0.1" value={override.depthMm ?? (f.kind === 'drill' ? material.drill : f.depthMm) ?? ''} onChange={e => operation([f.id], { depthMm: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>}
                   {!f.circle && (f.kind === 'pocket' || f.kind === 'inside') && <label><input type="checkbox" aria-label={`Corner overcuts for ${f.name}`} checked={override.cornerOvercuts ?? true} onChange={e => operation([f.id], { cornerOvercuts: e.target.checked })} />Corner overcuts</label>}
                   {f.kind === 'drill' ? <span>Hole diameter {camPreset.diameter} mm</span> : f.circle && <span>DXF diameter {(f.circle.radius * 2).toFixed(2)} mm</span>}
-                  {f.kind === 'drill' && <span>Depth {material.drill} mm / 2 mm pecks</span>}
+                  {f.kind === 'drill' && <span>Depth {override.depthMm ?? material.drill} mm / 2 mm pecks</span>}
                   {f.hinge && <span>35 mm hinge pocket / 15 or 18 mm stock</span>}
                 </div>
               </div>

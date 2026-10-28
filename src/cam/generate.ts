@@ -190,13 +190,15 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
       emit(`(No. ${operations.length + 1} ${f.kind} machining: ${comment(f.name)})`, `(Feature: ${f.id} / Layer: ${comment(f.layer)})`)
       if (f.kind === 'drill') {
         if (!f.circle && f.points.length !== 1) throw new Error('Drilling requires a circle or DXF point.')
+        const depth = settings.operations[f.id]?.depthMm ?? material.drill
+        if (!Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind drill depth greater than 0 and less than ${settings.thickness} mm.`)
         const center = f.circle?.center ?? f.points[0]
         approach(center)
-        const pecks = Math.ceil(material.drill / 2)
+        const pecks = Math.ceil(depth / 2)
         for (let peck = 1; peck <= pecks; peck++) {
-          emit(`G01 Z-${n(Math.min(peck * 2, material.drill))} F600`, peck === pecks ? 'G00 Z20' : 'G00 Z0.5')
+          emit(`G01 Z-${n(Math.min(peck * 2, depth))} F600`, peck === pecks ? 'G00 Z20' : 'G00 Z0.5')
         }
-        operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [center], tabs: [], depthMm: material.drill, firstLine, lastLine: lines.length })
+        operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [center], tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
         continue
       }
       if (f.kind === 'pocket') {
