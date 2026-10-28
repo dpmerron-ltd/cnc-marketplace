@@ -6,8 +6,9 @@ import type { Bounds, Point } from '../models/geometry'
 import { boundsPolygon, expandedFootprint, footprintScale, footprintsOverlap, fromPath, instanceFootprint, nestingRotations, polygonBounds, toPath } from '../gcode/footprint'
 import { convexSum } from './convexSum'
 import { selectMaterialParts } from '../gcode/materialSelection'
+import { compatibleCutSides, cutSideErrors, cutSides, type CutSide } from '../models/cutSide'
 
-interface PlacedShape { sheetIndex: number; bounds: Bounds; points: Point[]; localPoints: Point[]; origin: Point }
+interface PlacedShape { sheetIndex: number; cutSide?: CutSide; bounds: Bounds; points: Point[]; localPoints: Point[]; origin: Point }
 type NoFit = (obstacle: PlacedShape, candidate: Point[]) => ClipperLib.Path
 
 function insideNoFit(point: ClipperLib.IntPoint, path: ClipperLib.Path): boolean {
@@ -83,6 +84,9 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   parts = selection.parts
+  const lockedErrors = cutSideErrors(parts, { instances: sheet.instances.filter(instance => instance.locked) })
+  if (lockedErrors.length) throw new Error(lockedErrors.join(' '))
+  if (parts.some(part => sheet.instances.some(instance => instance.partId === part.id) && part.cutSide !== undefined && !cutSides.includes(part.cutSide))) throw new Error('Unknown component cutting side. Set a valid cutting side before nesting.')
   const instances = sheet.instances.map(instance => ({ ...instance }))
   const placed: PlacedShape[] = []
   const orientationCache = new Map<Part, ReturnType<typeof orientations>>()
@@ -115,7 +119,7 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
     const localPoints = option?.points ?? instanceFootprint(part, { ...instance, x: 0, y: 0 })
     const origin = { x: instance.x - (option?.offset.x ?? 0), y: instance.y - (option?.offset.y ?? 0) }
     const points = localPoints.map(p => ({ x: p.x + origin.x, y: p.y + origin.y }))
-    placed.push({ sheetIndex: instance.sheetIndex, points, localPoints, origin, bounds: polygonBounds(points) })
+    placed.push({ sheetIndex: instance.sheetIndex, cutSide: part.cutSide, points, localPoints, origin, bounds: polygonBounds(points) })
   }
   for (const instance of instances) {
     const part = parts.find(p => p.id === instance.partId)
@@ -133,6 +137,7 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
     const lastSheet = Math.max(0, ...placed.map(p => p.sheetIndex)) + 1
     for (let sheetIndex = 0; !best && sheetIndex <= lastSheet; sheetIndex++) {
       const onSheet = placed.filter(p => p.sheetIndex === sheetIndex)
+      if (onSheet.some(other => !compatibleCutSides(other.cutSide, part.cutSide))) continue
       const previousFailure = failedFits.get(part)?.get(sheetIndex)
       const failedOrientations = previousFailure?.revision === onSheet.length ? previousFailure.orientations : new Set<Point[]>()
       const occupiedTop = Math.max(0, ...onSheet.map(p => p.bounds.maxY))

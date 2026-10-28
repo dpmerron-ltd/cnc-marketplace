@@ -85,6 +85,7 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-documents-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-versions-migration.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-versions.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/cut-sides.sql
           psql --set ON_ERROR_STOP=on --file supabase/item-imports.sql
           psql --set ON_ERROR_STOP=on --file supabase/item-imports.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/item-imports.sql

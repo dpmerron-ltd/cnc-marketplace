@@ -13,6 +13,7 @@ import type { Point } from '../models/geometry'
 import { numberSheetParts, partNumberText } from '../labels/partLabels'
 import { selectMaterialParts } from './materialSelection'
 import { materialProfiles } from '../cam/materialProfiles'
+import { cutSideErrors, cutSideLabel, sheetCutSide } from '../models/cutSide'
 
 function commentText(value: string): string {
   return value.replace(/[\r\n()]/g, ' ')
@@ -178,6 +179,7 @@ function transformedInstanceLines(
     output.push(`(Physical sheet: ${instance.sheetIndex + 1})`)
     output.push(`(Position: X${formatNumber(instance.x)} Y${formatNumber(instance.y)})`)
     output.push(`(Rotation: ${instance.rotation})`)
+    output.push(`(Cutting face: ${cutSideLabel(part.cutSide)})`)
     output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
     output.push(`G00 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`)
     const sourceInitialFeed = part.parsed.startLines.flatMap(line => line.words).filter(word => word.letter === 'F').at(-1)?.value
@@ -203,6 +205,8 @@ function transformedInstanceLines(
 }
 
 export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: ProgramSettings): ExportResult {
+  const sideErrors = cutSideErrors(parts, sheet)
+  if (sideErrors.length) return { gcode: '', errors: sideErrors, warnings: [] }
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) return { gcode: '', errors: selection.errors, warnings: [] }
   parts = selection.parts
@@ -231,7 +235,7 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
   for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
     if (sheetIndex > 0) {
       output.push('')
-      output.push(`(Load physical sheet ${sheetIndex + 1}, align material to X0 Y0, then resume)`)
+      output.push(`(Load physical sheet ${sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))}; align material to X0 Y0, then resume)`)
       output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
       output.push('M05')
       output.push('M00')
@@ -239,6 +243,7 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
 
     output.push('')
     output.push(`(Physical sheet ${sheetIndex + 1} of ${sheetCount})`)
+    output.push(`(Load material: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))})`)
     const reachCheck = reachCheckLines(parts, sheet, sheetIndex)
     errors.push(...reachCheck.errors)
     output.push(...reachCheck.lines)
@@ -266,6 +271,8 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
 
 export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?: ProgramSettings): SheetExportResult[] {
   const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
+  const sideErrors = cutSideErrors(parts, sheet)
+  if (sideErrors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: sideErrors, warnings: [] }))
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: selection.errors, warnings: [] }))
   parts = selection.parts
@@ -287,6 +294,7 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?
     output.push(`(Sheet name: ${commentText(sheet.name)})`)
     if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
     output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
+    output.push(`(Load material: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))})`)
     output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
     if (sheet.materialProfile) output.push(`(Material thickness: ${commentText(materialProfiles.find(profile => profile.id === sheet.materialProfile)!.label)})`)
     output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))

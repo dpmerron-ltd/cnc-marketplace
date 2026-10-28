@@ -2,6 +2,7 @@ import { PDFDocument, rgb, type PDFPage } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import type { Bounds, Point } from '../models/geometry'
 import type { TabMap, TabMapPart } from './tabMap'
+import { cutSideLabel } from '../models/cutSide'
 
 const black = rgb(0.08, 0.1, 0.12), grey = rgb(0.6, 0.63, 0.66), white = rgb(1, 1, 1), gold = rgb(0.96, 0.78, 0.3)
 const pageWidth = 595.28, pageHeight = 841.89
@@ -74,13 +75,13 @@ export async function createTabMapPdf(map: TabMap, fontBytes: Uint8Array): Promi
   for (let sheetIndex = 0; sheetIndex < map.sheetCount; sheetIndex++) {
     const parts = map.parts.filter(part => part.sheetIndex === sheetIndex)
     const count = parts.reduce((total, part) => total + part.tabs.length, 0)
-    const overview = page(`Tab map | Sheet ${sheetIndex + 1} of ${map.sheetCount}`, `${map.width} x ${map.height} mm stock | ${parts.length} part${parts.length === 1 ? '' : 's'} | ${count} detected tab locations`)
+    const overview = page(`Tab map | Sheet ${sheetIndex + 1} of ${map.sheetCount}`, `${map.width} x ${map.height} mm stock | ${parts.length} parts | ${count} tab locations${map.cutSides ? ` | ${cutSideLabel(map.cutSides[sheetIndex])}` : ''}`)
     drawing(overview, parts, { minX: 0, minY: 0, maxX: map.width, maxY: map.height }, { x: 36, y: 155, width: 523, height: 570 }, false)
     text(overview, 'Heavy outlined spans and dots: tab locations. Enlarged part maps follow.', 36, 105, 9)
     text(overview, 'Part numbers match the sheet labels. This is a location guide, not a cutting template.', 36, 88, 8)
     text(overview, 'Check the actual parts before removal; stop the machine and cutter first.', 36, 71, 8)
     for (const part of parts) {
-      let detail = page(`${part.number} | Tab locations`, `Sheet ${sheetIndex + 1} | ${part.tabs.length} detected locations | Rotation ${part.rotation} deg`)
+      let detail = page(`${part.number} | Tab locations`, `Sheet ${sheetIndex + 1} | ${part.tabs.length} locations | Rotation ${part.rotation} deg${part.cutSide ? ` | ${cutSideLabel(part.cutSide)}` : ''}`)
       text(detail, part.name, 36, 725, 11)
       drawing(detail, [part], part.bounds, { x: 36, y: 344, width: 523, height: 358 }, true)
       let y = 302

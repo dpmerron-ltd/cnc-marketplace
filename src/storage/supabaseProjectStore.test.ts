@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
@@ -49,6 +49,21 @@ const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpa
 
 describe('cloud account boundaries', () => {
   beforeEach(async () => { mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.project = null; mock.history = []; mock.failOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
+
+  it('loads cutting sides in the lightweight index and full programs and uses a conflict-checked versioned save', async () => {
+    mock.rows = [{ id: 'faces', owner_id: 'bob', name: 'Faces', sku: 'FACES' }]
+    mock.components = [{ id: 'front', owner_id: 'bob', item_id: 'faces', sku: 'FRONT', name: 'Front', original_filename: 'front.nc', gcode: testParts[0].gcode, cut_side: 'pattern' }]
+    const project = await loadRemoteProject('alice')
+    expect(project?.componentIndex?.[0].cutSide).toBe('pattern')
+    const [part] = await loadRemoteItemComponents(project!.items[0], 'alice')
+    expect(part.cutSide).toBe('pattern')
+    await saveRemoteCutSide(part, 'non-pattern', 'alice')
+    expect(mock.queries.at(-1)?.write).toEqual({ id: 'front', cutSide: 'non-pattern', expectedCutSide: 'pattern' })
+    mock.conflict = true
+    await expect(saveRemoteCutSide(part, 'either', 'alice')).rejects.toThrow('changed in another session')
+    mock.userId = 'bob'
+    await expect(saveRemoteCutSide(part, 'either', 'alice')).rejects.toThrow('account changed')
+  })
 
   it('loads a shared item and components from different creators through bounded program pages', async () => {
     const item = { id: 'target', ownerId: 'bob', sku: 'T', name: 'Target', description: '', createdAt: '', updatedAt: '' }

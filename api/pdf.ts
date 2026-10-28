@@ -3,6 +3,7 @@ import fontkit from '@pdf-lib/fontkit'
 import type { generateJob } from '../src/jobs/generateJob'
 import { JobError } from '../src/jobs/generateJob'
 import { footprintInterior, instanceFootprint } from '../src/gcode/footprint'
+import { cutSideLabel } from '../src/models/cutSide'
 
 type Generated = Awaited<ReturnType<typeof generateJob>>
 const mm = 72 / 25.4
@@ -90,6 +91,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
 
   for (const sheet of manifest.sheets) {
     newPage(`Sheet ${sheet.number} of ${manifest.sheets.length}`)
+    paragraph(`Load material: ${cutSideLabel(sheet.cutSide)}`, 12)
     paragraph(`${sheet.partCount} parts | Reach X${sheet.maxX.toFixed(2)} Y${sheet.maxY.toFixed(2)} mm | deepest cut ${sheet.deepestCutMm.toFixed(2)} mm`, 9)
     paragraph(`Safe Z ${request.sheet.safeZMm} mm | ${sheet.screwMarks} screw marks | estimated ${Math.ceil(sheet.estimatedSeconds / 60)} minutes (excluding setup)`, 9)
     const scale = Math.min(505 / job.sheet.width, 570 / job.sheet.height)
@@ -134,7 +136,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
     paragraph(`${cut.partNumber} | Sheet ${cut.sheetNumber} | Job cut ${cut.cutOrder} | ${cut.component}`, 11)
     paragraph(`Item: ${cut.item} | SKU: ${cut.sku}`, 9)
     paragraph(`${cut.widthMm.toFixed(2)} x ${cut.heightMm.toFixed(2)} mm | X${cut.x.toFixed(2)} Y${cut.y.toFixed(2)} | ${cut.rotation} deg | depth ${cut.deepestCutMm.toFixed(2)} mm`, 9)
-    paragraph(`Source: ${cut.sourceFilename}`, 8)
+    paragraph(`Cutting face: ${cutSideLabel(cut.cutSide)} | Source: ${cut.sourceFilename}`, 8)
   }
   newPage('Source Program Specifics')
   for (const source of manifest.sources) {
@@ -160,7 +162,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
     line(`Order: ${cut.order}`, 11.3, 2.4)
     line(`SKU: ${cut.sku}`, 14.3, 2.2)
     line(cut.material || cut.item, 17.3, 2.2)
-    line(`X ${cut.x.toFixed(1)} Y ${cut.y.toFixed(1)} mm / ${cut.rotation} deg`, 20, 1.9)
+    line(cut.cutSide && cut.cutSide !== 'either' ? cutSideLabel(cut.cutSide) : `X ${cut.x.toFixed(1)} Y ${cut.y.toFixed(1)} mm / ${cut.rotation} deg`, 20, 1.9)
   }
   return { plan: await pdf.save(), labels: await labels.pdf.save() }
 }

@@ -6,6 +6,7 @@ import { numberSheetParts, partNumberText } from '../labels/partLabels'
 import { simulateGCode, type SimulatedMove } from '../gcode/simulator'
 import { instanceBounds, transformLocalPoint } from '../gcode/transform'
 import { selectMaterialParts } from '../gcode/materialSelection'
+import { sheetCutSide, type CutSide, type SheetCutSide } from '../models/cutSide'
 
 export interface TabLocation {
   points: Point[]
@@ -20,6 +21,7 @@ export interface TabMapPart {
   sheetIndex: number
   bounds: Bounds
   rotation: number
+  cutSide?: CutSide
   paths: Point[][]
   tabs: TabLocation[]
   warnings: string[]
@@ -30,6 +32,7 @@ export interface TabMap {
   width: number
   height: number
   sheetCount: number
+  cutSides?: SheetCutSide[]
   parts: TabMapPart[]
 }
 
@@ -118,6 +121,7 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
   return {
     name: sheet.name.trim() || 'Untitled Sheet', order: sheet.orderNumber?.trim() || '-', width: sheet.width, height: sheet.height,
     sheetCount: Math.max(...sheet.instances.map(instance => instance.sheetIndex)) + 1,
+    cutSides: Array.from({ length: Math.max(...sheet.instances.map(instance => instance.sheetIndex)) + 1 }, (_, index) => sheetCutSide(parts, sheet, index)),
     parts: [...sheet.instances].sort((a, b) => a.sheetIndex - b.sheetIndex).map(instance => {
       const part = parts.find(part => part.id === instance.partId)
       if (!part) throw new Error('A placed component is missing. Reopen export after restoring or removing it.')
@@ -127,7 +131,7 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
       const source = cache.get(part.id)!
       const transform = (point: Point) => transformLocalPoint(part, instance, point)
       return {
-        number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation,
+        number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
         paths: source.paths.map(path => path.map(transform)),
         tabs: source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: source.warnings,
       }

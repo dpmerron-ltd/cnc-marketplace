@@ -16,12 +16,12 @@ function fixture() {
 }
 describe('API credential verification', () => {
   it('returns exact source and revision through item and component filters for any authenticated user', async () => {
-    const row = { id: 'part', item_id: 'item', name: 'Panel', sku: 'P1', original_filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'original DXF', material_variants: null }
+    const row = { id: 'part', item_id: 'item', name: 'Panel', sku: 'P1', original_filename: 'panel.nc', gcode: testParts[0].gcode, dxf: 'original DXF', material_variants: null, cut_side: 'non-pattern' }
     let data: typeof row | null = row
     const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data, error: null })) }
     query.select.mockReturnValue(query); query.eq.mockReturnValue(query)
     const repo = supabaseRepository({ from: () => query } as unknown as SupabaseClient)
-    expect(await repo.componentSource('alice', 'item', 'part')).toEqual({ id: 'part', itemId: 'item', name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: row.gcode, dxf: row.dxf, materialVariants: null, sha256: await sha256(row.gcode) })
+    expect(await repo.componentSource('alice', 'item', 'part')).toEqual({ id: 'part', itemId: 'item', name: 'Panel', sku: 'P1', filename: 'panel.nc', gcode: row.gcode, dxf: row.dxf, materialVariants: null, sha256: await sha256(row.gcode), cutSide: 'non-pattern' })
     for (const pair of [['item_id', 'item'], ['id', 'part']]) expect(query.eq).toHaveBeenCalledWith(...pair)
     data = null
     expect(await repo.componentSource('alice', 'item', 'missing')).toBeUndefined()

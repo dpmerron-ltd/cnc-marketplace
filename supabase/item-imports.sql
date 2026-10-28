@@ -110,9 +110,9 @@ begin
       where import_id=p_id and kind='profile' and payload->>'componentId'=c->>'id';
     if profiles is null or not(profiles ?& profile_ids) or profiles->(c->>'primaryProfile')->>'gcode' is distinct from c->>'gcode' then raise exception 'IMPORT_INCOMPLETE: profiles missing or primary differs'; end if;
     if exists(select 1 from public.cnc_components where id=c->>'id') then raise exception 'IMPORT_CONFLICT: component ID exists'; end if;
-    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id)
+    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,cut_side)
       values(c->>'id',p_actor,new_id,c->>'sku',c->>'name',c->>'original_filename',c->>'gcode',c->>'dxf',(c->>'width')::double precision,(c->>'height')::double precision,
-        c->'bounding_box',c->'original_bounds',c->'metadata',now(),jsonb_build_object('version',1,'primaryProfile',c->>'primaryProfile','profiles',profiles),c->>'id');
+        c->'bounding_box',c->'original_bounds',c->'metadata',now(),jsonb_build_object('version',1,'primaryProfile',c->>'primaryProfile','profiles',profiles),c->>'id',coalesce(c->>'cut_side','either'));
   end loop;
   for d in select payload from public.item_import_entries where import_id=p_id and kind='document' order by key loop
     if not exists(select 1 from storage.objects where bucket_id='cnc-item-documents' and name=p_actor::text || '/' || (d->>'id') || '/document.pdf') then raise exception 'IMPORT_INCOMPLETE: PDF missing'; end if;

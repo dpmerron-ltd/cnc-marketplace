@@ -6,6 +6,7 @@ import { itemImageUrl, type ItemImage } from '../models/ItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
 import { ItemDocuments } from './ItemDocuments'
 import type { ComponentSummary, Part } from '../models/Part'
+import { cutSideLabel, cutSides, type CutSide } from '../models/cutSide'
 import { ItemPreview } from './ItemPreview'
 import { PackingPanel } from './PackingPanel'
 import { boxSize } from '../packing/format'
@@ -27,6 +28,7 @@ interface MarketplacePageProps {
   onSaveImage: (itemId: string, image: ItemImage | null) => Promise<void>
   onImportComponents: (itemId: string, files: FileList) => void
   onDeleteComponent: (partId: string) => void
+  onSaveCutSide?: (partId: string, cutSide: CutSide) => Promise<void>
   onAddToSheet: (partId: string) => void
   onAddItemToSheet: (itemId: string) => number | Promise<number>
   onOpenSheet: () => void
@@ -37,7 +39,7 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
+export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onSaveCutSide, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
   const [detailId, setDetailId] = useState<string>()
   const [followDefault, setFollowDefault] = useState(true)
   const [query, setQuery] = useState('')
@@ -47,6 +49,8 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
   const [added, setAdded] = useState<string>()
   const [addError, setAddError] = useState('')
   const [adding, setAdding] = useState(false)
+  const [savingCutSide, setSavingCutSide] = useState(false)
+  const [cutSideError, setCutSideError] = useState('')
   const sharedItems = useMemo(() => currentUserId ? catalogueItems(items) : [], [items, currentUserId])
   const partsByItem = useMemo(() => {
     const map = new Map<string, ComponentSummary[]>()
@@ -89,6 +93,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
     setDetailId(id)
     setFollowDefault(!items.find(item => item.id === id)?.version || Boolean(items.find(item => item.id === id)?.version?.isDefault))
     setComponentQuery('')
+    setCutSideError('')
     setAdded(undefined)
     setAddError('')
     void onLoadComponents?.(id).catch(() => {})
@@ -127,12 +132,22 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
       {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${itemFamily(selectedItem)}`} userId={currentUserId} item={selectedItem} readOnly={!editable} />}
       {componentsReady && selectedParts.length > 0 && <PackingPanel readOnly={!editable} pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
+      {selectedCount > 0 && <p className="muted">Cutting side is the face pointing up toward the cutter. Opposite sides are nested on separate sheets. Saving applies to new additions; existing sheets keep their item version.</p>}
+      {savingCutSide && <p role="status">Saving cutting side...</p>}
+      {cutSideError && <p role="alert">{cutSideError}</p>}
       {added && <p role="status" className="items-added">{added} added to the sheet.</p>}
       {addError && <p role="alert">{addError}</p>}
       {!componentsReady ? <div className="items-empty">{componentLoad?.error ? <><p role="alert">{componentLoad.error}</p><button type="button" onClick={() => void onLoadComponents?.(selectedItem.id).catch(() => {})}><RefreshCw size={16} /> Retry components</button></> : <p role="status">Loading components...</p>}</div> : visibleParts.length ? <div className="items-grid items-components">
         {visibleParts.map(part => <article key={part.id} className="items-component-card">
           <ItemPreview parts={[part]} label={`${part.name} toolpath`} />
           <div className="items-card-body"><h4>{part.name}</h4><span className="items-sku">{part.sku}</span><p>{part.width.toFixed(1)} x {part.height.toFixed(1)} mm</p><p className="items-filename">{part.originalFilename}{part.dxf ? ' + DXF' : ''}</p></div>
+          <label className="items-cut-side">Cutting side<select aria-label={`Cutting side for ${part.name}`} value={part.cutSide ?? 'either'} disabled={!editable || !onSaveCutSide || savingCutSide} onChange={async event => {
+            const side = event.target.value as CutSide
+            setSavingCutSide(true); setCutSideError('')
+            try { await onSaveCutSide!(part.id, side) }
+            catch (error) { setCutSideError(error instanceof Error ? error.message : 'Could not save cutting side. Please retry.') }
+            finally { setSavingCutSide(false) }
+          }}>{cutSides.map(side => <option key={side} value={side}>{cutSideLabel(side)}</option>)}</select></label>
           <div className="items-card-footer"><button type="button" disabled={selectedItem.version?.status === 'draft'} onClick={() => { onAddToSheet(part.id); setAdded(part.name) }}><Plus size={16} /> Add to sheet</button>{editable && <button type="button" className="items-icon danger" aria-label={`Remove ${part.name}`} title={`Remove ${part.name}`} onClick={() => {
             if (window.confirm(`Remove "${part.name}" from this item?${selectedItem.version ? ' Previous versions will keep this component.' : ' This cannot be undone.'}`)) onDeleteComponent(part.id)
           }}><Trash2 size={16} /></button>}</div>

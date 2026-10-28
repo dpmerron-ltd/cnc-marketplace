@@ -2,6 +2,7 @@ import type { RampProfile } from '../cam/materialProfiles'
 import type { PartLabel } from '../labels/partLabels'
 import type { Bounds } from '../models/geometry'
 import type { ProgramSettings } from '../gcode/programSettings'
+import type { SheetCutSide } from '../models/cutSide'
 
 export type JobStatus = 'awaiting_review' | 'ready' | 'cutting' | 'completed' | 'cancelled'
 export interface JobRequest {
@@ -26,7 +27,7 @@ export interface JobManifest {
   request: JobRequest
   items: Array<{ id: string; sku: string; name: string; quantity: number; componentsPerItem: number }>
   cuts: JobCut[]
-  sheets: Array<{ number: number; partCount: number; maxX: number; maxY: number; deepestCutMm: number; estimatedSeconds: number; screwMarks: number }>
+  sheets: Array<{ number: number; cutSide?: SheetCutSide; partCount: number; maxX: number; maxY: number; deepestCutMm: number; estimatedSeconds: number; screwMarks: number }>
   warnings: string[]
   setup: string[]
   sources: Array<{ id: string; filename: string; sha256: string; feeds: number[]; spindleSpeeds: number[] }>

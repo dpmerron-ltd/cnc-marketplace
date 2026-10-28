@@ -3,6 +3,7 @@ import type { Sheet } from '../models/Sheet'
 import { footprintsOverlap, instanceFootprint } from './footprint'
 import { instanceBounds, transformPartProgram } from './transform'
 import { selectMaterialParts } from './materialSelection'
+import { cutSideErrors } from '../models/cutSide'
 
 export interface ValidationIssue {
   level: 'error' | 'warning'
@@ -12,7 +13,7 @@ export interface ValidationIssue {
 export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
   const selection = selectMaterialParts(parts, sheet)
   parts = selection.parts
-  const issues: ValidationIssue[] = selection.errors.map(message => ({ level: 'error', message }))
+  const issues: ValidationIssue[] = [...selection.errors, ...cutSideErrors(parts, sheet)].map(message => ({ level: 'error', message }))
   if (sheet.width <= 0 || sheet.height <= 0) issues.push({ level: 'error', message: 'Sheet dimensions must be positive.' })
   if (sheet.borderSpacing < 0) issues.push({ level: 'error', message: 'Border spacing cannot be negative.' })
 

@@ -1,6 +1,7 @@
 // Load with the app so an open tab can still print after deployment removes old chunks.
 import { jsPDF } from 'jspdf'
 import { labelPageLayout, type LabelLayout, type PartLabel } from './partLabels'
+import { cutSideLabel } from '../models/cutSide'
 
 // Render at 300 dpi using browser fonts, including Unicode component and job names.
 export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout: LabelLayout) {
@@ -35,7 +36,7 @@ export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout:
   line(`Order: ${label.order}`, 11.3, 2.4)
   line(`SKU: ${label.sku}`, 14.3, 2.2)
   line(label.material || label.item || `X ${label.x.toFixed(1)} / Y ${label.y.toFixed(1)} mm`, 17.3, 2.2)
-  line(`X ${label.x.toFixed(1)}  Y ${label.y.toFixed(1)} mm / ${label.rotation} deg`, 20, 1.9)
+  line(label.cutSide && label.cutSide !== 'either' ? cutSideLabel(label.cutSide) : `X ${label.x.toFixed(1)}  Y ${label.y.toFixed(1)} mm / ${label.rotation} deg`, 20, 1.9)
 }
 
 export async function createLabelPdf(labels: PartLabel[], layout: LabelLayout): Promise<Blob> {

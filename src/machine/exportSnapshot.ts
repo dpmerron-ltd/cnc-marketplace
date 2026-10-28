@@ -7,6 +7,7 @@ import { effectiveSafeZ } from '../gcode/safeZ'
 import { preparationBounds } from '../gcode/preparationBounds'
 import { planScrewPositions } from '../gcode/screwPositions'
 import { materialProfiles } from '../cam/materialProfiles'
+import { cutSideErrors, sheetCutSide, type SheetCutSide } from '../models/cutSide'
 
 export type MachineStatus = 'waiting' | 'cutting' | 'completed' | 'cancelled'
 export const machineStatusNames: Record<MachineStatus, string> = { waiting: 'Waiting to cut', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
@@ -22,7 +23,7 @@ export interface ExportSnapshot {
   warnings: string[]
   programs: Sheet['gcodeSettings']
   files: MachineFile[]
-  sheets: Array<{ index: number; maxX: number; maxY: number; screws: Point[] }>
+  sheets: Array<{ index: number; cutSide?: SheetCutSide; maxX: number; maxY: number; screws: Point[] }>
 }
 export interface MachineRunSummary {
   id: string; owner_id: string; name: string; order_number: string
@@ -43,6 +44,8 @@ export async function buildExportSnapshot(input: {
 }): Promise<ExportSnapshot> {
   // Detach before the first await: later editor changes must never alter a saved export.
   const sheet = structuredClone(input.sheet)
+  const sideErrors = cutSideErrors(input.parts, sheet)
+  if (sideErrors.length) throw new Error(sideErrors.join(' '))
   const map = buildTabMap(input.parts, sheet)
   const selected = selectMaterialParts(input.parts, sheet)
   if (selected.errors.length) throw new Error(selected.errors.join(' '))
@@ -57,7 +60,7 @@ export async function buildExportSnapshot(input: {
     })
     const screws = planScrewPositions(selected.parts, preparedSheet, index)
     if (screws.errors.length) throw new Error(screws.errors.join(' '))
-    return { index, maxX: Math.max(0, ...bounds.map(bound => bound.maxX)), maxY: Math.max(0, ...bounds.map(bound => bound.maxY)), screws: screws.points }
+    return { index, cutSide: sheetCutSide(selected.parts, sheet, index), maxX: Math.max(0, ...bounds.map(bound => bound.maxX)), maxY: Math.max(0, ...bounds.map(bound => bound.maxY)), screws: screws.points }
   })
   if (input.files.length !== (input.mode === 'combined' ? 1 : map.sheetCount)) throw new Error('Export file count does not match the sheet layout.')
   const files: MachineFile[] = []

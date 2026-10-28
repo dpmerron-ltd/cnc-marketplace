@@ -2,6 +2,7 @@ import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageSchema, type ItemImage } from '../models/ItemImage'
 import type { ComponentSummary, Part } from '../models/Part'
+import type { CutSide } from '../models/cutSide'
 import type { SheetHistoryEntry } from '../models/Project'
 import type { GCodePreset, Sheet } from '../models/Sheet'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
@@ -20,6 +21,7 @@ interface ComponentRow {
   dxf: string | null
   date_imported: string
   material_variants?: unknown
+  cut_side?: CutSide
 }
 
 interface ProjectRow {
@@ -72,7 +74,7 @@ function componentRow(part: Part) {
   return {
     id: part.id, owner_id: part.ownerId, item_id: part.itemId, sku: part.sku, name: part.name,
     original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
-    width: part.width, height: part.height, bounding_box: part.boundingBox,
+    width: part.width, height: part.height, bounding_box: part.boundingBox, cut_side: part.cutSide ?? 'either',
     original_bounds: part.originalBounds, metadata, date_imported: part.dateImported,
     ...(materialVariants ? { material_variants: materialVariants } : {}),
   }
@@ -162,7 +164,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 
   // A JSONB profile projection still decompresses the NC bundle. Never scan
   // every historical bundle at startup; old versions load when opened.
-  const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height'
+  const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height,cut_side'
   const readIndex = async (column: 'item_id' | 'id', ids: string[]) => {
     const rows = []
     for (let offset = 0; offset < ids.length; offset += 40) {
@@ -210,7 +212,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const componentIndex: ComponentSummary[] = componentRows.filter(row => itemSkuById.has(row.item_id)).map(row => ({
     id: row.id, ownerId: row.owner_id, itemId: row.item_id,
     sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
-    originalFilename: row.original_filename, width: row.width, height: row.height,
+    originalFilename: row.original_filename, width: row.width, height: row.height, cutSide: row.cut_side ?? 'either',
     ...(profileById.get(row.id) ? { materialThicknessMm: profileById.get(row.id)!.thickness } : {}),
   }))
 
@@ -250,7 +252,7 @@ export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUs
   if (!supabase || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const client = supabase
   const rows = await readLibraryPages<ComponentRow>((from, to) => client.from('cnc_components')
-    .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants')
+    .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants,cut_side')
     .eq('item_id', item.id).order('date_imported').order('id').range(from, to), 'item components')
   if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const parts: Part[] = []
@@ -263,7 +265,7 @@ export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUs
       if (!variants.success) throw new Error(`${row.sku ?? row.name}: saved cutting profiles could not be read. No components have been removed.`)
       part.metadata.materialVariants = variants.data
     }
-    parts.push({ ...part, id: row.id, ownerId: row.owner_id, sku: row.sku ?? fallbackComponentSku(row.id, item.sku), name: row.name, dateImported: row.date_imported })
+    parts.push({ ...part, id: row.id, ownerId: row.owner_id, sku: row.sku ?? fallbackComponentSku(row.id, item.sku), name: row.name, dateImported: row.date_imported, cutSide: row.cut_side ?? 'either' })
   }
   return parts
 }
@@ -302,7 +304,7 @@ async function applyItemUpdate(userId: string, itemId: string, action: string, p
   if (previous) snapshots.set(previous.id, structuredClone(previous))
   snapshots.set(current.id, structuredClone(current)); catalogueSnapshots.set(userId, snapshots)
   for (const part of result.components) if (part.component_source_id) componentSuccessors.set(part.component_source_id, part.id)
-  emitCatalogueChange({ userId, current, previous, submittedItem, parts, components: result.components.map(part => ({ id: part.id, ownerId: part.owner_id, itemId: part.item_id, sku: part.sku, name: part.name, originalFilename: part.original_filename, width: part.width, height: part.height, sourceId: part.component_source_id ?? undefined, materialThicknessMm: materialProfiles.find(profile => profile.id === part.material_profile)?.thickness })) })
+  emitCatalogueChange({ userId, current, previous, submittedItem, parts, components: result.components.map(part => ({ id: part.id, ownerId: part.owner_id, itemId: part.item_id, sku: part.sku, name: part.name, originalFilename: part.original_filename, width: part.width, height: part.height, cutSide: part.cut_side ?? 'either', sourceId: part.component_source_id ?? undefined, materialThicknessMm: materialProfiles.find(profile => profile.id === part.material_profile)?.thickness })) })
   return result
 }
 export function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
@@ -394,6 +396,11 @@ export async function deleteRemoteComponent(partId: string, expectedUserId?: str
   if (!userId || (expectedUserId && expectedUserId !== userId)) throw new Error('Your account changed. Reload before deleting components.')
   if (!itemId) throw new Error('The item is required to create a revised version.')
   await updateRemoteItem(userId, itemId, 'remove_component', { id: partId })
+}
+
+export async function saveRemoteCutSide(part: Part, cutSide: CutSide, expectedUserId: string): Promise<void> {
+  if (!part.itemId) throw new Error('This component is missing its catalogue item.')
+  await updateRemoteItem(expectedUserId, part.itemId, 'cut_side', { id: part.id, cutSide, expectedCutSide: part.cutSide ?? 'either' })
 }
 
 export async function saveRemoteSheetHistory(entry: SheetHistoryEntry, expectedUserId: string): Promise<RemoteSaveResult> {

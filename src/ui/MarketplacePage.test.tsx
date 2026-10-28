@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MarketplaceItem } from '../models/Item'
 import { createPartFromGCode } from '../gcode/importPart'
@@ -20,6 +20,25 @@ function setup() {
 }
 
 describe('item library grid', () => {
+  it('saves per-component cutting sides and leaves failures visible for retry', async () => {
+    const callbacks = setup()
+    const onSaveCutSide = vi.fn().mockRejectedValueOnce(new Error('Cutting side changed in another session')).mockResolvedValue(undefined)
+    callbacks.rerender(<MarketplacePage items={items} parts={parts} currentUserId="alice" {...callbacks} onSaveCutSide={onSaveCutSide} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Alpha cabinet' }))
+    const select = screen.getByLabelText('Cutting side for Side panel')
+    expect(select).toHaveValue('either')
+    fireEvent.change(select, { target: { value: 'pattern' } })
+    expect(onSaveCutSide).toHaveBeenCalledWith(parts[0].id, 'pattern')
+    expect(select).toBeDisabled()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cutting side changed in another session')
+    expect(select).toHaveValue('either')
+    fireEvent.change(select, { target: { value: 'non-pattern' } })
+    await waitFor(() => expect(select).toBeEnabled())
+    expect(onSaveCutSide).toHaveBeenLastCalledWith(parts[0].id, 'non-pattern')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    callbacks.rerender(<MarketplacePage items={items} parts={parts.map(part => part.id === parts[0].id ? { ...part, cutSide: 'non-pattern' } : part)} currentUserId="alice" {...callbacks} onSaveCutSide={onSaveCutSide} />)
+    expect(select).toHaveValue('non-pattern')
+  })
   it('shows item images in the grid, with upload controls for a newly created item', () => {
     const callbacks = setup()
     callbacks.rerender(<MarketplacePage items={[{ ...items[0], image: testImage }, ...items.slice(1)]} parts={parts} currentUserId="alice" {...callbacks} />)

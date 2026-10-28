@@ -2,6 +2,7 @@ import type { MarketplaceItem } from '../models/Item'
 import type { ComponentSummary, Part } from '../models/Part'
 import { itemImageSchema } from '../models/ItemImage'
 import type { PackingSettings } from '../packing/types'
+import type { CutSide } from '../models/cutSide'
 
 export interface VersionItemRow {
   id: string; owner_id: string; uploaded_by: string; sku: string; name: string; description: string
@@ -11,6 +12,7 @@ export interface VersionItemRow {
 export interface VersionComponentRow {
   id: string; owner_id: string; item_id: string; sku: string; name: string; original_filename: string
   width: number; height: number; component_family_id: string; component_source_id: string | null; material_profile?: string
+  cut_side?: CutSide
 }
 export interface VersionUpdateResult { changed: boolean; current: VersionItemRow; previous: VersionItemRow | null; components: VersionComponentRow[] }
 export interface CatalogueChange {

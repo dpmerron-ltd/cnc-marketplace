@@ -3,6 +3,7 @@ import type { PartInstance } from '../models/PartInstance'
 import type { Rotation } from '../models/geometry'
 import { partNumberText } from '../labels/partLabels'
 import { instanceBounds } from '../gcode/transform'
+import { cutSideLabel } from '../models/cutSide'
 
 interface PropertiesPanelProps {
   part?: Part
@@ -22,6 +23,7 @@ export function PropertiesPanel({ part, instance, onUpdate, onDuplicate, onDelet
       ) : (
         <div className="property-grid">
           <strong>{partNumberText(instance.partNumber!)}: {part.name}</strong>
+          <span>Cutting face: {cutSideLabel(part.cutSide)}</span>
           <label>
             Sheet
             <input type="number" min={1} value={instance.sheetIndex + 1} onChange={(event) => onUpdate({ sheetIndex: Math.max(0, Number(event.target.value) - 1) })} />

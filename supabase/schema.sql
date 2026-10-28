@@ -69,6 +69,11 @@ alter table public.cnc_components
 alter table public.cnc_components
   add column if not exists material_variants jsonb;
 
+alter table public.cnc_components
+  add column if not exists cut_side text not null default 'either';
+alter table public.cnc_components drop constraint if exists component_cut_side_valid;
+alter table public.cnc_components add constraint component_cut_side_valid check (cut_side in ('either', 'pattern', 'non-pattern'));
+
 -- Old open tabs still send whole-catalogue upserts. Protect corrected programs
 -- server-side as well as in the new client; API replacements use a guarded RPC.
 create or replace function public.protect_component_program()

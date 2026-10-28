@@ -2,6 +2,7 @@ import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import { LayoutGrid } from 'lucide-react'
 import { versionLabel } from '../models/itemVersions'
+import { cutSideLabel } from '../models/cutSide'
 
 interface PartLibraryProps {
   items?: MarketplaceItem[]
@@ -73,6 +74,7 @@ export function PartLibrary({
           >
             <span>{part.name}</span>
             <small>{part.sku}</small>
+            <small>{cutSideLabel(part.cutSide)}</small>
             <small>
               {part.width.toFixed(1)} x {part.height.toFixed(1)} mm
               {part.dxf ? ' + DXF' : ''}

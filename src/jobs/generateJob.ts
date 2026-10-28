@@ -16,6 +16,7 @@ import { defaultItem } from '../models/itemVersions'
 import type { JobManifest, JobRequest } from './types'
 import { validProfilePassSelection, materialProfileId, rampProfileSchema } from '../cam/materialProfiles'
 import { selectMaterialParts } from '../gcode/materialSelection'
+import { sheetCutSide, cutSideLabel } from '../models/cutSide'
 
 export class JobError extends Error {
   status: number
@@ -101,7 +102,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
     sheets: exported.map((file, i) => {
       const instances = sheet.instances.filter(instance => instance.sheetIndex === i)
       const bounds = instances.map(instance => preparationBounds(parts.find(part => part.id === instance.partId)!, instance, settings.safeZMm).bounds)
-      return { number: i + 1, partCount: instances.length, maxX: Math.max(...bounds.map(bounds => bounds.maxX)), maxY: Math.max(...bounds.map(bounds => bounds.maxY)), deepestCutMm: simulations[i].deepestCutMm, estimatedSeconds: simulations[i].estimatedSeconds, screwMarks: planScrewPositions(parts, sheet, file.sheetIndex).points.length }
+      return { number: i + 1, cutSide: sheetCutSide(parts, sheet, file.sheetIndex), partCount: instances.length, maxX: Math.max(...bounds.map(bounds => bounds.maxX)), maxY: Math.max(...bounds.map(bounds => bounds.maxY)), deepestCutMm: simulations[i].deepestCutMm, estimatedSeconds: simulations[i].estimatedSeconds, screwMarks: planScrewPositions(parts, sheet, file.sheetIndex).points.length }
     }),
     warnings,
     setup: [
@@ -112,6 +113,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
       'Maximum X/Y reach check precedes each sheet. Confirm the physical machine can reach these coordinates. M05 only stops automatically controlled spindles.',
       settings.screwMarks ? 'Screw marking enabled: 6 mm cutter, recessed screws, 2 mm marking depth, followed by M05 / M00 pause to fit screws.' : 'Screw marking is disabled. Secure the material before starting.',
       'Load each physical sheet separately, align its origin and use its matching sheet-N.nc file. Apply labels only with the machine and spindle stopped.',
+      ...exported.map(file => `Sheet ${file.sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, file.sheetIndex))}.`),
       'Dimensions are source toolpath footprints, not finished-part dimensions. Layout drawings are not to scale. Timing excludes manual setup and pauses.',
     ],
     sources: await Promise.all(parts.map(async part => ({ id: part.id, filename: part.originalFilename, sha256: await sha256(part.gcode), feeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'F').map(word => word.value)))], spindleSpeeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'S').map(word => word.value)))] }))),

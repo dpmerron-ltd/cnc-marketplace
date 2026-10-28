@@ -51,6 +51,16 @@ function library(userId: string): RemoteProjectState {
   }
 }
 
+function cutSideLibrary() {
+  const remote = library('alice')
+  remote.parts = testParts.map(part => ({ ...part, ownerId: 'alice', itemId: 'alice-item' }))
+  return { ...remote, sheet: {
+    name: 'Cutting sides', width: 500, height: 500, spacing: 10, borderSpacing: 10,
+    screwMarkingEnabled: false, gcodeSettings: { ...defaultProgramSettings, safeZ: 20 },
+    instances: [{ id: 'first', partId: remote.parts[0].id, x: 20, y: 20, rotation: 0, locked: false, sheetIndex: 0, partNumber: 5 }],
+  } }
+}
+
 async function switchAccount(userId: string) {
   await act(async () => {
     mock.userId = userId
@@ -98,6 +108,38 @@ function placedLibrary() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('uses unloaded component metadata to choose a compatible sheet for manual additions', async () => {
+    const { remote, components } = lazyLibrary()
+    const faced = components.map((part, index): Part => ({ ...part, cutSide: index ? 'non-pattern' : 'pattern' }))
+    remote.componentIndex = faced.map(summarizePart)
+    remote.sheet = { ...cutSideLibrary().sheet, instances: [{ ...cutSideLibrary().sheet.instances[0], partId: faced[1].id }] }
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(item => item.id === faced[0].itemId ? Promise.resolve([faced[0]]) : new Promise(() => {}))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByRole('heading', { name: 'Panel 0' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add to sheet' }))
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ instances: [
+      expect.objectContaining({ partId: faced[1].id, sheetIndex: 0 }),
+      expect.objectContaining({ partId: faced[0].id, sheetIndex: 1 }),
+    ] }))
+  })
+  it('places individual components with opposite cutting faces on separate physical sheets', async () => {
+    const remote = cutSideLibrary()
+    remote.parts = remote.parts.map((part, index) => ({ ...part, cutSide: index ? 'non-pattern' : 'pattern' }))
+    remote.sheet.instances = remote.sheet.instances.slice(0, 1)
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByRole('heading', { name: remote.parts[1].name })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add to sheet' })[1])
+    await openSheet()
+    expect(await screen.findByRole('button', { name: 'Sheet 2' })).toHaveClass('active-sheet-tab')
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ instances: [
+      expect.objectContaining({ partId: remote.parts[0].id, sheetIndex: 0 }),
+      expect.objectContaining({ partId: remote.parts[1].id, sheetIndex: 1 }),
+    ] }))
+  })
   it('opens and edits a shared item and adds its components to another user’s sheet', async () => {
     mock.userId = 'bob'
     const { remote, components } = lazyLibrary()

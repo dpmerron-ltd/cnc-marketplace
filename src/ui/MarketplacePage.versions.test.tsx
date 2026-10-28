@@ -15,14 +15,16 @@ const callbacks = () => ({ onCreateItem: vi.fn(() => ''), onSelectItem: vi.fn(),
 
 it('keeps the default editable and the older version read-only with its original components', () => {
   const actions = callbacks()
-  render(<MarketplacePage items={[previous, current]} parts={parts} currentUserId="user" {...actions} />)
+  render(<MarketplacePage items={[previous, current]} parts={parts} currentUserId="user" {...actions} onSaveCutSide={vi.fn()} />)
   expect(screen.getAllByRole('button', { name: 'Open Rack' })).toHaveLength(1)
   fireEvent.click(screen.getByRole('button', { name: 'Open Rack' }))
   expect(screen.getByLabelText('Item version')).toHaveValue('b')
   expect(screen.getByLabelText('Item name')).not.toHaveAttribute('readonly')
+  expect(screen.getByLabelText('Cutting side for Side')).toBeEnabled()
   expect(screen.queryByRole('button', { name: 'Publish version' })).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('Item version'), { target: { value: 'a' } })
   expect(screen.getByLabelText('Item name')).toHaveAttribute('readonly')
+  expect(screen.getByLabelText('Cutting side for Side')).toBeDisabled()
   expect(screen.queryByLabelText('Upload components')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Remove Side' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Add to sheet' }))

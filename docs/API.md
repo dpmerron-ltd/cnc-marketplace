@@ -451,3 +451,9 @@ return 400. The generator and sheet selectors expose both profiles, and new
 automatic variant bundles include both. Existing bundles remain valid but need
 regeneration before the 13 mm profile can be selected for export. Saved components and queued
 jobs are not rewritten. Selecting a stock thickness does not resize DXF joints.
+
+## Component cutting sides
+
+Component creation and staged item-import components accept optional `cutSide`: `"either"` (default), `"pattern"`, or `"non-pattern"`. This specifies the stock face pointing up toward the cutter. Catalogue component summaries expose `cut_side`; component-source responses expose `cutSide`. Set existing components through the item's **Cutting side** control, which publishes a new item revision with conflict checking.
+
+Job nesting separates pattern-side-up and non-pattern-side-up components onto different physical sheets. Either-side components can share either face. Job manifest cuts and sheets include `cutSide`; sheet plans, NC headers and labels include the corresponding face instruction. Source geometry and cutting depths are preserved. Existing job files and historical item versions retain their original settings.

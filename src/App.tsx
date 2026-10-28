@@ -29,6 +29,7 @@ import { mergeVersionEdit, subscribeCatalogueChanges } from './storage/catalogue
 import { itemImageSchema, type ItemImage } from './models/ItemImage'
 import type { ComponentSummary, Part } from './models/Part'
 import { summarizePart } from './models/Part'
+import { cutSideLabel, sheetCutSide, compatibleCutSides, type CutSide } from './models/cutSide'
 import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
@@ -45,6 +46,7 @@ import {
   loadRemoteProject,
   loadRemoteItemComponents,
   saveRemoteComponent,
+  saveRemoteCutSide,
   saveRemoteItemImage,
   saveRemoteProject,
   saveRemoteSheetHistory,
@@ -1008,9 +1010,30 @@ function App() {
     } catch (error) { if (accountRef.current === userId) setStatus(`Component was not removed: ${errorMessage(error)}`) }
   }
 
+  async function saveCutSide(partId: string, cutSide: CutSide) {
+    const part = parts.find(candidate => candidate.id === partId)
+    const item = items.find(candidate => candidate.id === part?.itemId)
+    if (!part || !canEditItem(item) || !userId) throw new Error('This shared component is not available in this session.')
+    if (!persistedComponentIds.current.has(partId)) throw new Error('Wait for this component to finish uploading, then set its cutting side.')
+    await saveRemoteCutSide(part, cutSide, userId)
+    if (accountRef.current === userId) setStatus('Cutting side saved. New additions use the revised item; existing sheets keep their original version.')
+  }
+
   function addPart(partId: string, x = sheet.borderSpacing, y = sheet.borderSpacing) {
     const parent = items.find(item => item.id === parts.find(part => part.id === partId)?.itemId)
     if (parent?.version?.status === 'draft') { setStatus('This item version is incomplete. Reload the catalogue before adding it.'); return }
+    const part = parts.find(candidate => candidate.id === partId)
+    const side = sheetCutSide(catalogueComponents, sheet, currentSheetIndex)
+    if (part && (side === 'mixed' || !compatibleCutSides(side, part.cutSide))) {
+      const target = Array.from({ length: sheetCount + 1 }, (_, index) => index).find(index => {
+        const face = sheetCutSide(catalogueComponents, sheet, index)
+        return face !== 'mixed' && compatibleCutSides(face, part.cutSide)
+      })!
+      setSheet(current => numberSheetParts({ ...current, instances: [...current.instances, newInstance(partId, x, y, target)] }))
+      setActiveSheetIndex(target)
+      setStatus(`Added ${part.name} to Sheet ${target + 1}: ${cutSideLabel(part.cutSide)}.`)
+      return
+    }
     setSheet((current) => numberSheetParts({
       ...current,
       instances: [...current.instances, newInstance(partId, x, y, currentSheetIndex)],
@@ -1522,6 +1545,7 @@ function App() {
           onImportComponents={(itemId, files) => void importFilesForItem(itemId, files)}
           onDeleteComponent={deleteComponent}
           onAddToSheet={addPart}
+          onSaveCutSide={saveCutSide}
           onAddItemToSheet={addAllItemComponents}
           onOpenSheet={() => setPage('sheet')}
         />
@@ -1568,6 +1592,7 @@ function App() {
                 <Trash2 size={16} /> Delete All Parts
               </button>
             </div>
+            <p className="sheet-cut-side" role="status">Sheet {currentSheetIndex + 1} · <strong>{cutSideLabel(sheetCutSide(sheetParts, sheet, currentSheetIndex))}</strong></p>
             <SheetEditor
               parts={sheetParts}
               sheet={sheet}
@@ -1679,6 +1704,8 @@ function App() {
             )}
 
             <div className="export-file-list">
+              <h3>Material face for each sheet</h3>
+              <ul>{Array.from({ length: pendingExport.summary.physicalSheets }, (_, index) => <li key={index}>Sheet {index + 1}: {cutSideLabel(sheetCutSide(pendingExport.tabMap.parts, pendingExport.tabMap.sheet, index))}</li>)}</ul>
               <h3>Files to export</h3>
               <ul>
                 {pendingExport.files.map((file) => (

@@ -1,6 +1,7 @@
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
+import type { CutSide } from '../models/cutSide'
 
 const validNumber = (value: number | undefined): value is number => Number.isSafeInteger(value) && value! > 0
 
@@ -34,6 +35,7 @@ export interface PartLabel {
   x: number
   y: number
   rotation: number
+  cutSide?: CutSide
 }
 
 export function buildPartLabels(parts: Part[], items: MarketplaceItem[], input: Sheet): PartLabel[] {
@@ -48,6 +50,7 @@ export function buildPartLabels(parts: Part[], items: MarketplaceItem[], input: 
       job: sheet.name.trim() || 'Untitled Job', order: sheet.orderNumber?.trim() || '-', material: sheet.material?.trim() || '',
       sheetNumber: instance.sheetIndex + 1, cutOrder: index + 1, totalParts: ordered.length,
       x: instance.x, y: instance.y, rotation: instance.rotation,
+      cutSide: part.cutSide ?? 'either',
     }
   })
 }

@@ -12,6 +12,10 @@ The **Items** page is a shared grid library for all signed-in users with item ph
 
 Each item also has a [stacked flat-pack estimate](docs/PACKING.md), capped at five components per box and 120 cm outside, with overflow boxes, internal size ranges, stack layouts and editable packing measurements.
 
+For patterned or single-faced stock, open an item and set each component's **Cutting side** to **Either side**, **Pattern side up**, or **Non-pattern side up**. The selected face points up toward the cutter. Existing components default to either side. Item/order additions and auto-nesting put opposite-facing components on separate physical sheets; unrestricted components can share either. Manual additions use a compatible sheet, and conflicting layouts block export. Sheet review, NC files, labels, job plans and At Machine show the required face.
+
+Cutting-side edits create a new item version. Existing sheets and queued/exported programs retain their original version; remove and re-add the item to use the revised requirements. NC geometry is preserved, so source programs must already machine the component from the chosen face. This setting does not mirror geometry or generate a two-sided machining operation.
+
 ```bash
 npm install
 npm run dev

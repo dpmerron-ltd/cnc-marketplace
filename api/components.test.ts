@@ -7,6 +7,13 @@ import * as simulation from '../src/gcode/simulator'
 
 const input = { id: '20000000-0000-4000-8000-000000000001', name: 'Side', sku: 'SIDE', filename: 'side.nc', gcode: testParts[0].gcode }
 describe('component uploads', () => {
+  it('accepts supported cutting sides, defaults older uploads and rejects invalid values', () => {
+    expect(parseComponent(input, 'alice', testItem.id).part.cutSide).toBe('either')
+    for (const cutSide of ['either', 'pattern', 'non-pattern']) {
+      expect(parseComponent({ ...input, cutSide }, 'alice', testItem.id).part).toMatchObject({ cutSide, gcode: input.gcode })
+    }
+    for (const cutSide of ['up', '', null, 1]) expect(() => parseComponent({ ...input, cutSide }, 'alice', testItem.id)).toThrow('Invalid component')
+  })
   it('reuses only identical server-stored variants while validating primary and changed NC', () => {
     const materialVariants = materialVariantsSchema.parse({ version: 1, primaryProfile: '18', profiles: Object.fromEntries(materialProfiles.map(profile => [profile.id, { gcode: input.gcode, errors: [], warnings: [] }])) })
     const simulate = vi.spyOn(simulation, 'simulateGCode')
