@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { newProductionJob, planWaitingSheets, replanWorkspace, sheetSignature, sheetNeedsExport, changeSheetStage, updateProductionSheet, waitingExportSheet } from './production'
+import { newProductionJob, removeProductionJob, planWaitingSheets, replanWorkspace, sheetSignature, sheetNeedsExport, changeSheetStage, updateProductionSheet, waitingExportSheet } from './production'
 import { autoNest } from '../nesting/nestingEngine'
 import { exportPhysicalSheetGCodes } from '../gcode/exporter'
 import { sheetGCodeFilename } from '../gcode/filenames'
@@ -20,6 +20,44 @@ function exported() {
 }
 
 describe('production sheet workflow', () => {
+  it('removes waiting work and releases recuts while preserving completed records and other jobs', () => {
+    const first = changeSheetStage(exported(), 0, 'cut')
+    first.sheet.instances[1].recutId = 'replacement'
+    const other = job()
+    const result = removeProductionJob({ activeId: first.id, jobs: [first, other] }, first.id)
+    expect(result.activeId).toBe(other.id)
+    expect(result.jobs[1]).toBe(other)
+    const record = result.jobs[0]
+    expect(record.archived).toBe(true)
+    expect(record.sheet.instances).toEqual([first.sheet.instances[0]])
+    expect(record.sheets).toEqual(first.sheets)
+    expect(sheetSignature(record.sheet, 0)).toBe(sheetSignature(first.sheet, 0))
+    expect(sheetNeedsExport(record, 1)).toBe(true)
+    expect(result.jobs.flatMap(job => job.sheet.instances).some(instance => instance.recutId === 'replacement')).toBe(false)
+    expect(replanWorkspace(result, testParts).jobs[0]).toBe(record)
+  })
+  it('removes an unused tab without changing the selected job', () => {
+    const first = job(), unused = newProductionJob({ ...first.sheet, instances: [] })
+    expect(removeProductionJob({ activeId: first.id, jobs: [first, unused] }, unused.id)).toEqual({ activeId: first.id, jobs: [first] })
+  })
+  it('leaves a fresh empty job when the final working job is removed', () => {
+    const first = job()
+    first.sheet.orderNumber = 'OLD-ORDER'
+    first.sheet.orderImports = [{ key: 'old', name: 'OLD-ORDER', instanceIds: first.sheet.instances.map(i => i.id) }]
+    const result = removeProductionJob({ activeId: first.id, jobs: [first] }, first.id)
+    expect(result.jobs).toHaveLength(1)
+    expect(result.activeId).not.toBe(first.id)
+    expect(result.activeId).toBe(result.jobs[0].id)
+    expect(result.jobs[0].sheet.instances).toEqual([])
+    expect(result.jobs[0].sheet.orderNumber).toBeUndefined()
+    expect(result.jobs[0].sheet.orderImports).toBeUndefined()
+  })
+  it('keeps a job accessible while one of its sheets is cutting', () => {
+    const first = changeSheetStage(exported(), 0, 'cutting')
+    expect(() => removeProductionJob({ activeId: first.id, jobs: [first] }, first.id)).toThrow('still cutting')
+    expect(first.sheet.instances).toHaveLength(2)
+    expect(first.archived).toBeUndefined()
+  })
   it('keeps cutting and cut sheets fixed, and never nests additions onto their spare space', () => {
     let value = changeSheetStage(exported(), 0, 'cutting')
     const original = value.sheet.instances[0]

@@ -1,14 +1,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MachinePage } from './MachinePage'
-import { newProductionJob } from '../jobs/production'
+import { newProductionJob, sheetSignature } from '../jobs/production'
 import { ncHash, type MachineRun } from '../machine/exportSnapshot'
 import type { MachineRecut } from '../machine/recuts'
+import { renderLabel } from '../labels/labelPdf'
 
 const mock = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), change: vi.fn(), download: vi.fn(), recuts: vi.fn(), queueRecut: vi.fn() }))
 vi.mock('../storage/machineRunsStore', () => ({ listMachineRuns: (...args: unknown[]) => mock.list(...args), loadMachineRun: (...args: unknown[]) => mock.load(...args), changeMachineRunStatus: (...args: unknown[]) => mock.change(...args) }))
 vi.mock('../storage/machineRecutsStore', () => ({ listRunRecuts: (...args: unknown[]) => mock.recuts(...args), queueMachineRecut: (...args: unknown[]) => mock.queueRecut(...args) }))
 vi.mock('../storage/projectStorage', () => ({ downloadText: (...args: unknown[]) => mock.download(...args) }))
+vi.mock('../labels/labelPdf', () => ({ renderLabel: vi.fn(), createLabelPdf: vi.fn() }))
 const id = '00000000-0000-4000-8000-000000000001'
 const makeRecut = (sheetIndex = 0, partNumber = 'P001'): MachineRecut => ({ id: 'recut-1', owner_id: 'alice', source_run_id: id, sheet_index: sheetIndex, part_number: partNumber, part_name: `Side ${sheetIndex + 1}`, job_name: 'Rack', order_number: '1007', material: 'Ply', thickness: '12 mm', status: 'queued', created_at: '2026-10-27T12:00:00Z', updated_at: '2026-10-27T12:00:00Z' })
 const makeRun = async (): Promise<MachineRun> => ({
@@ -69,6 +71,28 @@ describe('At Machine', () => {
     expect(screen.getAllByRole('option')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Download NC' }))
     await waitFor(() => expect(mock.download).toHaveBeenCalledWith('two.nc', 'two.nc', 'application/x-gcode'))
+  })
+
+  it('keeps removed job history and saved labels readable without allowing its NC download', async () => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+    const run = await makeRun()
+    run.snapshot.mode = 'combined'
+    const job = newProductionJob({ name: 'Rack', width: 1220, height: 1220, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: run.snapshot.programs })
+    job.archived = true
+    job.sheets[0] = { stage: 'cut', runId: run.id, combined: true, signature: sheetSignature(job.sheet, 0) }
+    run.snapshot.jobId = job.id
+    mock.load.mockResolvedValue(run)
+    window.history.replaceState({}, '', `#machine/${id}`)
+    const print = vi.fn(async () => {})
+    render(<MachinePage userId="alice" jobs={[job]} onCurrentLabels={print} />)
+    await screen.findByRole('heading', { name: 'Rack' })
+    expect(screen.getByRole('alert')).toHaveTextContent('no longer active')
+    expect(screen.getAllByRole('button', { name: 'Download NC' }).every(button => button.hasAttribute('disabled'))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Print labels' }))
+    expect(await screen.findByRole('dialog', { name: 'Part Labels' })).toBeInTheDocument()
+    expect(renderLabel).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ component: 'Side 1', partNumber: 'P001', sheetNumber: 1 }), expect.anything())
+    expect(print).not.toHaveBeenCalled()
+    expect(mock.download).not.toHaveBeenCalled()
   })
 
   it('opens a direct phone link, refuses a corrupted saved download, and retains the current status on conflict', async () => {

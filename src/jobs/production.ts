@@ -78,6 +78,27 @@ export function waitingExportSheet(job: ProductionJob): Sheet {
   return { ...job.sheet, instances: job.sheet.instances.filter(i => indices.has(i.sheetIndex)) }
 }
 
+export function removeProductionJob(workspace: SheetWorkspace, id: string): SheetWorkspace {
+  const job = workspace.jobs.find(job => job.id === id)
+  if (!job || job.archived) return workspace
+  if (Object.values(job.sheets).some(sheet => sheet.stage === 'cutting')) {
+    throw new Error('Mark sheets that are still cutting as cut before removing this job.')
+  }
+  // Keep exported jobs as a record so removed waiting files remain superseded.
+  const keepRecord = job.revision > 0 || Object.values(job.sheets).some(sheet => sheet.runId || sheet.stage === 'cut')
+  const retained = job.sheet.instances.filter(instance => job.sheets[instance.sheetIndex]?.stage === 'cut')
+  const jobs = keepRecord
+    ? workspace.jobs.map(candidate => candidate.id === id ? { ...job, archived: true, sheet: { ...job.sheet, instances: retained } } : candidate)
+    : workspace.jobs.filter(candidate => candidate.id !== id)
+  let active = jobs.find(candidate => candidate.id === workspace.activeId && !candidate.archived)
+    ?? jobs.find(candidate => !candidate.archived && (!candidate.sheet.instances.length || waitingSheetIndices(candidate).length))
+  if (!active) {
+    active = newProductionJob({ ...job.sheet, name: today(), instances: [], orderNumber: undefined, orderImports: undefined, nextPartNumber: undefined })
+    jobs.push(active)
+  }
+  return { ...workspace, activeId: active.id, jobs }
+}
+
 export function replanWorkspace(workspace: SheetWorkspace, parts: Part[]): SheetWorkspace {
   const groups = new Map<string, ProductionJob[]>()
   for (const job of workspace.jobs) {

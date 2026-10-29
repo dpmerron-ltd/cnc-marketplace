@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import type { SetStateAction } from 'react'
-import { newWorkspace, newProductionJob, today, updateProductionSheet, waitingExportSheet, sheetIndices, waitingSheetIndices, sheetSignature, changeSheetStage, type SheetWorkspace, type ProductionJob, type SheetStage } from './jobs/production'
+import { newWorkspace, newProductionJob, removeProductionJob, today, updateProductionSheet, waitingExportSheet, sheetIndices, waitingSheetIndices, sheetSignature, changeSheetStage, type SheetWorkspace, type ProductionJob, type SheetStage } from './jobs/production'
 import { sheetGCodeFilename } from './gcode/filenames'
 import { cacheWorkspace, recoveryWorkspace } from './storage/workspaceCache'
 import { reserveExportName } from './storage/exportNamesStore'
@@ -489,6 +489,21 @@ function App() {
     const job = newProductionJob({ ...defaultSheet, materialProfile: sheet.materialProfile, material: sheet.material, name: today() })
     setWorkspace(current => ({ activeId: job.id, jobs: [...current.jobs, job] }))
     setActiveSheetIndex(0); setSelectedInstanceId(undefined); setPendingExport(undefined); setPage('sheet')
+  }
+  function removeJob(id: string) {
+    if (exportBusyRef.current || loadedAccountId !== userId) return
+    const current = workspaceRef.current
+    const job = current.jobs.find(job => job.id === id)
+    if (!job || job.archived) return
+    const waiting = waitingExportSheet(job).instances.length
+    if (waiting && !window.confirm(`Remove job ${job.name} and its ${waiting} waiting part${waiting === 1 ? '' : 's'}? Queued re-cuts will be available to add again. Previous exports and cut-sheet records will be kept.`)) return
+    try {
+      const next = removeProductionJob(current, id)
+      setWorkspace(next)
+      if (next.activeId !== current.activeId) { setActiveSheetIndex(0); setSelectedInstanceId(undefined) }
+      setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+      setStatus(`Job removed.${current.jobs.some(job => job.id === next.activeId) ? '' : ' A fresh empty job is ready.'}`)
+    } catch (error) { setStatus(errorMessage(error)) }
   }
   const [activeSheetIndex, setActiveSheetIndex] = useState(0)
   const [sheetHistory, setSheetHistory] = useState<SheetHistoryEntry[]>(initialState.sheetHistory)
@@ -1569,6 +1584,7 @@ function App() {
         {loadedAccountId === userId && (page === 'sheet' || page === 'history') && <div className="production-tabs" role="tablist" aria-label="Open cutting jobs">
           {workspace.jobs.filter(job => !job.archived && (!job.sheet.instances.length || waitingSheetIndices(job).length)).map((job, index) => <button type="button" role="tab" aria-selected={job.id === activeJob.id} key={job.id} disabled={exportBusy} onClick={() => openJob(job.id)}>{job.name} · {materialProfiles.find(p => p.id === job.sheet.materialProfile)?.thickness ?? 'Original'} mm · {index + 1}</button>)}
           <button type="button" disabled={exportBusy} onClick={addJob}>New job</button>
+          <button type="button" disabled={exportBusy || activeJob.archived || Object.values(activeJob.sheets).some(sheet => sheet.stage === 'cutting')} title="Remove this job and its waiting parts; keep previous exports and cut-sheet records. Mark any cutting sheets cut first." onClick={() => removeJob(activeJob.id)}>Remove job</button>
         </div>}
         {sheetReady && (page === 'sheet' || page === 'history') && <><div className="sheet-controls">
           <label className="sheet-name-control">
@@ -1646,7 +1662,7 @@ function App() {
       {loadedAccountId === userId && <div className="workspace-save-status" role="status">{workspaceSaveError ? <>Cloud save failed: {workspaceSaveError} <button type="button" onClick={() => void saveCurrentProject()}>Retry save</button><button type="button" onClick={() => setLibraryReload(value => value + 1)}>Reload saved plan</button></> : savedWorkspaceAt === workspace.updatedAt ? 'All job tabs saved' : 'Saving job tabs…'}{recoverableWorkspace && <button type="button" onClick={() => void downloadWorkspaceRecovery()}>Download unsaved recovery</button>}</div>}
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
+      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
