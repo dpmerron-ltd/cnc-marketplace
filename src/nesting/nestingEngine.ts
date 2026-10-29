@@ -81,6 +81,18 @@ export function partFitsSheet(part: Part, sheet: Sheet): boolean {
 }
 
 export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {
+  const closed = new Set(sheet.unavailableSheetIndices ?? [])
+  if (!closed.size) return nestAvailable(parts, sheet, onProgress)
+  const indices: number[] = []
+  const limit = Math.max(sheet.instances.length, ...sheet.instances.map(i => i.sheetIndex + 1)) + closed.size + 1
+  for (let i = 0; indices.length < limit; i++) if (!closed.has(i)) indices.push(i)
+  const waiting = sheet.instances.filter(i => !closed.has(i.sheetIndex))
+  const nested = nestAvailable(parts, { ...sheet, unavailableSheetIndices: undefined, instances: waiting.map(i => ({ ...i, sheetIndex: indices.indexOf(i.sheetIndex) })) }, onProgress)
+  const placed = new Map(nested.map(i => [i.id, { ...i, sheetIndex: indices[i.sheetIndex] }]))
+  return sheet.instances.map(i => placed.get(i.id) ?? i)
+}
+
+function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   parts = selection.parts

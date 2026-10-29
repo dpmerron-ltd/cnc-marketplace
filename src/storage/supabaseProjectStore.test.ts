@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { newWorkspace } from '../jobs/production'
 import type { Sheet } from '../models/Sheet'
 import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { testParts } from '../test/jobFixtures'
@@ -10,6 +11,11 @@ vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
     rpc: async (name: string, input: { p_actor: string; p_item: string; p_action: string; p_payload: { components?: Record<string, unknown>[]; expected?: Record<string, string>; next?: Record<string, unknown>; image?: unknown } }) => {
+      if (name === 'save_cnc_workspace') {
+        const request = input as unknown as { p_expected_version: number }
+        mock.queries.push({ table: 'workspace-rpc', write: input, filters: [] })
+        return { data: mock.error ? null : request.p_expected_version + 1, error: mock.error }
+      }
       expect(name).toBe('update_item_version')
       const payload = input.p_payload
       mock.queries.push({ table: input.p_action === 'add_components' ? 'cnc_components' : 'marketplace_items', write: payload.components ?? payload.next ?? payload, filters: [['id', input.p_item], ...Object.entries(input.p_action === 'metadata' ? payload.expected ?? {} : {})] })
@@ -48,7 +54,7 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(async () => { mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.project = null; mock.history = []; mock.failOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
+  beforeEach(async () => { localStorage.clear(); mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.project = null; mock.history = []; mock.failOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
 
   it('loads cutting sides in the lightweight index and full programs and uses a conflict-checked versioned save', async () => {
     mock.rows = [{ id: 'faces', owner_id: 'bob', name: 'Faces', sku: 'FACES' }]
@@ -104,16 +110,28 @@ describe('cloud account boundaries', () => {
     await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load component index: Response too large')
   })
 
+  it('saves all tabs using the last confirmed cloud version and retains that version after a failure', async () => {
+    const workspace = newWorkspace(sheet)
+    expect(await saveRemoteProject([], [], sheet, undefined, 'alice', workspace)).toEqual({ ok: true })
+    mock.error = { message: 'Changed on another device' }
+    expect(await saveRemoteProject([], [], sheet, undefined, 'alice', workspace)).toMatchObject({ ok: false, error: 'Changed on another device' })
+    mock.error = null
+    expect(await saveRemoteProject([], [], sheet, undefined, 'alice', workspace)).toEqual({ ok: true })
+    const calls = mock.queries.filter(query => query.table === 'workspace-rpc').map(query => query.write as { p_expected_version: number; p_workspace: unknown })
+    expect(calls.map(call => call.p_expected_version)).toEqual([0, 1, 1])
+    expect(calls.every(call => call.p_workspace === workspace)).toBe(true)
+  })
+
   it('skips historical bundles at startup while retaining versions and saved-sheet revisions', async () => {
     mock.rows = Array.from({ length: 640 }, (_, index) => ({ id: `version-${index}`, owner_id: 'alice', name: 'Rack', sku: 'RACK', version_family_id: 'family', version_number: index + 1, version_status: 'published', version_default: index === 639 }))
     mock.components = mock.rows.flatMap((row, index) => Array.from({ length: 20 }, (_, part) => ({ id: `part-${index}-${part}`, item_id: (row as { id: string }).id, owner_id: 'alice', name: 'Panel', sku: 'P', original_filename: 'panel.nc', width: 100, height: 200, material_profile: '12', gcode: testParts[0].gcode })))
     const placed = (partId: string) => ({ id: partId, partId, sheetIndex: 0, x: 0, y: 0, rotation: 0, locked: false })
-    mock.project = { id: 'alice', selected_item_id: 'version-0', sheet: { ...sheet, instances: [placed('part-0-0'), placed('part-639-0')] } }
+    mock.project = { id: 'alice', selected_item_id: 'version-0', sheet: { ...sheet, instances: [placed('part-0-0'), placed('part-639-0')] }, workspace: { activeId: 'other', jobs: [{ id: 'other', name: 'Other tab', revision: 0, sheets: {}, sheet: { ...sheet, instances: [placed('part-2-0')] } }] } }
     mock.history = [{ id: 'saved', name: 'Saved', saved_at: '', sheet: { ...sheet, instances: [placed('part-1-0'), placed('part-0-0')] } }]
     const result = await loadRemoteProject('alice')
     expect(result?.items).toHaveLength(640)
-    expect(result?.componentIndex).toHaveLength(22)
-    expect(result?.componentIndex?.map(part => part.id)).toEqual(expect.arrayContaining(['part-0-0', 'part-1-0', 'part-639-0']))
+    expect(result?.componentIndex).toHaveLength(23)
+    expect(result?.componentIndex?.map(part => part.id)).toEqual(expect.arrayContaining(['part-0-0', 'part-1-0', 'part-2-0', 'part-639-0']))
     expect(result?.componentIndex?.every(part => part.materialThicknessMm === 12)).toBe(true)
     expect(result?.sheet).toEqual((mock.project as { sheet: Sheet }).sheet)
     expect(result?.sheetHistory[0].sheet.instances).toHaveLength(2)
@@ -122,7 +140,7 @@ describe('cloud account boundaries', () => {
     expect(indexQueries).toHaveLength(6)
     expect(indexQueries.every(query => query.included?.[0] === 'item_id'
       ? JSON.stringify(query.included[1]) === JSON.stringify(['version-639'])
-      : JSON.stringify(query.included?.[1]) === JSON.stringify(['part-0-0', 'part-1-0']))).toBe(true)
+      : JSON.stringify(query.included?.[1]) === JSON.stringify(['part-0-0', 'part-2-0', 'part-1-0']))).toBe(true)
     const profileQueries = mock.queries.filter(query => query.columns?.includes('material_variants->>'))
     expect(profileQueries).toHaveLength(1)
     expect(profileQueries[0].included?.[0]).toBe('id')

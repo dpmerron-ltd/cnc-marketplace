@@ -1,3 +1,5 @@
+import { buildPartLabels, type PartLabel } from '../labels/partLabels'
+import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import type { Point } from '../models/geometry'
@@ -11,9 +13,12 @@ import { cutSideErrors, sheetCutSide, type SheetCutSide } from '../models/cutSid
 
 export type MachineStatus = 'waiting' | 'cutting' | 'completed' | 'cancelled'
 export const machineStatusNames: Record<MachineStatus, string> = { waiting: 'Waiting to cut', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
-export interface MachineFile { filename: string; gcode: string; sha256: string; estimatedSeconds: number }
+export interface MachineFile { sheetIndices?: number[]; filename: string; gcode: string; sha256: string; estimatedSeconds: number }
 export interface ExportSnapshot {
   version: 1
+  jobId?: string
+  labels?: PartLabel[]
+  materialProfile?: Sheet['materialProfile']
   mode: 'combined' | 'sheets'
   map: TabMap
   material: string
@@ -38,8 +43,10 @@ export async function ncHash(gcode: string): Promise<string> {
 }
 
 export async function buildExportSnapshot(input: {
+  jobId?: string
+  items?: MarketplaceItem[]
   mode: ExportSnapshot['mode']; parts: Part[]; sheet: Sheet
-  files: Array<{ filename: string; gcode: string; simulation: { estimatedSeconds: number } }>
+  files: Array<{ sheetIndices?: number[]; filename: string; gcode: string; simulation: { estimatedSeconds: number } }>
   summary: { deepestCutMm?: number; exportWarnings: string[] }
 }): Promise<ExportSnapshot> {
   // Detach before the first await: later editor changes must never alter a saved export.
@@ -62,11 +69,11 @@ export async function buildExportSnapshot(input: {
     if (screws.errors.length) throw new Error(screws.errors.join(' '))
     return { index, cutSide: sheetCutSide(selected.parts, sheet, index), maxX: Math.max(0, ...bounds.map(bound => bound.maxX)), maxY: Math.max(0, ...bounds.map(bound => bound.maxY)), screws: screws.points }
   })
-  if (input.files.length !== (input.mode === 'combined' ? 1 : map.sheetCount)) throw new Error('Export file count does not match the sheet layout.')
+  if (input.files.length !== (input.mode === 'combined' ? 1 : new Set(sheet.instances.map(i => i.sheetIndex)).size)) throw new Error('Export file count does not match the sheet layout.')
   const files: MachineFile[] = []
-  for (const file of input.files) files.push({ filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
+  for (const file of input.files) files.push({ sheetIndices: file.sheetIndices, filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
   return {
-    version: 1, mode: input.mode, map, sheets, files, safeZ,
+    version: 1, jobId: input.jobId, labels: buildPartLabels(input.parts, input.items ?? [], sheet), materialProfile: sheet.materialProfile, mode: input.mode, map, sheets, files, safeZ,
     material: sheet.material?.trim() || 'Not specified',
     thickness: materialProfiles.find(profile => profile.id === sheet.materialProfile)?.label ?? 'Original NC - verify stock thickness',
     deepestCutMm: input.summary.deepestCutMm, warnings: [...input.summary.exportWarnings], programs: sheet.gcodeSettings,

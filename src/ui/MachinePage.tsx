@@ -6,11 +6,13 @@ import { listRunRecuts, queueMachineRecut } from '../storage/machineRecutsStore'
 import type { MachineRecut } from '../machine/recuts'
 import { downloadText } from '../storage/projectStorage'
 import './MachinePage.css'
+import { sheetNeedsExport, type ProductionJob } from '../jobs/production'
+import { PartLabelsDialog } from './PartLabelsDialog'
 
 const mm = (value: number) => Number(value.toFixed(2)).toString()
 const selectedId = (hash: string) => hash.match(/^#machine\/([0-9a-f-]{36})(?:\?.*)?$/i)?.[1]
 
-export function MachinePage({ userId }: { userId: string }) {
+export function MachinePage({ userId, jobs = [], onCurrentLabels, syncBlocked = false }: { userId: string; jobs?: ProductionJob[]; syncBlocked?: boolean; onCurrentLabels?: (jobId: string, index: number) => Promise<void> }) {
   const [locationHash, setLocationHash] = useState(() => window.location.hash)
   const id = selectedId(locationHash)
   const [runs, setRuns] = useState<MachineRunSummary[]>([])
@@ -21,6 +23,7 @@ export function MachinePage({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [labelsOpen, setLabelsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [sheetIndex, setSheetIndex] = useState(0)
   const [partNumber, setPartNumber] = useState<string>()
@@ -56,7 +59,8 @@ export function MachinePage({ userId }: { userId: string }) {
           if (!abort.signal.aborted) {
             const params = new URLSearchParams(locationHash.split('?')[1])
             const requestedSheet = Number(params.get('sheet')) - 1
-            const initialSheet = loaded.snapshot.sheets.some(sheet => sheet.index === requestedSheet) ? requestedSheet : 0
+            const occupied = [...new Set(loaded.snapshot.map.parts.map(part => part.sheetIndex))]
+            const initialSheet = occupied.includes(requestedSheet) ? requestedSheet : occupied[0] ?? 0
             setRun(loaded); setSheetIndex(initialSheet)
             setPartNumber(loaded.snapshot.map.parts.find(part => part.sheetIndex === initialSheet && part.number === params.get('part'))?.number)
           }
@@ -129,14 +133,17 @@ export function MachinePage({ userId }: { userId: string }) {
   const parts = map?.parts.filter(part => part.sheetIndex === sheetIndex) ?? []
   const selected = parts.find(part => part.number === partNumber)
   const alreadyQueued = recutsReady && recutState.entries.some(entry => entry.sheet_index === sheetIndex && entry.part_number === partNumber)
-  const files = snapshot?.mode === 'combined' ? snapshot.files : snapshot?.files.slice(sheetIndex, sheetIndex + 1) ?? []
+  const files = snapshot?.files.filter((file, index) => file.sheetIndices ? file.sheetIndices.includes(sheetIndex) : snapshot.mode === 'combined' || index === sheetIndex) ?? []
+  const liveJob = jobs.find(job => job.id === snapshot?.jobId)
+  const needsSync = Boolean(snapshot?.jobId && syncBlocked)
+  const superseded = Boolean(liveJob && (sheetNeedsExport(liveJob, sheetIndex) || liveJob.sheets[sheetIndex]?.runId !== run?.id))
   // Keep labels readable at the overview scale, including narrow phone screens.
   const markerSize = map ? map.width * 12 / mapWidth : 10
   const warnings = [...new Set([...(snapshot?.warnings ?? []), ...parts.flatMap(part => part.warnings.map(warning => `${part.number}: ${warning}`))])]
 
   return <main className="machine-page">
     <header className="machine-heading">
-      <div>{id && <button type="button" className="icon-text-button" onClick={() => navigate()}><ArrowLeft size={18} /> Waiting sheets</button>}<h2>{run?.name ?? 'At Machine'}</h2>{run && <p>Order {run.order_number} <span className={`machine-status machine-status-${run.status}`}>{machineStatusNames[run.status]}</span></p>}</div>
+      <div>{id && <button type="button" className="icon-text-button" onClick={() => navigate()}><ArrowLeft size={18} /> Cutting Jobs</button>}<h2>{run?.name ?? 'Previous exports'}</h2>{run && <p>Order {run.order_number} <span className={`machine-status machine-status-${run.status}`}>{machineStatusNames[run.status]}</span></p>}</div>
       <button type="button" className="icon-button" title="Refresh exported sheets" aria-label="Refresh exported sheets" disabled={loading || busy} onClick={() => setRevision(value => value + 1)}><RefreshCw size={19} /></button>
     </header>
     {error && <p role="alert" className="machine-error">{error}</p>}
@@ -148,7 +155,7 @@ export function MachinePage({ userId }: { userId: string }) {
     </> : run && snapshot && map && sheet ? <>
       <dl className="machine-facts"><div><dt>Stock thickness</dt><dd>{snapshot.thickness}</dd></div><div><dt>Material</dt><dd>{snapshot.material}</dd></div><div><dt>Cutting face</dt><dd>{sheet.cutSide ? cutSideLabel(sheet.cutSide) : 'Not recorded in this export'}</dd></div><div><dt>Bed / sheet</dt><dd>{mm(map.width)} × {mm(map.height)} mm</dd></div><div><dt>Deepest cut</dt><dd>{snapshot.deepestCutMm == null ? 'Not identified' : `${mm(snapshot.deepestCutMm)} mm`}</dd></div><div><dt>Clearance Z</dt><dd>{mm(snapshot.safeZ)} mm</dd></div><div><dt>Reach check X / Y</dt><dd>{mm(sheet.maxX)} / {mm(sheet.maxY)} mm</dd></div></dl>
       <section className="machine-bed-section" aria-label="Exported bed layout">
-        <div className="machine-bed-controls"><label>Physical sheet<select aria-label="Physical sheet" value={sheetIndex} onChange={event => { setSheetIndex(Number(event.target.value)); setPartNumber(undefined); setZoom(1) }}>{snapshot.sheets.map(value => <option value={value.index} key={value.index}>Sheet {value.index + 1} of {map.sheetCount}</option>)}</select></label><div><button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" disabled={zoom === 1} onClick={() => setZoom(value => Math.max(1, value - 0.5))}><ZoomOut size={20} /></button><button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" disabled={zoom === 4} onClick={() => setZoom(value => Math.min(4, value + 0.5))}><ZoomIn size={20} /></button></div></div>
+        <div className="machine-bed-controls"><label>Physical sheet<select aria-label="Physical sheet" value={sheetIndex} onChange={event => { setSheetIndex(Number(event.target.value)); setPartNumber(undefined); setZoom(1) }}>{snapshot.sheets.filter(value => map.parts.some(part => part.sheetIndex === value.index)).map(value => <option value={value.index} key={value.index}>Sheet {value.index + 1} of {map.sheetCount}</option>)}</select></label><div><button type="button" className="icon-button" title="Zoom out" aria-label="Zoom out" disabled={zoom === 1} onClick={() => setZoom(value => Math.max(1, value - 0.5))}><ZoomOut size={20} /></button><button type="button" className="icon-button" title="Zoom in" aria-label="Zoom in" disabled={zoom === 4} onClick={() => setZoom(value => Math.min(4, value + 0.5))}><ZoomIn size={20} /></button></div></div>
         <div className="machine-map-scroll" ref={mapContainer}><svg aria-label={`Sheet ${sheetIndex + 1} cutting paths and tab locations`} role="group" className="machine-map" viewBox={`${-markerSize * 2} ${-markerSize * 2} ${map.width + markerSize * 4} ${map.height + markerSize * 4}`} style={{ width: `${zoom * 100}%` }}>
           <rect x="0" y="0" width={map.width} height={map.height} fill="#fff" stroke="#6b7280" strokeWidth={markerSize / 6} />
           <g transform={`translate(0 ${map.height}) scale(1 -1)`}>
@@ -175,11 +182,12 @@ export function MachinePage({ userId }: { userId: string }) {
           <p>Rotation {mm(selected.rotation)}° · Bounds X {mm(selected.bounds.minX)}–{mm(selected.bounds.maxX)}, Y {mm(selected.bounds.minY)}–{mm(selected.bounds.maxY)} mm</p>{selected.tabs.length > 0 && <table><thead><tr><th>Tab</th><th>X</th><th>Y</th><th>Z</th></tr></thead><tbody>{selected.tabs.map((tab, index) => <tr key={index}><td>{index + 1}{tab.inferred ? '*' : ''}</td><td>{mm(tab.center.x)}</td><td>{mm(tab.center.y)}</td><td>{mm(tab.z)}</td></tr>)}</tbody></table>}</div>}
         {recutNotice && <p role="status">{recutNotice}</p>}
       </section>
-      <section className="machine-files"><h3>Exported program</h3><p>{snapshot.mode === 'combined' && map.sheetCount > 1 ? `Combined file: ${map.sheetCount} physical sheets, with a load-sheet pause between them.` : `Separate program for sheet ${sheetIndex + 1}.`}</p>{files.map(file => <div className="machine-file" key={file.filename}><strong>{file.filename}</strong><span>Estimated file time: {Math.ceil(file.estimatedSeconds / 60)} min, excluding operator pauses</span><button type="button" className="icon-text-button" disabled={busy} onClick={() => { const epoch = lifetime.current; void action(async () => { if (await ncHash(file.gcode) !== file.sha256) throw new Error('Saved file integrity check failed. Do not run this file.'); if (epoch === lifetime.current) downloadText(file.filename, file.gcode, 'application/x-gcode') }) }}><Download size={18} /> Download NC</button><details><summary>File fingerprint (SHA-256)</summary><code>{file.sha256}</code></details></div>)}<p>Exported {new Date(run.created_at).toLocaleString()} · Reference {run.id.slice(0, 8)}</p><button type="button" className="icon-text-button" disabled={busy} onClick={() => void action(async () => { await navigator.clipboard.writeText(window.location.href); setCopied(true) })}>{copied ? <Check size={18} /> : <Copy size={18} />}{copied ? 'Link copied' : 'Copy sheet link'}</button></section>
+      <section className="machine-files"><h3>Exported program</h3>{needsSync && <p role="alert">Load and save the latest cutting plan before downloading this file.</p>}{superseded && <p role="alert">This waiting layout has changed. Export its latest revision from Cutting Jobs before cutting.</p>}<button type="button" disabled={busy} onClick={() => { if (liveJob && onCurrentLabels) void action(() => onCurrentLabels(liveJob.id, sheetIndex)); else setLabelsOpen(true) }}>Print labels</button><p>{snapshot.mode === 'combined' && map.sheetCount > 1 ? `Combined file: ${map.sheetCount} physical sheets, with a load-sheet pause between them.` : `Separate program for sheet ${sheetIndex + 1}.`}</p>{files.map(file => <div className="machine-file" key={file.filename}><strong>{file.filename}</strong><span>Estimated file time: {Math.ceil(file.estimatedSeconds / 60)} min, excluding operator pauses</span><button type="button" className="icon-text-button" disabled={busy || superseded || needsSync} onClick={() => { const epoch = lifetime.current; void action(async () => { if (await ncHash(file.gcode) !== file.sha256) throw new Error('Saved file integrity check failed. Do not run this file.'); if (epoch === lifetime.current) downloadText(file.filename, file.gcode, 'application/x-gcode') }) }}><Download size={18} /> Download NC</button><details><summary>File fingerprint (SHA-256)</summary><code>{file.sha256}</code></details></div>)}<p>Exported {new Date(run.created_at).toLocaleString()} · Reference {run.id.slice(0, 8)}</p><button type="button" className="icon-text-button" disabled={busy} onClick={() => void action(async () => { await navigator.clipboard.writeText(window.location.href); setCopied(true) })}>{copied ? <Check size={18} /> : <Copy size={18} />}{copied ? 'Link copied' : 'Copy sheet link'}</button></section>
+      {labelsOpen && <PartLabelsDialog parts={[]} items={[]} sheet={{ name: map.name, orderNumber: map.order, material: snapshot.material, width: map.width, height: map.height, spacing: 0, borderSpacing: 0, instances: [], gcodeSettings: snapshot.programs }} sheetIndex={sheetIndex} onClose={() => setLabelsOpen(false)} labelsOverride={snapshot.labels ?? map.parts.map((part, i) => ({ instanceId: `${part.sheetIndex}-${part.number}`, partNumber: part.number, component: part.name, item: '', sku: '', job: map.name, order: map.order, material: snapshot.material, sheetNumber: part.sheetIndex + 1, cutOrder: i + 1, totalParts: map.parts.length, x: part.bounds.minX, y: part.bounds.minY, rotation: part.rotation, cutSide: part.cutSide }))} />}
       <section className="machine-setup"><h3>Program setup</h3><p>Z0 is the material surface. Origin X0 Y0 is shown at the lower-left of the layout.</p><p>{sheet.screws.length ? `${sheet.screws.length} screw marks, 2 mm deep, followed by a stop for fitting recessed screws.` : 'No screw marking on this sheet.'}</p><details><summary>Saved start / spindle / end programs</summary><h4>Start</h4><pre>{snapshot.programs.startGcode}</pre><h4>Spindle start</h4><pre>{snapshot.programs.spindleStartGcode || 'Manual spindle start'}</pre><h4>End</h4><pre>{snapshot.programs.endGcode}</pre></details></section>
       {warnings.length > 0 && <details className="machine-warnings" open><summary>Checks and warnings ({warnings.length})</summary><ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
       <p className="machine-caution">Match the NC filename and stock before running. This layout is not a machine safety check; verify workholding, tooling, origin and clearance at the machine.</p>
-      <div className="machine-actions">{run.status === 'waiting' && <button type="button" className="primary icon-text-button" disabled={busy} onClick={() => void transition('cutting')}><Play size={18} /> Mark cutting</button>}{run.status === 'cutting' && <button type="button" className="primary icon-text-button" disabled={busy} onClick={() => void transition('completed')}><Check size={18} /> Mark completed</button>}{['waiting', 'cutting'].includes(run.status) && <button type="button" disabled={busy} onClick={() => void transition('cancelled')}>Cancel export</button>}<small>Status only; does not control the CNC. Applies to all {map.sheetCount} sheet{map.sheetCount === 1 ? '' : 's'} in this export.</small></div>
+      <div className="machine-actions">{snapshot.jobId ? <a href="#machine">Track each sheet in Cutting Jobs</a> : <>{run.status === 'waiting' && <button type="button" className="primary icon-text-button" disabled={busy} onClick={() => void transition('cutting')}><Play size={18} /> Mark cutting</button>}{run.status === 'cutting' && <button type="button" className="primary icon-text-button" disabled={busy} onClick={() => void transition('completed')}><Check size={18} /> Mark completed</button>}{['waiting', 'cutting'].includes(run.status) && <button type="button" disabled={busy} onClick={() => void transition('cancelled')}>Cancel export</button>}<small>Status only; does not control the CNC. Applies to all {map.sheetCount} sheet{map.sheetCount === 1 ? '' : 's'} in this export.</small></>}</div>
     </> : null}
   </main>
 }

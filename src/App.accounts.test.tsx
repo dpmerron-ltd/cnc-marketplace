@@ -108,6 +108,34 @@ function placedLibrary() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(cleanup)
+  it('automatically saves independent material tabs and recalls their layouts', async () => {
+    mock.load.mockResolvedValue(cutSideLibrary())
+    render(<App />)
+    await openSheet()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet material thickness' }), { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: 'New job' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet material thickness' }), { target: { value: '18' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'SECOND' } })
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(2)
+    fireEvent.click(tabs[0])
+    expect(screen.getByRole('combobox', { name: 'Sheet material thickness' })).toHaveValue('12')
+    expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('')
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[5]).toMatchObject({ jobs: [
+      expect.objectContaining({ sheet: expect.objectContaining({ materialProfile: '12', instances: [expect.anything()] }) }),
+      expect.objectContaining({ sheet: expect.objectContaining({ materialProfile: '18', orderNumber: 'SECOND', instances: [] }) }),
+    ] }))
+    const saved = mock.save.mock.calls.at(-1)![5]
+    cleanup()
+    mock.load.mockResolvedValue({ ...cutSideLibrary(), workspace: saved })
+    render(<App />)
+    await openSheet()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    fireEvent.click(screen.getAllByRole('tab')[1])
+    expect(screen.getByRole('combobox', { name: 'Sheet material thickness' })).toHaveValue('18')
+    expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('SECOND')
+  })
+
   it('uses unloaded component metadata to choose a compatible sheet for manual additions', async () => {
     const { remote, components } = lazyLibrary()
     const faced = components.map((part, index): Part => ({ ...part, cutSide: index ? 'non-pattern' : 'pattern' }))
@@ -156,7 +184,7 @@ describe('account switching', () => {
     await waitFor(() => expect(mock.save).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ ownerId: 'alice', name: 'Shared cabinet' })]),
       expect.anything(), expect.objectContaining({ instances: [expect.objectContaining({ partId: 'panel-0' })] }),
-      expect.anything(), 'bob',
+      expect.anything(), 'bob', expect.anything(),
     ))
   })
 
@@ -209,7 +237,7 @@ describe('account switching', () => {
     mock.loadItem.mockRejectedValueOnce(new Error('Component fetch failed')).mockImplementation(async item => components.filter(part => part.itemId === item.id))
     render(<App />)
     await screen.findByRole('button', { name: 'Sheet' })
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ instances: [expect.objectContaining(remote.sheet!.instances[0])] }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ instances: [expect.objectContaining(remote.sheet!.instances[0])] }), expect.anything(), 'alice', expect.anything()))
     expect(mock.loadItem).not.toHaveBeenCalled()
     await openSheet()
     expect(await screen.findByRole('alert')).toHaveTextContent('Component fetch failed')
@@ -311,8 +339,8 @@ describe('account switching', () => {
     mock.load.mockResolvedValue(remote)
     render(<App />)
     await openSheet()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Job name' }), { target: { value: 'Updated sheet' } })
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ name: 'Updated sheet' }), expect.anything(), 'alice'))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'Updated order' } })
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.objectContaining({ orderNumber: 'Updated order' }), expect.anything(), 'alice', expect.anything()))
   })
 
   it('confirms deleting all parts on the selected sheet, preserving other sheets and library components', async () => {
@@ -411,7 +439,7 @@ describe('account switching', () => {
     await openSheet()
     fireEvent.click(screen.getByRole('button', { name: 'Save Sheet' }))
     await screen.findByText('Saved sheet to history.')
-    expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.anything(), expect.anything(), 'alice')
+    expect(mock.save).toHaveBeenCalledWith(expect.anything(), [], expect.anything(), expect.anything(), 'alice', expect.anything())
   })
 
   it('keeps programs private across account switches and requires setup for new accounts', async () => {
@@ -443,7 +471,8 @@ describe('account switching', () => {
     expect(screen.queryByRole('textbox', { name: 'Job name' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Auto Nest' })).not.toBeInTheDocument()
     await openSheet()
-    expect(screen.getByRole('textbox', { name: 'Job name' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Job name' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tablist', { name: 'Open cutting jobs' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Sheet item' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Manage items' }))
     expect(screen.getByRole('textbox', { name: 'Search items' })).toBeInTheDocument()
@@ -453,11 +482,10 @@ describe('account switching', () => {
     mock.load.mockResolvedValue(library('alice'))
     render(<App />)
     await openSheet()
-    const name = await screen.findByRole('textbox', { name: 'Job name' })
-    fireEvent.change(name, { target: { value: 'Camperlocker' } })
+    expect(screen.queryByRole('textbox', { name: 'Job name' })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'ORD-2048' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Material' }), { target: { value: '18 mm plywood' } })
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ name: 'Camperlocker', orderNumber: 'ORD-2048', material: '18 mm plywood' }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ orderNumber: 'ORD-2048', material: '18 mm plywood' }), expect.anything(), 'alice', expect.anything()))
     mock.load.mockResolvedValue(library('bob'))
     await switchAccount('bob')
     await screen.findByText("bob's private item")
@@ -480,12 +508,12 @@ describe('account switching', () => {
     expect(height).toBeEnabled()
     expect(height).toHaveValue(20)
     fireEvent.change(height, { target: { value: '25' } })
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 25, screwMarkingEnabled: true }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: 25, screwMarkingEnabled: true }), expect.anything(), 'alice', expect.anything()))
     mock.save.mockClear()
     fireEvent.click(override)
     fireEvent.click(marking)
     expect(height).toBeDisabled()
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: null, screwMarkingEnabled: false }), expect.anything(), 'alice'))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ safeZOverrideMm: null, screwMarkingEnabled: false }), expect.anything(), 'alice', expect.anything()))
     fireEvent.click(override)
     expect(height).toHaveValue(20)
   })

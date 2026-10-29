@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { sheetGCodeFilename } from '../src/gcode/filenames'
 import { generateJob, JobError, parseJobRequest, sha256 } from '../src/jobs/generateJob'
 import type { CuttingJob, JobFile, JobManifest, JobRequest, JobStatus, JobSummary } from '../src/jobs/types'
 import type { MarketplaceItem } from '../src/models/Item'
@@ -240,7 +241,7 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
           { name: 'sheet-plan.pdf', contentType: 'application/pdf', bytes: pdfs.plan },
           { name: 'labels.pdf', contentType: 'application/pdf', bytes: pdfs.labels },
           { name: 'manifest.json', contentType: 'application/json', bytes: new TextEncoder().encode(JSON.stringify({ jobId: id, ...job.manifest }, null, 2)) },
-          ...job.exported.map(file => ({ name: `sheet-${file.sheetIndex + 1}.nc`, contentType: 'text/plain', bytes: new TextEncoder().encode(file.gcode) })),
+          ...job.exported.map(file => ({ name: sheetGCodeFilename(`sheet-${file.sheetIndex + 1}`, job.parts, job.sheet, file.sheetIndex), contentType: 'text/plain', bytes: new TextEncoder().encode(file.gcode) })),
         ]
         if (raw.reduce((sum, file) => sum + file.bytes.length, 0) > 12000000) throw new JobError('Generated job exceeds 12 MB. Split the order into smaller jobs.')
         const files = await Promise.all(raw.map(async file => ({ name: file.name, contentType: file.contentType, bytes: file.bytes.length, sha256: await sha256(file.bytes) })))

@@ -1,0 +1,9 @@
+.cutting-jobs { padding: 1.25rem; max-width: 1500px; margin: auto; }
+.cutting-jobs-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cutting-job { border: 1px solid #ccd3dc; border-radius: .6rem; padding: 1rem; margin: 1rem 0; overflow-x: auto; background: #fff; }
+.cutting-job table { border-collapse: collapse; width: 100%; }
+.cutting-job th, .cutting-job td { text-align: left; padding: .75rem; border-bottom: 1px solid #e2e7ec; }
+.production-tabs { display: flex; flex-wrap: wrap; gap: .4rem; padding: .75rem 1rem; border-bottom: 1px solid #ccd3dc; }
+.production-tabs [aria-selected="true"] { background: #163f66; color: #fff; }
+
+.workspace-save-status { padding: .5rem 1rem; background: #eef4f8; color: #244762; font-size: .875rem; }

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MachinePage } from './MachinePage'
+import { newProductionJob } from '../jobs/production'
 import { ncHash, type MachineRun } from '../machine/exportSnapshot'
 import type { MachineRecut } from '../machine/recuts'
 
@@ -42,6 +43,34 @@ describe('At Machine', () => {
     await screen.findByRole('button', { name: 'Mark completed' })
     expect(mock.change).toHaveBeenCalledWith('alice', expect.objectContaining({ status: 'waiting' }), 'cutting')
   })
+  it('blocks a superseded waiting download and prints labels from the current plan', async () => {
+    const run = await makeRun()
+    const job = newProductionJob({ name: 'Rack', width: 1220, height: 1220, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: run.snapshot.programs })
+    run.snapshot.jobId = job.id
+    mock.load.mockResolvedValue(run)
+    window.history.replaceState({}, '', `#machine/${id}`)
+    const print = vi.fn(async () => {})
+    render(<MachinePage userId="alice" jobs={[job]} onCurrentLabels={print} />)
+    expect(await screen.findByRole('button', { name: 'Download NC' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('layout has changed')
+    expect(screen.queryByRole('button', { name: 'Mark cutting' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Print labels' }))
+    await waitFor(() => expect(print).toHaveBeenCalledWith(job.id, 0))
+    expect(mock.download).not.toHaveBeenCalled()
+  })
+  it('opens the first occupied sheet when a revision excludes earlier cut sheets', async () => {
+    const run = await makeRun()
+    run.snapshot.files = [{ ...run.snapshot.files[1], sheetIndices: [1] }]
+    run.snapshot.map.parts = run.snapshot.map.parts.slice(1)
+    mock.load.mockResolvedValue(run)
+    window.history.replaceState({}, '', `#machine/${id}`)
+    render(<MachinePage userId="alice" />)
+    expect(await screen.findByRole('combobox', { name: 'Physical sheet' })).toHaveValue('1')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Download NC' }))
+    await waitFor(() => expect(mock.download).toHaveBeenCalledWith('two.nc', 'two.nc', 'application/x-gcode'))
+  })
+
   it('opens a direct phone link, refuses a corrupted saved download, and retains the current status on conflict', async () => {
     window.history.replaceState({}, '', `#machine/${id}`)
     const run = await makeRun(); run.snapshot.files[0].gcode = 'modified'
@@ -121,8 +150,8 @@ describe('At Machine', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Re-cut' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Re-cut' }))
     expect(screen.getByRole('button', { name: 'Queuing...' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Waiting sheets' }))
-    await screen.findByRole('heading', { name: 'At Machine' })
+    fireEvent.click(screen.getByRole('button', { name: 'Cutting Jobs' }))
+    await screen.findByRole('heading', { name: 'Previous exports' })
     await act(async () => finish(makeRecut()))
     expect(screen.queryByText('P001 added to the re-cut queue.')).not.toBeInTheDocument()
   })

@@ -12,7 +12,7 @@ The **Items** page is a shared grid library for all signed-in users with item ph
 
 Each item also has a [stacked flat-pack estimate](docs/PACKING.md), capped at five components per box and 120 cm outside, with overflow boxes, internal size ranges, stack layouts and editable packing measurements.
 
-For patterned or single-faced stock, open an item and set each component's **Cutting side** to **Either side**, **Pattern side up**, or **Non-pattern side up**. The selected face points up toward the cutter. Existing components default to either side. Item/order additions and auto-nesting put opposite-facing components on separate physical sheets; unrestricted components can share either. Manual additions use a compatible sheet, and conflicting layouts block export. Sheet review, NC files, labels, job plans and At Machine show the required face.
+For patterned or single-faced stock, open an item and set each component's **Cutting side** to **Either side**, **Pattern side up**, or **Non-pattern side up**. The selected face points up toward the cutter. Existing components default to either side. Item/order additions and auto-nesting put opposite-facing components on separate physical sheets; unrestricted components can share either. Manual additions use a compatible sheet, and conflicting layouts block export. Sheet review, NC files, labels, job plans and Cutting Jobs show the required face.
 
 Cutting-side edits create a new item version. Existing sheets and queued/exported programs retain their original version; remove and re-add the item to use the revised requirements. NC geometry is preserved, so source programs must already machine the component from the chosen face. This setting does not mirror geometry or generate a two-sided machining operation.
 
@@ -143,3 +143,5 @@ See [API reference and deployment instructions](docs/API.md) for authentication,
 The optional **18 mm (9 mm holes)** cutting profile uses the 6.35 mm cutter and
 exactly 9 mm-deep fixing holes, while retaining the normal 18 mm through cuts.
 See [API instructions](docs/API.md) for the `drillDepthMm: 9` selector.
+
+Plan multiple material batches in automatically saved job tabs. **Cutting Jobs** tracks each physical sheet as waiting, cutting or cut, provides current labels and replacement requests, and offers an explicit **Re-plan waiting sheets** action to fill compatible stock without moving work already cut. See [Cutting Jobs workflow](docs/AT-MACHINE.md).

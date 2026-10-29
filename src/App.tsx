@@ -1,5 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import type { SetStateAction } from 'react'
+import { newWorkspace, newProductionJob, today, updateProductionSheet, waitingExportSheet, sheetIndices, waitingSheetIndices, sheetSignature, changeSheetStage, type SheetWorkspace, type ProductionJob, type SheetStage } from './jobs/production'
+import { sheetGCodeFilename } from './gcode/filenames'
+import { cacheWorkspace, recoveryWorkspace } from './storage/workspaceCache'
+import { reserveExportName } from './storage/exportNamesStore'
+import { replanWaiting } from './jobs/replanWaiting'
+import { CuttingJobsPage } from './ui/CuttingJobsPage'
+import { completeSheetRecuts } from './storage/machineRecutsStore'
+import type { MachineRecut } from './machine/recuts'
 import { Download, Trash2, UserRound } from 'lucide-react'
 import { ProfilePage } from './ui/ProfilePage'
 import { loadProgramSettings, saveProgramSettings } from './storage/programSettingsStore'
@@ -10,7 +19,7 @@ import { TabMapDownload } from './ui/TabMapDownload'
 import { QueuePage } from './ui/QueuePage'
 import { MachinePage } from './ui/MachinePage'
 import { buildExportSnapshot } from './machine/exportSnapshot'
-import { saveMachineRun } from './storage/machineRunsStore'
+import { loadMachineRun, saveMachineRun } from './storage/machineRunsStore'
 import { OrdersPage } from './ui/OrdersPage'
 import { nestOrder, prepareOrderSheet, type AddOrderRequest, type NestProgress } from './orders/addOrderToSheet'
 import { BoxStockPage } from './ui/BoxStockPage'
@@ -71,7 +80,7 @@ const PrintablesPage = lazy(() => import('./ui/PrintablesPage').then(module => (
 const pageFromHash = () => window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#queue' || window.location.hash.startsWith('#queue/') ? 'queue' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
 
 const defaultSheet: Sheet = {
-  name: 'Untitled Sheet',
+  name: today(),
   width: 1220,
   height: 1220,
   spacing: 30,
@@ -171,10 +180,6 @@ function makeItemSku(name: string): string {
 
 function makeComponentSku(itemSku: string, index: number): string {
   return `${skuBase(itemSku) || 'ITEM'}-C${String(index).padStart(3, '0')}`
-}
-
-function filenameSafe(value: string): string {
-  return (skuBase(value).toLowerCase() || 'combined-sheet').replace(/-+/g, '-')
 }
 
 function normalizeItem(item: MarketplaceItem): MarketplaceItem {
@@ -291,6 +296,7 @@ function newItem(name = 'Untitled Item', uploadedBy?: string, ownerId?: string):
 }
 
 interface AppPersistenceState {
+  workspace?: SheetWorkspace
   items: MarketplaceItem[]
   parts: Part[]
   sheet: Sheet
@@ -307,6 +313,7 @@ interface MfaFactor {
 }
 
 interface PendingExportFile {
+  sheetIndices: number[]
   filename: string
   gcode: string
   simulation: GCodeSimulation
@@ -333,6 +340,8 @@ interface ExportSummary {
 
 interface PendingExport {
   id: string
+  jobId: string
+  revision: number
   mode: 'combined' | 'sheets'
   files: PendingExportFile[]
   summary: ExportSummary
@@ -368,6 +377,7 @@ function projectToAppState(project: Project | undefined): AppPersistenceState {
       sheetHistory: project.sheetHistory ?? [],
       selectedItemId: fallbackItemId,
       restored: true,
+      workspace: project.workspace,
     }
   }
 
@@ -431,9 +441,10 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
+  const [navigationHash, setNavigationHash] = useState(() => window.location.hash)
   const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine' | 'prints'>(pageFromHash)
   useEffect(() => {
-    const navigate = () => { const next = pageFromHash(); if (next !== 'marketplace') setPage(next) }
+    const navigate = () => { setNavigationHash(window.location.hash); const next = pageFromHash(); if (next !== 'marketplace') setPage(next) }
     window.addEventListener('hashchange', navigate)
     return () => window.removeEventListener('hashchange', navigate)
   }, [])
@@ -446,7 +457,39 @@ function App() {
   const componentEpoch = useRef(0)
   const loadedItems = useRef(new Set<string>())
   const loadingItems = useRef(new Map<string, Promise<Part[]>>())
-  const [sheet, setSheet] = useState<Sheet>(normalizeSheet(initialState.sheet))
+  const [workspace, replaceWorkspace] = useState<SheetWorkspace>(() => newWorkspace(normalizeSheet(initialState.sheet)))
+  const [workspaceSaveError, setWorkspaceSaveError] = useState('')
+  const [recoverableWorkspace, setRecoverableWorkspace] = useState<SheetWorkspace>()
+  const [savedWorkspaceAt, setSavedWorkspaceAt] = useState('')
+  const workspaceRef = useRef(workspace)
+  function setWorkspace(value: SetStateAction<SheetWorkspace>) {
+    const updated = typeof value === 'function' ? value(workspaceRef.current) : value
+    const next = { ...updated, updatedAt: new Date().toISOString() }
+    workspaceRef.current = next
+    replaceWorkspace(next)
+  }
+  const activeJob = workspace.jobs.find(job => job.id === workspace.activeId) ?? workspace.jobs[0]
+  const sheet = activeJob.sheet
+  const planningSheet = { ...sheet, unavailableSheetIndices: sheetIndices(sheet).filter(index => activeJob.sheets[index]?.stage && activeJob.sheets[index].stage !== 'waiting') }
+  function setSheet(value: SetStateAction<Sheet>) {
+    const current = workspaceRef.current
+    const job = current.jobs.find(job => job.id === current.activeId)!
+    try {
+      const next = updateProductionSheet(job, typeof value === 'function' ? value(job.sheet) : value)
+      setWorkspace({ ...current, jobs: current.jobs.map(job => job.id === next.id ? next : job) })
+    } catch (error) { setStatus(errorMessage(error)) }
+  }
+  function openJob(id: string) {
+    setWorkspace(current => ({ ...current, activeId: id }))
+    setActiveSheetIndex(0); setSelectedInstanceId(undefined)
+    setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+    setPage('sheet')
+  }
+  function addJob() {
+    const job = newProductionJob({ ...defaultSheet, materialProfile: sheet.materialProfile, material: sheet.material, name: today() })
+    setWorkspace(current => ({ activeId: job.id, jobs: [...current.jobs, job] }))
+    setActiveSheetIndex(0); setSelectedInstanceId(undefined); setPendingExport(undefined); setPage('sheet')
+  }
   const [activeSheetIndex, setActiveSheetIndex] = useState(0)
   const [sheetHistory, setSheetHistory] = useState<SheetHistoryEntry[]>(initialState.sheetHistory)
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(initialState.selectedItemId)
@@ -757,21 +800,24 @@ function App() {
   useEffect(() => {
     if (!userId || loadedAccountId !== userId || !mfaReady) return
 
+    cacheWorkspace(userId, workspace)
     const timeout = window.setTimeout(() => {
       if (accountRef.current !== userId) return
-      saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, sheetHistory, savedAt: new Date().toISOString() }, userId)
+      saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, workspace, sheetHistory, savedAt: new Date().toISOString() }, userId)
       if (remoteHydratedRef.current && canUseSupabase()) {
         const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
-        void saveRemoteProject(items, newParts, sheet, selectedItemId, userId).then((result) => {
+        void saveRemoteProject(items, newParts, sheet, selectedItemId, userId, workspace).then((result) => {
           if (accountRef.current !== userId) return
-          if (result.ok) for (const part of newParts) persistedComponentIds.current.add(part.id)
-          else setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`)
-        })
+          if (result.ok) {
+            for (const part of newParts) persistedComponentIds.current.add(part.id)
+            if (workspaceRef.current.updatedAt === workspace.updatedAt) { setSavedWorkspaceAt(workspace.updatedAt ?? ''); setWorkspaceSaveError('') }
+          } else { setWorkspaceSaveError(result.error ?? 'Cloud save failed'); setStatus(`Cloud save failed: ${result.error ?? 'unknown error'}`) }
+        }).catch(error => { if (accountRef.current === userId) setWorkspaceSaveError(errorMessage(error)) })
       }
     }, 300)
 
     return () => window.clearTimeout(timeout)
-  }, [items, parts, catalogueComponents, selectedItemId, sheet, sheetHistory, userId, loadedAccountId, mfaReady])
+  }, [items, parts, catalogueComponents, selectedItemId, sheet, workspace, sheetHistory, userId, loadedAccountId, mfaReady])
 
   useEffect(() => {
     if (!canUseSupabase() || !userId || !mfaReady) return
@@ -792,13 +838,15 @@ function App() {
       persistedComponentIds.current = new Set([...index, ...remoteProject.parts].map(part => part.id))
       const project = privateProject({ version: 1, ...remoteProject, sheet: remoteProject.sheet ?? defaultSheet, savedAt: new Date().toISOString() }, userId)
       const loaded = projectToAppState(project)
+      setRecoverableWorkspace(recoveryWorkspace(userId))
       setComponentIndex(project.componentIndex ?? loaded.parts)
       // An unindexed historical version is not an empty, already-loaded item.
       resetComponentLoading(loaded.items, loaded.items.filter(item => loaded.parts.some(part => part.itemId === item.id) && index.filter(part => part.itemId === item.id).every(summary => loaded.parts.some(part => part.id === summary.id))).map(item => item.id))
       setItems(loaded.items)
       setParts(loaded.parts)
       setSheetHistory(loaded.sheetHistory)
-      setSheet(pruneMissingSheetInstances({ ...loaded.sheet, gcodePresets: mergePresets(loaded.sheet.gcodePresets, remoteProject?.gcodePresets ?? []) }, [...loaded.parts, ...index]))
+      const restoredSheet = pruneMissingSheetInstances({ ...loaded.sheet, gcodePresets: mergePresets(loaded.sheet.gcodePresets, remoteProject?.gcodePresets ?? []) }, [...loaded.parts, ...index])
+      setWorkspace(project.workspace?.jobs.length ? { ...project.workspace, jobs: project.workspace.jobs.map(job => ({ ...job, sheet: normalizeSheet(job.sheet) })) } : newWorkspace(restoredSheet))
       setSelectedItemId(loaded.items.some((item) => item.id === remoteProject?.selectedItemId) ? remoteProject?.selectedItemId : loaded.selectedItemId)
       setSelectedInstanceId(undefined)
       setActiveSheetIndex(0)
@@ -837,7 +885,7 @@ function App() {
         setItems([])
         setParts([])
         setSheetHistory([])
-        setSheet(defaultSheet)
+        setWorkspace(newWorkspace({ ...defaultSheet, name: today() })); setWorkspaceSaveError(''); setSavedWorkspaceAt(''); setRecoverableWorkspace(undefined)
         setActiveSheetIndex(0)
         setSelectedItemId(undefined)
         setSelectedPartId(undefined)
@@ -880,7 +928,7 @@ function App() {
     if (userId && loadedAccountId === userId) saveProject(buildProject(), userId)
     if (userId && loadedAccountId === userId && remoteHydratedRef.current && canUseSupabase()) {
       const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
-      const result = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId)
+      const result = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId, workspace)
       if (accountRef.current !== userId) return
       if (!result.ok) {
         setStatus(`Sign out blocked. Cloud save failed: ${result.error ?? 'unknown error'}`)
@@ -1023,11 +1071,12 @@ function App() {
     const parent = items.find(item => item.id === parts.find(part => part.id === partId)?.itemId)
     if (parent?.version?.status === 'draft') { setStatus('This item version is incomplete. Reload the catalogue before adding it.'); return }
     const part = parts.find(candidate => candidate.id === partId)
+    const currentIsClosed = planningSheet.unavailableSheetIndices.includes(currentSheetIndex)
     const side = sheetCutSide(catalogueComponents, sheet, currentSheetIndex)
-    if (part && (side === 'mixed' || !compatibleCutSides(side, part.cutSide))) {
+    if (part && (currentIsClosed || side === 'mixed' || !compatibleCutSides(side, part.cutSide))) {
       const target = Array.from({ length: sheetCount + 1 }, (_, index) => index).find(index => {
         const face = sheetCutSide(catalogueComponents, sheet, index)
-        return face !== 'mixed' && compatibleCutSides(face, part.cutSide)
+        return !planningSheet.unavailableSheetIndices.includes(index) && face !== 'mixed' && compatibleCutSides(face, part.cutSide)
       })!
       setSheet(current => numberSheetParts({ ...current, instances: [...current.instances, newInstance(partId, x, y, target)] }))
       setActiveSheetIndex(target)
@@ -1054,7 +1103,7 @@ function App() {
     const latest = orderSheetInputs.current
     if (componentEpoch.current !== epoch || accountRef.current !== userId || initial.sheet !== latest.sheet || initial.items !== latest.items) throw new Error('Your sheet or catalogue changed. Try again.')
     if (latest.sheet.instances.some(instance => !latest.parts.some(part => part.id === instance.partId))) throw new Error('The sheet contains unavailable components. Refresh before adding this item.')
-    const next = addItemToSheet(item, latest.parts, latest.sheet, userId, currentSheetIndex)
+    const next = addItemToSheet(item, latest.parts, { ...latest.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex)
     const count = next.instances.length - latest.sheet.instances.length
     setSheet(next)
     setStatus(`Added all ${count} components of ${item.name} to the sheet.`)
@@ -1063,6 +1112,8 @@ function App() {
 
   async function addOrderToSheet(request: AddOrderRequest, signal: AbortSignal, onProgress: (progress: NestProgress) => void) {
     if (!userId || accountRef.current !== userId || loadedAccountId !== userId) throw new Error('Wait for your account catalogue to finish loading.')
+    const importKey = `${request.shop}/${request.order.id}`
+    if (workspaceRef.current.jobs.some(job => job.sheet.orderImports?.some(order => order.key === importKey && order.instanceIds.some(id => job.sheet.instances.some(i => i.id === id))))) throw new Error(`${request.order.name} is already included in a cutting job.`)
     const initial = orderSheetInputs.current
     const epoch = componentEpoch.current
     const required = new Set([...Object.values(request.matches), ...initial.sheet.instances.flatMap(instance => {
@@ -1075,7 +1126,7 @@ function App() {
     }
     const snapshot = orderSheetInputs.current
     if (signal.aborted || accountRef.current !== userId || componentEpoch.current !== epoch || initial.sheet !== snapshot.sheet || initial.items !== snapshot.items) throw new Error('Your sheet or catalogue changed. Try again.')
-    const prepared = prepareOrderSheet(request, snapshot.items, snapshot.parts, snapshot.sheet, userId, currentSheetIndex)
+    const prepared = prepareOrderSheet(request, snapshot.items, snapshot.parts, { ...snapshot.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex)
     const instances = await nestOrder(prepared.parts, prepared.sheet, signal, onProgress)
     const latest = orderSheetInputs.current
     if (signal.aborted || accountRef.current !== userId || latest.sheet !== snapshot.sheet || latest.parts !== snapshot.parts || latest.items !== snapshot.items) throw new Error('Your sheet or catalogue changed. No order components were added; try again.')
@@ -1086,6 +1137,92 @@ function App() {
     setPendingExport(undefined)
     setPage('sheet')
     setStatus(`Added ${prepared.count} components for order ${request.order.name}. Review the sheet before cutting.`)
+  }
+
+  async function loadJobParts(jobs: ProductionJob[]) {
+    const owner = userId, epoch = componentEpoch.current
+    if (!owner || loadedAccountId !== owner) throw new Error('Wait for your catalogue to load.')
+    const current = orderSheetInputs.current
+    const ids = new Set(jobs.flatMap(job => job.sheet.instances.map(i => i.partId)))
+    const itemIds = new Set([...current.componentIndex, ...current.parts].filter(part => ids.has(part.id)).flatMap(part => part.itemId ? [part.itemId] : []))
+    for (const id of itemIds) await ensureItemComponents(id)
+    if (accountRef.current !== owner || componentEpoch.current !== epoch) throw new Error('Your account or catalogue changed. Try again.')
+    const loaded = orderSheetInputs.current.parts
+    if ([...ids].some(id => !loaded.some(part => part.id === id))) throw new Error('Some original components are unavailable. Restore them before changing the plan.')
+    return loaded.filter(part => ids.has(part.id))
+  }
+
+  async function downloadWorkspaceRecovery() {
+    if (!recoverableWorkspace || !userId) return
+    try {
+      const jobs = recoverableWorkspace.jobs.map(job => newProductionJob(waitingExportSheet(job))).filter(job => job.sheet.instances.length)
+      if (!jobs.length) throw new Error('The recovery copy has no uncut parts.')
+      const restoredParts = await loadJobParts(jobs)
+      const itemIds = new Set(restoredParts.map(part => part.itemId))
+      downloadText('cutting-jobs-recovery.json', JSON.stringify({ version: 1, items: items.filter(item => itemIds.has(item.id)), parts: restoredParts, sheet: jobs[0].sheet, workspace: { activeId: jobs[0].id, jobs }, sheetHistory: [], savedAt: new Date().toISOString() }, null, 2), 'application/json')
+    } catch (error) { setStatus(errorMessage(error)) }
+  }
+
+  async function updateJobSheetStage(id: string, index: number, stage: SheetStage) {
+    const before = workspaceRef.current, job = before.jobs.find(job => job.id === id)!
+    const updated = changeSheetStage(job, index, stage)
+    setWorkspace({ ...before, jobs: before.jobs.map(job => job.id === id ? updated : job) })
+    if (!await saveCurrentProject()) { setWorkspace(before); throw new Error('Progress could not be saved to the cloud. Reload the saved plan before continuing.') }
+    if (stage === 'cut') await completeSheetRecuts(userId!, job.sheet.instances.filter(i => i.sheetIndex === index).flatMap(i => i.recutId ? [i.recutId] : []))
+    setStatus(`Sheet ${index + 1} marked ${stage}. It is excluded from future nesting.`)
+  }
+
+  async function openJobLabels(id: string, index: number) {
+    const before = workspaceRef.current, job = before.jobs.find(job => job.id === id)!
+    await loadJobParts([job])
+    if (workspaceRef.current !== before) throw new Error('The plan changed while loading. Try again.')
+    setWorkspace({ ...before, activeId: id }); setActiveSheetIndex(index); setLabelsOpen(true)
+  }
+
+  async function replanWaitingJobs() {
+    const before = workspaceRef.current
+    const loaded = await loadJobParts(before.jobs.map(job => ({ ...job, sheet: waitingExportSheet(job) })))
+    if (workspaceRef.current !== before) throw new Error('The plan changed while loading. Try again.')
+    const next = await replanWaiting(before, loaded)
+    if (workspaceRef.current !== before) throw new Error('The plan changed while re-planning. No layouts were changed; try again.')
+    setWorkspace(next); setPendingExport(undefined); setPreview(undefined)
+    if (!await saveCurrentProject()) throw new Error('Re-planning succeeded locally but the cloud save failed. Keep this page open and retry saving.')
+    setStatus('Waiting sheets re-planned and saved. Review the changed layouts and export fresh cutting files and labels.')
+  }
+
+  async function addRecutToSheet(entry: MachineRecut, signal: AbortSignal) {
+    if (!userId || entry.owner_id !== userId || entry.status !== 'queued') throw new Error('This re-cut is no longer available.')
+    const owner = userId, before = workspaceRef.current
+    if (before.jobs.some(job => job.sheet.instances.some(i => i.recutId === entry.id))) throw new Error('This replacement is already in a cutting job.')
+    const run = await loadMachineRun(owner, entry.source_run_id, signal)
+    const source = run.snapshot.map.parts.find(part => part.sheetIndex === entry.sheet_index && part.number === entry.part_number)
+    if (!source) throw new Error('The original exported part could not be found.')
+    let partId = source.partId, itemId = source.itemId
+    // Old exports can be recovered from the matching saved sheet, with exact NC verification.
+    if (!partId) {
+      for (const history of sheetHistory.filter(history => history.name === run.name)) {
+        const instance = history.sheet.instances.find(i => i.sheetIndex === entry.sheet_index && `P${String(i.partNumber).padStart(3, '0')}` === entry.part_number)
+        if (!instance) continue
+        const recovered = await loadJobParts([{ ...activeJob, sheet: history.sheet }])
+        const check = run.snapshot.mode === 'combined' ? [exportCombinedGCode(recovered, history.sheet, run.snapshot.programs)] : exportPhysicalSheetGCodes(recovered, history.sheet, run.snapshot.programs)
+        if (check.length === run.snapshot.files.length && check.every((file, i) => file.gcode === run.snapshot.files[i].gcode)) { partId = instance.partId; itemId = recovered.find(p => p.id === partId)?.itemId; break }
+      }
+    }
+    if (!partId || !itemId) throw new Error('This older export has no recoverable component reference. Select the original component from the library for this replacement.')
+    await ensureItemComponents(itemId)
+    await loadJobParts([activeJob])
+    if (signal.aborted || accountRef.current !== owner || workspaceRef.current !== before) throw new Error('Your account or selected job changed. Try again.')
+    const latest = orderSheetInputs.current, part = latest.parts.find(part => part.id === partId), item = latest.items.find(item => item.id === itemId)
+    if (!part || !item) throw new Error('The original component revision is unavailable.')
+    const profile = run.snapshot.materialProfile ?? materialProfiles.find(profile => profile.label === run.snapshot.thickness)?.id
+    if (sheet.instances.length && (sheet.materialProfile !== profile || (sheet.material ?? '').trim().toLowerCase() !== run.snapshot.material.trim().toLowerCase())) throw new Error(`Select a job using ${run.snapshot.thickness} ${run.snapshot.material}, or create an empty job for this replacement.`)
+    const target = sheet.instances.length ? planningSheet : { ...planningSheet, materialProfile: profile, material: run.snapshot.material }
+    const next = addItemToSheet(item, latest.parts, target, owner, currentSheetIndex, [part.id])
+    const added = next.instances.at(-1)!
+    added.recutId = entry.id; added.orderName = entry.order_number
+    setSheet(next); setSelectedInstanceId(added.id); setActiveSheetIndex(added.sheetIndex); setPage('sheet')
+    setPendingExport(undefined); setPreview(undefined)
+    setStatus(`Added replacement ${entry.part_number} to Sheet ${added.sheetIndex + 1}. Review and export the updated layout.`)
   }
 
   function updateInstance(instanceId: string, patch: Partial<PartInstance>) {
@@ -1110,10 +1247,10 @@ function App() {
   }
 
   function clearSheet(sheetIndex?: number) {
-    const instances = sheetIndex === undefined ? [] : sheet.instances.filter(instance => instance.sheetIndex !== sheetIndex)
+    const instances = sheet.instances.filter(instance => planningSheet.unavailableSheetIndices.includes(instance.sheetIndex) || (sheetIndex !== undefined && instance.sheetIndex !== sheetIndex))
     const count = sheet.instances.length - instances.length
     if (!count) return
-    const target = sheetIndex === undefined ? 'all sheets' : `Sheet ${sheetIndex + 1}`
+    const target = sheetIndex === undefined ? planningSheet.unavailableSheetIndices.length ? 'waiting sheets' : 'all sheets' : `Sheet ${sheetIndex + 1}`
     if (!window.confirm(`Delete all ${count} part${count === 1 ? '' : 's'} from ${target}? This includes locked parts. Components will remain in the library. This cannot be undone.`)) return
 
     const remainingIds = new Set(instances.map(instance => instance.id))
@@ -1132,7 +1269,7 @@ function App() {
   }
 
   function buildProject(): Project {
-    return { version: 1, items, parts, componentIndex: catalogueComponents, sheet: programSheet, sheetHistory, savedAt: new Date().toISOString() }
+    return { version: 1, items, parts, componentIndex: catalogueComponents, sheet: programSheet, workspace, sheetHistory, savedAt: new Date().toISOString() }
   }
 
   async function exportProject() {
@@ -1170,9 +1307,10 @@ function App() {
 
   async function saveCurrentProject(): Promise<boolean> {
     if (!userId || loadedAccountId !== userId) return false
+    const currentWorkspace = workspaceRef.current
     const historyEntry = buildHistoryEntry()
     const nextHistory = [historyEntry, ...sheetHistory]
-    const localSaved = saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
+    const localSaved = saveProject({ version: 1, items, parts, componentIndex: catalogueComponents, sheet, workspace: currentWorkspace, sheetHistory: nextHistory, savedAt: new Date().toISOString() }, userId)
     if (!localSaved && !(remoteHydratedRef.current && canUseSupabase())) {
       setStatus('Could not save project; browser storage may be full.')
       return false
@@ -1180,14 +1318,16 @@ function App() {
 
     if (remoteHydratedRef.current && canUseSupabase()) {
       const newParts = parts.filter(part => !persistedComponentIds.current.has(part.id))
-      const remoteSaved = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId)
+      const remoteSaved = await saveRemoteProject(items, newParts, sheet, selectedItemId, userId, currentWorkspace)
       const historySaved = remoteSaved.ok ? await saveRemoteSheetHistory(historyEntry, userId) : remoteSaved
       if (accountRef.current !== userId) return false
       if (!historySaved.ok) {
+        setWorkspaceSaveError(historySaved.error ?? 'Cloud save failed')
         setStatus(`Cloud save failed: ${historySaved.error ?? 'unknown error'}`)
         return false
       }
       for (const part of newParts) persistedComponentIds.current.add(part.id)
+      if (workspaceRef.current.updatedAt === currentWorkspace.updatedAt) { setSavedWorkspaceAt(currentWorkspace.updatedAt ?? ''); setWorkspaceSaveError('') }
       setSheetHistory(nextHistory)
       setStatus('Saved sheet to history.')
       return true
@@ -1210,7 +1350,8 @@ function App() {
     resetComponentLoading(loadedState.items, loadedState.items.map(item => item.id))
     setSelectedItemId(loadedState.selectedItemId)
     setParts(loadedState.parts)
-    setSheet(pruneMissingSheetInstances(normalizeSheet(loadedState.sheet), loadedState.parts))
+    const savedWorkspace = loadProject(userId)?.workspace
+    setWorkspace(savedWorkspace?.jobs.length ? savedWorkspace : newWorkspace(pruneMissingSheetInstances(normalizeSheet(loadedState.sheet), loadedState.parts)))
     setSheetHistory(loadedState.sheetHistory)
     setSelectedInstanceId(undefined)
     setActiveSheetIndex(0)
@@ -1230,13 +1371,14 @@ function App() {
       setStatus('Could not import this project file.')
       return
     }
-    setItems(importedState.items)
-    setComponentIndex(importedState.parts)
-    resetComponentLoading(importedState.items, importedState.items.map(item => item.id))
+    setItems(current => [...current, ...importedState.items])
+    setComponentIndex(current => [...current, ...importedState.parts])
+    resetComponentLoading([...items, ...importedState.items], [...loadedItems.current, ...importedState.items.map(item => item.id)])
     setSelectedItemId(importedState.selectedItemId)
-    setParts(importedState.parts)
-    setSheet(pruneMissingSheetInstances(normalizeSheet(importedState.sheet), importedState.parts))
-    setSheetHistory(importedState.sheetHistory)
+    setParts(current => [...current, ...importedState.parts])
+    const importedJobs = importedState.workspace?.jobs.length ? importedState.workspace.jobs : [newProductionJob(pruneMissingSheetInstances(normalizeSheet(importedState.sheet), importedState.parts))]
+    setWorkspace(current => ({ activeId: importedJobs[0].id, jobs: [...current.jobs, ...importedJobs] }))
+    setSheetHistory(current => [...current, ...importedState.sheetHistory])
     setSelectedInstanceId(undefined)
     setActiveSheetIndex(0)
     setStatus(`Imported project ${file.name}.`)
@@ -1245,7 +1387,7 @@ function App() {
   function previewGCode() {
     if (!requirePrograms()) return
     try {
-      const result = exportCombinedGCode(parts, sheet, programs)
+      const result = exportCombinedGCode(parts, waitingExportSheet(activeJob), programs)
       const simulation = safeSimulateGCode(result.gcode)
       setPreview(result.gcode)
       setPreviewSimulation(simulation)
@@ -1261,22 +1403,23 @@ function App() {
     }
   }
 
-  function exportSummary(exportWarnings: string[], simulations: GCodeSimulation[]): ExportSummary {
+  function exportSummary(exportWarnings: string[], simulations: GCodeSimulation[], target: Sheet): ExportSummary {
+    const targetParts = selectMaterialParts(parts, target).parts
     const estimatedCuttingTimeSeconds = simulations.reduce((total, simulation) => total + simulation.estimatedSeconds, 0)
     return {
-      sheetName: sheet.name.trim() || defaultSheet.name,
-      physicalSheets: sheetCount,
-      placedParts: sheet.instances.length,
-      uniqueComponents: new Set(sheet.instances.map((instance) => instance.partId)).size,
-      deepestCutMm: deepestSourceCut(sheetParts, sheet),
-      safeZ: effectiveSafeZ(sheet),
+      sheetName: target.name.trim() || defaultSheet.name,
+      physicalSheets: sheetIndices(target).length,
+      placedParts: target.instances.length,
+      uniqueComponents: new Set(target.instances.map((instance) => instance.partId)).size,
+      deepestCutMm: deepestSourceCut(targetParts, target),
+      safeZ: effectiveSafeZ(target),
       estimatedCuttingTimeSeconds,
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
       simulationWarnings: simulations.reduce((total, simulation) => total + simulation.warnings.length, 0),
-      reachCheckEnabled: sheet.instances.length > 0,
-      screwMarkCount: Array.from({ length: sheetCount }, (_, index) => planScrewPositions(sheetParts, sheet, index).points.length).reduce((total, count) => total + count, 0),
-      spindleStartEnabled: sheet.gcodeSettings.spindleStartGcode.trim().length > 0,
+      reachCheckEnabled: target.instances.length > 0,
+      screwMarkCount: sheetIndices(target).map(index => planScrewPositions(targetParts, target, index).points.length).reduce((total, count) => total + count, 0),
+      spindleStartEnabled: target.gcodeSettings.spindleStartGcode.trim().length > 0,
       validationErrors: errors.length,
       validationWarnings: warnings.length,
       exportWarnings,
@@ -1291,76 +1434,36 @@ function App() {
     return true
   }
 
-  function prepareCombinedExport() {
-    if (!requirePrograms()) return
-    if (!requirePublishedItems()) return
-    if (errors.length > 0) {
-      setStatus('Export blocked by validation errors.')
-      return
-    }
-
-    const result = exportCombinedGCode(parts, sheet, programs)
-    if (result.errors.length > 0) {
-      setStatus(`Export blocked: ${result.errors[0]}`)
-      setPreview(result.gcode)
-      return
-    }
-
-    const filename = `${filenameSafe(sheet.name)}.nc`
-    const simulation = safeSimulateGCode(result.gcode)
-    if (simulation.errors.length > 0) {
-      setStatus(`Export blocked by ${simulation.errors.length} simulation error(s).`)
-      setPreview(result.gcode)
-      setPreviewSimulation(simulation)
-      return
-    }
-    setPendingExport({
-      id: crypto.randomUUID(),
-      mode: 'combined',
-      files: [{ filename, gcode: result.gcode, simulation }],
-      summary: exportSummary(result.warnings, [simulation]),
-      tabMap: { parts, sheet: { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } },
-    })
-    setExportError('')
-  }
-
-  function prepareSheetExports() {
-    if (!requirePrograms()) return
-    if (!requirePublishedItems()) return
-    if (errors.length > 0) {
-      setStatus('Export blocked by validation errors.')
-      return
-    }
-
-    const results = exportPhysicalSheetGCodes(parts, sheet, programs)
-    const exportErrors = results.flatMap((result) => result.errors)
-    if (exportErrors.length > 0) {
-      setStatus(`Export blocked: ${exportErrors[0]}`)
-      setPreview(results.map((result) => result.gcode).join('\n\n'))
-      return
-    }
-
-    const base = filenameSafe(sheet.name)
-    const files = results.map((result) => ({
-      filename: `${base}-sheet-${result.sheetIndex + 1}.nc`,
-      gcode: result.gcode,
-      simulation: safeSimulateGCode(result.gcode),
-    }))
-    const simulationErrors = files.flatMap((file) => file.simulation.errors)
-    if (simulationErrors.length > 0) {
-      setStatus(`Export blocked by ${simulationErrors.length} simulation error(s).`)
-      setPreview(files.map((file) => file.gcode).join('\n\n'))
-      setPreviewSimulation(files[0]?.simulation)
-      return
-    }
-    setPendingExport({
-      id: crypto.randomUUID(),
-      mode: 'sheets',
-      files,
-      summary: exportSummary(results.flatMap((result) => result.warnings), files.map((file) => file.simulation)),
-      tabMap: { parts, sheet: { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, ...programs } } },
-    })
-    setExportError('')
+  async function prepareExport(mode: 'combined' | 'sheets') {
+    if (!requirePrograms() || !requirePublishedItems() || !userId || exportBusyRef.current) return
+    if (errors.length) { setStatus('Export blocked by validation errors.'); return }
+    const job = activeJob, owner = userId, initialSheet = sheet
+    if (!waitingSheetIndices(job).length) { setStatus('There are no waiting sheets to export.'); return }
+    exportBusyRef.current = true; setExportBusy(true)
+    try {
+      const name = await reserveExportName(job.id, owner)
+      if (accountRef.current !== owner || workspaceRef.current.activeId !== job.id || workspaceRef.current.jobs.find(value => value.id === job.id)?.sheet !== initialSheet) return
+      const namedJob = { ...job, name, sheet: { ...job.sheet, name } }
+      setWorkspace(current => ({ ...current, jobs: current.jobs.map(value => value.id === job.id ? namedJob : value) }))
+      const revision = job.revision + 1
+      const base = revision === 1 ? name : `${name}-r${revision}`
+      const exportSheet = { ...waitingExportSheet(namedJob), name: base }
+      const results = mode === 'combined' ? [{ ...exportCombinedGCode(parts, exportSheet, programs), sheetIndex: undefined }] : exportPhysicalSheetGCodes(parts, exportSheet, programs)
+      const exportErrors = results.flatMap(result => result.errors)
+      if (exportErrors.length) throw new Error(exportErrors[0])
+      const files = results.map(result => ({
+        filename: sheetGCodeFilename(result.sheetIndex === undefined ? base : `${base}-sheet-${result.sheetIndex + 1}`, parts, exportSheet, result.sheetIndex),
+        sheetIndices: result.sheetIndex === undefined ? sheetIndices(exportSheet) : [result.sheetIndex],
+        gcode: result.gcode, simulation: safeSimulateGCode(result.gcode),
+      }))
+      if (files.some(file => file.simulation.errors.length)) throw new Error('The generated program failed simulation.')
+      setPendingExport({ id: crypto.randomUUID(), jobId: job.id, revision, mode, files,
+        summary: { ...exportSummary(results.flatMap(result => result.warnings), files.map(file => file.simulation), exportSheet), sheetName: base, physicalSheets: sheetIndices(exportSheet).length, placedParts: exportSheet.instances.length },
+        tabMap: { parts, sheet: { ...exportSheet, gcodeSettings: { ...exportSheet.gcodeSettings, ...programs } } },
+      })
+      setExportError('')
+    } catch (error) { if (accountRef.current === owner) setStatus(`Export blocked: ${errorMessage(error)}`) }
+    finally { exportBusyRef.current = false; setExportBusy(false) }
   }
 
   async function confirmPendingExport() {
@@ -1370,14 +1473,22 @@ function App() {
     exportBusyRef.current = true
     setExportBusy(true); setExportError('')
     try {
-      const snapshot = await buildExportSnapshot({ ...exportToConfirm, ...exportToConfirm.tabMap })
+      const snapshot = await buildExportSnapshot({ ...exportToConfirm, ...exportToConfirm.tabMap, items })
       if (accountRef.current !== ownerId) return
       await saveMachineRun(exportToConfirm.id, ownerId, snapshot)
       if (accountRef.current !== ownerId) return
+      const beforeSavingPlan = workspaceRef.current
+      setWorkspace(current => ({ ...current, jobs: current.jobs.map(job => job.id !== exportToConfirm.jobId ? job : {
+        ...job, revision: exportToConfirm.revision,
+        sheet: { ...job.sheet, instances: job.sheet.instances.map(instance => ({ ...instance, orderName: instance.orderName || job.sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))?.name || job.sheet.orderNumber })) },
+        sheets: { ...job.sheets, ...Object.fromEntries(exportToConfirm.files.flatMap(file => file.sheetIndices).map(index => [index, { stage: 'waiting' as const, combined: exportToConfirm.mode === 'combined', runId: exportToConfirm.id, signature: sheetSignature(job.sheet, index) }])) },
+      }) }))
+      const saved = await saveCurrentProject()
+      if (!saved) { setWorkspace(beforeSavingPlan); throw new Error('The cutting plan could not be saved. Retry before downloading files') }
+      if (accountRef.current !== ownerId) return
       exportToConfirm.files.forEach(file => downloadText(file.filename, file.gcode, 'application/x-gcode'))
       setPendingExport(undefined)
-      const saved = await saveCurrentProject()
-      if (accountRef.current === ownerId) setStatus(`Exported ${exportToConfirm.files.length} NC file(s) and saved to At Machine, waiting to cut.${saved ? '' : ' The editable sheet history could not be saved.'}`)
+      if (accountRef.current === ownerId) setStatus(`Exported ${exportToConfirm.files.length} NC file(s) and saved to Cutting Jobs, waiting to cut.${saved ? '' : ' The editable sheet history could not be saved.'}`)
     } catch (error) {
       if (accountRef.current === ownerId) setExportError(`Export could not finish: ${errorMessage(error)}. Retry to save the same export; no new cutting programs will be generated.`)
     } finally { exportBusyRef.current = false; setExportBusy(false) }
@@ -1385,7 +1496,8 @@ function App() {
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
     const nextSheet = pruneMissingSheetInstances(normalizeSheet(entry.sheet), catalogueComponents)
-    setSheet(nextSheet)
+    const recalled = newProductionJob(nextSheet)
+    setWorkspace(current => ({ activeId: recalled.id, jobs: [...current.jobs, recalled] }))
     setSelectedItemId(entry.selectedItemId)
     setSelectedInstanceId(undefined)
     setActiveSheetIndex(0)
@@ -1445,7 +1557,7 @@ function App() {
         <nav className="nav-tabs" aria-label="Primary">
           <button type="button" className={page === 'marketplace' ? 'active-nav' : ''} onClick={() => setPage('marketplace')}>Items</button>
           <button type="button" className={page === 'sheet' ? 'active-nav' : ''} onClick={() => setPage('sheet')}>Sheet</button>
-          <button type="button" className={page === 'machine' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'machine'; setPage('machine') }}>At Machine</button>
+          <button type="button" className={page === 'machine' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'machine'; setPage('machine') }}>Cutting Jobs</button>
           <button type="button" className={page === 'history' ? 'active-nav' : ''} onClick={() => setPage('history')}>History</button>
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'orders' ? 'active-nav' : ''} onClick={() => setPage('orders')}>Orders</button>
@@ -1454,10 +1566,14 @@ function App() {
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
           <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
         </nav>
+        {loadedAccountId === userId && (page === 'sheet' || page === 'history') && <div className="production-tabs" role="tablist" aria-label="Open cutting jobs">
+          {workspace.jobs.filter(job => !job.archived && (!job.sheet.instances.length || waitingSheetIndices(job).length)).map((job, index) => <button type="button" role="tab" aria-selected={job.id === activeJob.id} key={job.id} disabled={exportBusy} onClick={() => openJob(job.id)}>{job.name} · {materialProfiles.find(p => p.id === job.sheet.materialProfile)?.thickness ?? 'Original'} mm · {index + 1}</button>)}
+          <button type="button" disabled={exportBusy} onClick={addJob}>New job</button>
+        </div>}
         {sheetReady && (page === 'sheet' || page === 'history') && <><div className="sheet-controls">
           <label className="sheet-name-control">
-            Job name
-            <input value={sheet.name} onChange={(event) => setSheet({ ...sheet, name: event.target.value })} />
+            Job
+            <output>{activeJob.name}</output>
           </label>
           <label className="sheet-name-control">
             Order number
@@ -1516,20 +1632,21 @@ function App() {
               setActiveSheetIndex(0)
             }}
           />
-          <button type="button" className="danger" disabled={!sheet.instances.length} onClick={() => clearSheet()}>Clear All Sheets</button>
+          <button type="button" className="danger" disabled={!waitingSheetIndices(activeJob).length} onClick={() => clearSheet()}>{planningSheet.unavailableSheetIndices.length ? 'Clear waiting sheets' : 'Clear All Sheets'}</button>
           <button type="button" onClick={() => void saveCurrentProject()}>Save Sheet</button>
           <button type="button" onClick={loadSavedProject}>Load Sheet</button>
           <button type="button" onClick={previewGCode}>Preview</button>
           <button type="button" className="icon-text-button" disabled={!sheet.instances.length} onClick={() => setLabelsOpen(true)}><Download size={16} /> Download Labels</button>
-          <button type="button" onClick={prepareSheetExports}>Export Sheets</button>
-          <button type="button" className="primary" onClick={prepareCombinedExport}>Export Combined</button>
+          <button type="button" disabled={exportBusy} onClick={() => void prepareExport('sheets')}>Export Sheets</button>
+          <button type="button" className="primary" disabled={exportBusy} onClick={() => void prepareExport('combined')}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
         {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes' || page === 'prints') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
+      {loadedAccountId === userId && <div className="workspace-save-status" role="status">{workspaceSaveError ? <>Cloud save failed: {workspaceSaveError} <button type="button" onClick={() => void saveCurrentProject()}>Retry save</button><button type="button" onClick={() => setLibraryReload(value => value + 1)}>Reload saved plan</button></> : savedWorkspaceAt === workspace.updatedAt ? 'All job tabs saved' : 'Saving job tabs…'}{recoverableWorkspace && <button type="button" onClick={() => void downloadWorkspaceRecovery()}>Download unsaved recovery</button>}</div>}
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
-      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? <MachinePage key={userId} userId={userId} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} /> : page === 'marketplace' ? (
+      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1553,6 +1670,7 @@ function App() {
         <HistoryPage history={sheetHistory} onOpen={openHistoryEntry} onDelete={deleteHistoryEntry} />
       ) : !sheetReady ? <main className="items-page"><p role={sheetLoadError ? 'alert' : 'status'}>{sheetLoadError ?? 'Loading sheet components...'}</p>{sheetLoadError && <button type="button" onClick={() => setComponentRetry(value => value + 1)}>Retry sheet components</button>}</main> : (
         <div className="workspace">
+          {planningSheet.unavailableSheetIndices.includes(currentSheetIndex) && <p role="status">Sheet {currentSheetIndex + 1} is {activeJob.sheets[currentSheetIndex].stage}. Its layout is fixed; new parts will go on waiting sheets.</p>}
           <PartLibrary
             items={items.filter(item => defaultItem(item) || item.id === selectedItemId)}
             parts={visibleParts}
@@ -1586,7 +1704,7 @@ function App() {
                 type="button"
                 className="danger icon-text-button sheet-clear-button"
                 aria-label={`Delete all parts from Sheet ${currentSheetIndex + 1}`}
-                disabled={!sheet.instances.some(instance => instance.sheetIndex === currentSheetIndex)}
+                disabled={planningSheet.unavailableSheetIndices.includes(currentSheetIndex) || !sheet.instances.some(instance => instance.sheetIndex === currentSheetIndex)}
                 onClick={() => clearSheet(currentSheetIndex)}
               >
                 <Trash2 size={16} /> Delete All Parts
@@ -1605,8 +1723,8 @@ function App() {
           </main>
           <div className="side-stack">
             <PropertiesPanel
-              part={selectedInstancePart}
-              instance={selectedInstance}
+              part={planningSheet.unavailableSheetIndices.includes(currentSheetIndex) ? undefined : selectedInstancePart}
+              instance={planningSheet.unavailableSheetIndices.includes(currentSheetIndex) ? undefined : selectedInstance}
               onUpdate={(patch) => selectedInstanceId && updateInstance(selectedInstanceId, patch)}
               onDuplicate={duplicateSelected}
               onDelete={deleteSelected}

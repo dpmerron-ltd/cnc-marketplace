@@ -1,5 +1,6 @@
 import type { Project } from '../models/Project'
 import type { Sheet } from '../models/Sheet'
+import { newProductionJob, waitingExportSheet } from '../jobs/production'
 
 export function privateProject(project: Project, userId: string): Project {
   const items = project.items ?? []
@@ -18,6 +19,7 @@ export function privateProject(project: Project, userId: string): Project {
     parts,
     ...(componentIndex ? { componentIndex } : {}),
     sheet: cleanSheet(project.sheet),
+    workspace: project.workspace ? { ...project.workspace, jobs: project.workspace.jobs.map(job => ({ ...job, sheet: cleanSheet(job.sheet) })) } : undefined,
     sheetHistory: project.sheetHistory?.map((entry) => ({
       ...entry,
       sheet: cleanSheet(entry.sheet),
@@ -51,6 +53,7 @@ export function copyProjectToAccount(project: Project, userId: string): Project 
     })),
     parts: project.parts.map((part) => ({ ...part, id: partIds.get(part.id)!, itemId: itemIds.get(part.itemId ?? ''), ownerId: userId })),
     sheet: copySheet(project.sheet),
+    workspace: project.workspace ? (() => { const jobs = project.workspace.jobs.map(job => newProductionJob(copySheet(waitingExportSheet(job)))); return { jobs, activeId: jobs[0].id } })() : undefined,
     sheetHistory: project.sheetHistory?.map((entry) => ({
       ...entry, id: crypto.randomUUID(), sheet: copySheet(entry.sheet), selectedItemId: itemIds.get(entry.selectedItemId ?? ''),
     })),

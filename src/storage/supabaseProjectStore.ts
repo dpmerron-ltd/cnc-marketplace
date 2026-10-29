@@ -24,10 +24,15 @@ interface ComponentRow {
   cut_side?: CutSide
 }
 
+import { cacheWorkspace, cachedWorkspace, setWorkspaceVersion, workspaceVersion, preserveWorkspaceRecovery, recoveryWorkspace } from './workspaceCache'
+import type { SheetWorkspace } from '../jobs/production'
+
 interface ProjectRow {
   id: string
   sheet: Sheet
   selected_item_id: string | null
+  workspace?: SheetWorkspace
+  workspace_version?: number
 }
 
 interface SheetHistoryRow {
@@ -54,6 +59,7 @@ export interface RemoteProjectState {
   parts: Part[]
   componentIndex?: ComponentSummary[]
   sheet?: Sheet
+  workspace?: SheetWorkspace
   selectedItemId?: string
   sheetHistory: SheetHistoryEntry[]
   gcodePresets: GCodePreset[]
@@ -162,6 +168,14 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const stateError = presetsResult.error ?? projectResult.error ?? historyResult.error
   if (stateError) throw new Error(`Could not load your saved library settings: ${stateError.message}`)
 
+  const localCache = cachedWorkspace(userId)
+  const remoteWorkspace = projectResult.data?.workspace
+  const version = projectResult.data?.workspace_version ?? 0
+  setWorkspaceVersion(userId, version)
+  const localWorkspace = localCache?.baseVersion === version ? localCache.workspace : undefined
+  if (localCache && localCache.baseVersion !== version && localCache.workspace.updatedAt !== remoteWorkspace?.updatedAt) preserveWorkspaceRecovery(userId)
+  const workspace = localWorkspace && (!remoteWorkspace || (localWorkspace.updatedAt ?? '') > (remoteWorkspace.updatedAt ?? '')) ? localWorkspace : remoteWorkspace
+
   // A JSONB profile projection still decompresses the NC bundle. Never scan
   // every historical bundle at startup; old versions load when opened.
   const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height,cut_side'
@@ -178,7 +192,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const componentRows = await readIndex('item_id', currentItemIds)
   const indexedIds = new Set(componentRows.map(row => row.id))
   // Saved sheets deliberately retain the exact revisions they were built with.
-  const savedSheets = [projectResult.data?.sheet, ...((historyResult.data ?? []) as SheetHistoryRow[]).map(row => row.sheet)]
+  const savedSheets = [projectResult.data?.sheet, ...(workspace?.jobs.map(job => job.sheet) ?? []), ...(recoveryWorkspace(userId)?.jobs.map(job => job.sheet) ?? []), ...((historyResult.data ?? []) as SheetHistoryRow[]).map(row => row.sheet)]
   const pinnedIds = [...new Set(savedSheets.flatMap(sheet => sheet?.instances.map(instance => instance.partId) ?? []))].filter(id => !indexedIds.has(id))
   componentRows.push(...await readIndex('id', pinnedIds))
   // Fetch profiles by the exact page IDs so PostgreSQL cannot decompress a
@@ -242,6 +256,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     parts: [],
     componentIndex,
     sheet: project?.sheet,
+    workspace,
     selectedItemId: project?.selected_item_id ?? items[0]?.id,
     sheetHistory,
     gcodePresets,
@@ -347,7 +362,7 @@ export function saveRemoteProject(...args: Parameters<typeof persistRemoteProjec
   return next
 }
 
-async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string): Promise<RemoteSaveResult> {
+async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], sheet: Sheet, selectedItemId: string | undefined, expectedUserId: string, workspace?: SheetWorkspace): Promise<RemoteSaveResult> {
   if (!supabase) return { ok: false, error: 'Supabase is not configured.' }
   const userId = await getUserId()
   if (!userId || userId !== expectedUserId) return { ok: false, error: 'The signed-in account changed. Please reload.' }
@@ -372,6 +387,15 @@ async function persistRemoteProject(items: MarketplaceItem[], parts: Part[], she
     const group = saveableParts.filter(part => part.itemId === itemId)
     try { await updateRemoteItem(userId, itemId, 'add_components', { components: group.map(componentRow) }, undefined, group) }
     catch (error) { return { ok: false, error: (error as Error).message } }
+  }
+
+  if (workspace) {
+    const result = await supabase.rpc('save_cnc_workspace', { p_owner: userId, p_workspace: workspace, p_sheet: sheet, p_selected_item_id: itemIds.has(selectedItemId ?? '') ? selectedItemId : null, p_expected_version: workspaceVersion(userId) })
+    if (result.error || !Number.isSafeInteger(result.data)) return { ok: false, error: result.error?.message ?? 'The saved plan could not be confirmed.' }
+    setWorkspaceVersion(userId, result.data)
+    const cached = cachedWorkspace(userId)
+    if (cached?.workspace.updatedAt === workspace.updatedAt) cacheWorkspace(userId, workspace)
+    return { ok: true }
   }
 
   const projectResult = await supabase.from('sheet_projects').upsert({

@@ -358,6 +358,19 @@ describe('jobs HTTP API', () => {
     expect(response.headers.get('Retry-After')).toBe('60')
     expect((await f.api(new Request('http://localhost/v1/jobs', { method: 'OPTIONS' }))).status).toBe(204)
   })
+  it('names downloadable physical files for their cutting faces', async () => {
+    const f = fixture()
+    f.repo.loadComponents = vi.fn(async () => ({ items: [testItem], parts: testParts.map((part, i) => ({ ...part, cutSide: i ? 'non-pattern' as const : 'pattern' as const })) }))
+    const response = await f.call('/jobs', 'POST', { ...testRequest, items: [{ sku: testItem.sku, quantity: 1 }], sheet: { ...testRequest.sheet, widthMm: 500, heightMm: 500, screwMarks: false } })
+    expect(response.status).toBe(201)
+    const job = await response.json()
+    const names = job.files.map((file: { name: string }) => file.name).filter((name: string) => name.endsWith('.nc'))
+    expect(names).toEqual(['sheet-1-pattern-side-up.nc', 'sheet-2-non-pattern-side-up.nc'])
+    const file = await f.call(`/jobs/${job.id}/artifacts/${names[1]}`)
+    expect(file.status).toBe(200)
+    expect(await file.text()).toContain('Load material: Non-pattern side up')
+  })
+
   it('creates a complete review job, downloads exact-size labels and safely replays retries', async () => {
     const f = fixture()
     const response = await f.call('/jobs', 'POST', testRequest)

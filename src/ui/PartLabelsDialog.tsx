@@ -3,10 +3,10 @@ import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
-import { buildPartLabels, labelPageLayout, type LabelLayout } from '../labels/partLabels'
+import { buildPartLabels, labelPageLayout, type PartLabel, type LabelLayout } from '../labels/partLabels'
 import { createLabelPdf, renderLabel } from '../labels/labelPdf'
 
-export function PartLabelsDialog({ parts, items, sheet, sheetIndex, onClose }: { parts: Part[]; items: MarketplaceItem[]; sheet: Sheet; sheetIndex: number; onClose: () => void }) {
+export function PartLabelsDialog({ parts, items, sheet, sheetIndex, onClose, labelsOverride }: { parts: Part[]; items: MarketplaceItem[]; sheet: Sheet; sheetIndex: number; onClose: () => void; labelsOverride?: PartLabel[] }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const mounted = useRef(false)
@@ -18,10 +18,10 @@ export function PartLabelsDialog({ parts, items, sheet, sheetIndex, onClose }: {
   const result = useMemo(() => {
     try {
       labelPageLayout(layout)
-      const labels = buildPartLabels(parts, items, sheet).filter(label => scope === 'all' || label.sheetNumber === sheetIndex + 1)
+      const labels = (labelsOverride ?? buildPartLabels(parts, items, sheet)).filter(label => scope === 'all' || label.sheetNumber === sheetIndex + 1)
       return { labels, error: '' }
     } catch (error) { return { labels: [], error: (error as Error).message } }
-  }, [parts, items, sheet, sheetIndex, scope, layout])
+  }, [parts, items, sheet, sheetIndex, scope, layout, labelsOverride])
   const selected = Math.min(index, Math.max(0, result.labels.length - 1))
   useEffect(() => {
     mounted.current = true

@@ -473,3 +473,102 @@ create trigger guard_machine_recut before insert or update on public.cnc_machine
   for each row execute function public.guard_machine_recut();
 
 commit;
+
+-- Editable production plans share the existing account-scoped, automatically saved project.
+alter table public.sheet_projects add column if not exists workspace jsonb;
+
+-- One daily sequence across all operators and exports, using the workshop's local date.
+create table if not exists public.cnc_job_daily_numbers (
+  job_date date primary key,
+  last_number integer not null check (last_number > 0)
+);
+create table if not exists public.cnc_job_names (
+  id uuid primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  job_date date not null,
+  job_number integer not null check (job_number > 0),
+  unique (job_date, job_number)
+);
+alter table public.cnc_job_daily_numbers enable row level security;
+alter table public.cnc_job_names enable row level security;
+revoke all on public.cnc_job_daily_numbers, public.cnc_job_names from public, anon, authenticated;
+
+create or replace function public.reserve_cnc_job_name(p_id uuid, p_owner uuid)
+returns text language plpgsql security definer set search_path = '' as $$
+declare
+  entry public.cnc_job_names;
+  workshop_date date := (clock_timestamp() at time zone 'Europe/London')::date;
+  next_number integer;
+begin
+  if p_id is null or p_owner is null or (current_setting('role',true) <> 'service_role' and
+    (auth.uid() is distinct from p_owner or coalesce(auth.jwt()->>'aal','') <> 'aal2'))
+  then raise exception 'JOB_NAME_FORBIDDEN' using errcode = '42501'; end if;
+  -- Lost responses and simultaneous retries of the same job keep its original name.
+  perform pg_advisory_xact_lock(hashtextextended(p_id::text, 0));
+  select * into entry from public.cnc_job_names where id = p_id;
+  if found then
+    if entry.owner_id <> p_owner then raise exception 'JOB_NAME_FORBIDDEN' using errcode = '42501'; end if;
+  else
+    insert into public.cnc_job_daily_numbers(job_date, last_number) values (workshop_date, 1)
+      on conflict (job_date) do update set last_number = public.cnc_job_daily_numbers.last_number + 1
+      returning last_number into next_number;
+    insert into public.cnc_job_names(id, owner_id, job_date, job_number)
+      values (p_id, p_owner, workshop_date, next_number) returning * into entry;
+  end if;
+  return entry.job_date::text || '-' || lpad(entry.job_number::text, greatest(3, length(entry.job_number::text)), '0');
+end $$;
+revoke all on function public.reserve_cnc_job_name(uuid, uuid) from public, anon;
+grant execute on function public.reserve_cnc_job_name(uuid, uuid) to authenticated, service_role;
+
+-- Old autosaves must not return material already at the machine to the planning pool.
+create or replace function public.cnc_fixed_sheet(p_sheet jsonb, p_index integer)
+returns jsonb language sql immutable set search_path = '' as $$
+  select (p_sheet - array['name','instances','orderImports','orderNumber','nextPartNumber','unavailableSheetIndices']) ||
+    jsonb_build_object('instances', coalesce((select jsonb_agg(value - array['locked','orderName'] order by ordinal)
+      from jsonb_array_elements(p_sheet->'instances') with ordinality as instance(value, ordinal)
+      where (value->>'sheetIndex')::integer = p_index), '[]'::jsonb))
+$$;
+create or replace function public.guard_cutting_workspace()
+returns trigger language plpgsql set search_path = '' as $$
+declare old_job jsonb; new_job jsonb; state record;
+begin
+  if new.workspace is distinct from old.workspace and new.workspace_version <> old.workspace_version + 1 then raise exception 'This cutting plan changed on another device. Reload the saved plan before continuing.' using errcode = '40001'; end if;
+  for old_job in select value from jsonb_array_elements(old.workspace->'jobs') loop
+    for state in select key, value from jsonb_each(old_job->'sheets') where value->>'stage' in ('cutting','cut') loop
+      select value into new_job from jsonb_array_elements(new.workspace->'jobs') where value->>'id' = old_job->>'id';
+      if new_job is null or coalesce(new_job->'sheets'->state.key->>'stage','waiting') not in ('cutting','cut')
+        or (state.value->>'stage' = 'cut' and new_job->'sheets'->state.key->>'stage' <> 'cut')
+        or public.cnc_fixed_sheet(old_job->'sheet', state.key::integer) is distinct from public.cnc_fixed_sheet(new_job->'sheet', state.key::integer)
+      then raise exception 'A sheet is already cutting or cut. Reload the saved plan before continuing.' using errcode = '23514'; end if;
+    end loop;
+  end loop;
+  return new;
+end $$;
+revoke all on function public.cnc_fixed_sheet(jsonb,integer), public.guard_cutting_workspace() from public, anon;
+grant execute on function public.cnc_fixed_sheet(jsonb,integer) to authenticated, service_role;
+drop trigger if exists guard_cutting_workspace on public.sheet_projects;
+create trigger guard_cutting_workspace before update on public.sheet_projects for each row execute function public.guard_cutting_workspace();
+
+alter table public.sheet_projects add column if not exists workspace_version integer not null default 0;
+create or replace function public.save_cnc_workspace(p_owner uuid, p_workspace jsonb, p_sheet jsonb, p_selected_item_id uuid, p_expected_version integer)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare owner uuid := auth.uid(); current_plan public.sheet_projects; next_version integer;
+begin
+  if owner is null or owner is distinct from p_owner or coalesce(auth.jwt()->>'aal','') <> 'aal2' then raise exception 'WORKSPACE_FORBIDDEN' using errcode = '42501'; end if;
+  if p_workspace is null or jsonb_typeof(p_workspace->'jobs') is distinct from 'array' or p_sheet is null or p_expected_version is null then raise exception 'Invalid cutting workspace'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('workspace:' || owner::text, 0));
+  select * into current_plan from public.sheet_projects where id = owner::text and owner_id = owner for update;
+  if found then
+    if current_plan.workspace = p_workspace and current_plan.sheet = p_sheet and current_plan.selected_item_id is not distinct from p_selected_item_id then return current_plan.workspace_version; end if;
+    if current_plan.workspace_version <> p_expected_version then raise exception 'This cutting plan changed on another device. Reload the saved plan before continuing.' using errcode = '40001'; end if;
+    next_version := current_plan.workspace_version + 1;
+    update public.sheet_projects set workspace = p_workspace, sheet = p_sheet, selected_item_id = p_selected_item_id, workspace_version = next_version, updated_at = now() where id = owner::text and owner_id = owner;
+  else
+    if p_expected_version <> 0 then raise exception 'The saved cutting plan is missing. Reload before continuing.'; end if;
+    next_version := 1;
+    insert into public.sheet_projects(id, owner_id, sheet, selected_item_id, workspace, workspace_version) values (owner::text, owner, p_sheet, p_selected_item_id, p_workspace, next_version);
+  end if;
+  return next_version;
+end $$;
+revoke all on function public.save_cnc_workspace(uuid,jsonb,jsonb,uuid,integer) from public, anon;
+grant execute on function public.save_cnc_workspace(uuid,jsonb,jsonb,uuid,integer) to authenticated;

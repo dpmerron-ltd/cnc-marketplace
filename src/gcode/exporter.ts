@@ -232,8 +232,9 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
   output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
 
   let instanceNumber = 0
-  for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
-    if (sheetIndex > 0) {
+  const usedSheetIndices = [...new Set(sheet.instances.map(instance => instance.sheetIndex))].sort((a, b) => a - b)
+  for (const sheetIndex of usedSheetIndices) {
+    if (sheetIndex !== usedSheetIndices[0]) {
       output.push('')
       output.push(`(Load physical sheet ${sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))}; align material to X0 Y0, then resume)`)
       output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
@@ -285,7 +286,8 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?
   if (!Number.isFinite(safeZ) || safeZ <= 0) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: ['Safe Z must be a finite positive height above the material.'], warnings: [] }))
   sheet = numberSheetParts({ ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } })
 
-  return Array.from({ length: sheetCount }, (_, sheetIndex) => {
+  const usedSheetIndices = [...new Set(sheet.instances.map(instance => instance.sheetIndex))].sort((a, b) => a - b)
+  return (usedSheetIndices.length ? usedSheetIndices : [0]).map(sheetIndex => {
     const output: string[] = []
     const sheetInstanceIds = sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex).map((instance) => instance.id)
     const transformed = transformedInstanceLines(parts, sheet, sheetInstanceIds)

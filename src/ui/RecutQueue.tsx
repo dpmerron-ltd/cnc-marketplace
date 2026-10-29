@@ -4,11 +4,16 @@ import { recutSourceLink, recutStatusNames, type MachineRecut, type RecutStatus 
 import { changeMachineRecutStatus, listMachineRecuts } from '../storage/machineRecutsStore'
 import './RecutQueue.css'
 
-export function RecutQueue({ userId, refresh = 0 }: { userId: string; refresh?: number }) {
-  return <AccountRecutQueue key={userId} userId={userId} refresh={refresh} />
+export interface RecutSheetTarget {
+  onAddRecut?: (entry: MachineRecut, signal: AbortSignal) => Promise<void>
+  addedRecuts?: string[]
+  sheetName?: string
+}
+export function RecutQueue({ userId, refresh = 0, ...target }: { userId: string; refresh?: number } & RecutSheetTarget) {
+  return <AccountRecutQueue key={userId} userId={userId} refresh={refresh} {...target} />
 }
 
-function AccountRecutQueue({ userId, refresh }: { userId: string; refresh: number }) {
+function AccountRecutQueue({ userId, refresh, onAddRecut, addedRecuts = [], sheetName }: { userId: string; refresh: number } & RecutSheetTarget) {
   const [entries, setEntries] = useState<MachineRecut[]>([])
   const [status, setStatus] = useState<RecutStatus | ''>('queued')
   const [offset, setOffset] = useState(0)
@@ -53,9 +58,19 @@ function AccountRecutQueue({ userId, refresh }: { userId: string; refresh: numbe
     finally { if (!signal.aborted) { pending.current = false; setBusyId(undefined) } }
   }
 
+  async function add(entry: MachineRecut) {
+    if (!onAddRecut || pending.current) return
+    pending.current = true; setBusyId(entry.id); setError('')
+    const signal = lifetime.current!.signal
+    try { await onAddRecut(entry, signal); if (!signal.aborted) setNotice(`${entry.part_number} added to the selected job.`) }
+    catch (cause) { if (!signal.aborted) setError((cause as Error).message) }
+    finally { if (!signal.aborted) { pending.current = false; setBusyId(undefined) } }
+  }
+
   return <section className="recut-queue" aria-label="Re-cut parts">
     <h3>Re-cut parts</h3>
-    <p>Select a part in At Machine and choose Re-cut to add it here. Each entry requests one replacement part.</p>
+    <p>Select a part in Cutting Jobs and choose Re-cut to add it here. Each entry requests one replacement part.</p>
+    {onAddRecut && <p>Adding replacements to: <strong>{sheetName}</strong>. Select another job in the Sheet tab to change the destination.</p>}
     <div className="queue-filters"><label>Re-cut status<select value={status} disabled={Boolean(busyId)} onChange={event => { setStatus(event.target.value as RecutStatus | ''); setOffset(0); setNotice('') }}><option value="">All re-cuts</option>{Object.entries(recutStatusNames).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label></div>
     {!loading && error && <p role="alert" className="queue-error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -66,7 +81,7 @@ function AccountRecutQueue({ userId, refresh }: { userId: string; refresh: numbe
         <td>{entry.material}<span className="queue-order">{entry.thickness}</span></td>
         <td>{recutStatusNames[entry.status]}</td>
         <td>{new Date(entry.created_at).toLocaleString()}</td>
-        <td>{entry.status === 'queued' && <div className="recut-actions"><button type="button" disabled={Boolean(busyId)} onClick={() => void update(entry, 'completed')}>Mark re-cut</button><button type="button" disabled={Boolean(busyId)} onClick={() => void update(entry, 'cancelled')}>Remove</button></div>}</td>
+        <td>{entry.status === 'queued' && <div className="recut-actions">{onAddRecut && <button type="button" disabled={Boolean(busyId) || addedRecuts.includes(entry.id)} onClick={() => void add(entry)}>{addedRecuts.includes(entry.id) ? 'Added to job' : 'Add to sheet'}</button>}<button type="button" disabled={Boolean(busyId)} onClick={() => void update(entry, 'completed')}>Mark re-cut</button><button type="button" disabled={Boolean(busyId)} onClick={() => void update(entry, 'cancelled')}>Remove</button></div>}</td>
       </tr>)}</tbody></table></div>
       {!error && !entries.length && <p>{status === 'queued' ? 'No parts waiting to be re-cut.' : 'No re-cuts found.'}</p>}
     </>}

@@ -18,6 +18,7 @@ export interface GCodePreset {
 
 export interface Sheet {
   name: string
+  unavailableSheetIndices?: number[]
   orderNumber?: string
   orderImports?: { key: string; name: string; instanceIds: string[] }[]
   material?: string

@@ -1,5 +1,6 @@
 import type { ComponentSummary, Part } from './Part'
 import type { Sheet } from './Sheet'
+import type { SheetWorkspace } from '../jobs/production'
 import type { MarketplaceItem } from './Item'
 
 export interface SheetHistoryEntry {
@@ -19,6 +20,7 @@ export interface Project {
   parts: Part[]
   componentIndex?: ComponentSummary[]
   sheet: Sheet
+  workspace?: SheetWorkspace
   sheetHistory?: SheetHistoryEntry[]
   savedAt: string
 }

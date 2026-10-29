@@ -26,6 +26,7 @@ export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceIt
   const key = `${shop}/${order.id}`
   const ids = new Set(sheet.instances.map(instance => instance.id))
   if (sheet.orderImports?.some(entry => entry.key === key && entry.instanceIds.some(id => ids.has(id)))) throw new Error(`${order.name} is already on this sheet. Remove its existing components before adding it again.`)
+  while (sheet.unavailableSheetIndices?.includes(sheetIndex)) sheetIndex++
   const additions: PartInstance[] = []
   for (const line of order.lineItems.nodes) {
     if (!Number.isSafeInteger(line.currentQuantity) || line.currentQuantity < 0) throw new Error(`${line.title}: invalid order quantity.`)
@@ -36,7 +37,7 @@ export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceIt
     const components = parts.filter(part => part.itemId === item.id)
     if (!components.length) throw new Error(`${item.name} has no components.`)
     if (additions.length + components.length * line.currentQuantity > 500) throw new Error('This order exceeds 500 components. Split it into smaller cutting jobs.')
-    for (let copy = 0; copy < line.currentQuantity; copy++) for (const part of components) additions.push({ id: crypto.randomUUID(), partId: part.id, sheetIndex: 0, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0, locked: false })
+    for (let copy = 0; copy < line.currentQuantity; copy++) for (const part of components) additions.push({ id: crypto.randomUUID(), partId: part.id, orderName: order.name, sheetIndex: 0, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0, locked: false })
   }
   if (!additions.length) throw new Error('This order has no current items to add.')
   const selection = selectMaterialParts(parts, { ...sheet, instances: [...sheet.instances, ...additions] })
@@ -46,7 +47,7 @@ export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceIt
   const obstacles = sheet.instances.filter(instance => instance.sheetIndex >= sheetIndex).map(instance => ({ ...instance, sheetIndex: instance.sheetIndex - sheetIndex, locked: true }))
   return {
     parts: selection.parts,
-    sheet: { ...sheet, instances: [...obstacles, ...additions] },
+    sheet: { ...sheet, unavailableSheetIndices: sheet.unavailableSheetIndices?.filter(i => i >= sheetIndex).map(i => i - sheetIndex), instances: [...obstacles, ...additions] },
     count: additions.length,
     finish(instances: PartInstance[]): Sheet {
       const placed = instances.slice(obstacles.length).map(instance => ({ ...instance, sheetIndex: instance.sheetIndex + sheetIndex }))

@@ -3,12 +3,12 @@ import { Check, ChevronLeft, ChevronRight, Copy, Download, KeyRound, Plus, Refre
 import type { CuttingJob, JobStatus, JobSummary } from '../jobs/types'
 import { downloadJobFile, jobApiRequest, jobsApiUrl } from '../storage/jobsApi'
 import { supabase } from '../storage/supabaseClient'
-import { RecutQueue } from './RecutQueue'
+import { RecutQueue, type RecutSheetTarget } from './RecutQueue'
 
 const statusNames: Record<JobStatus, string> = { awaiting_review: 'Awaiting review', ready: 'Ready', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
 interface ApiKey { id: string; name: string; token_prefix: string; expires_at: string; revoked_at: string | null; expired: boolean }
 
-export function QueuePage({ userId }: { userId: string }) {
+export function QueuePage({ userId, ...target }: { userId: string } & RecutSheetTarget) {
   const [tab, setTab] = useState<'queue' | 'keys' | 'recuts'>(() => window.location.hash === '#queue/recuts' ? 'recuts' : 'queue')
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [job, setJob] = useState<CuttingJob>()
@@ -112,7 +112,7 @@ export function QueuePage({ userId }: { userId: string }) {
       </div>
     </div>
     {error && <p className="queue-error" role="alert">{error}</p>}
-    {tab === 'recuts' ? <RecutQueue key={userId} userId={userId} refresh={revision} /> : tab === 'keys' ? <section className="api-access">
+    {tab === 'recuts' ? <RecutQueue key={userId} userId={userId} refresh={revision} {...target} /> : tab === 'keys' ? <section className="api-access">
       <label>API base URL<input readOnly value={jobsApiUrl} /></label>
       <a href="https://github.com/dpmerron-ltd/cnc-marketplace/blob/main/docs/API.md" target="_blank" rel="noreferrer">API Reference</a>
       <div className="api-key-create"><label>Key name<input maxLength={80} value={keyName} onChange={event => setKeyName(event.target.value)} /></label><button type="button" className="icon-text-button" disabled={busy || !keyName.trim() || Boolean(newKey)} onClick={() => void createKey()}><Plus size={16} /> Create key</button></div>

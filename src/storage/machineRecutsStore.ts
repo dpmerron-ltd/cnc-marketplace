@@ -43,3 +43,10 @@ export async function changeMachineRecutStatus(ownerId: string, entry: MachineRe
   const { data, error } = await client.from('cnc_machine_recuts').update({ status }).eq('owner_id', ownerId).eq('id', entry.id).eq('status', 'queued').select('id').single()
   if (error || !data) throw new Error(error?.message ?? 'This re-cut changed on another device. Refresh the queue before updating it.')
 }
+
+export async function completeSheetRecuts(ownerId: string, ids: string[]): Promise<void> {
+  if (!ids.length) return
+  const client = await clientFor(ownerId)
+  const { error } = await client.from('cnc_machine_recuts').update({ status: 'completed' }).eq('owner_id', ownerId).in('id', ids).eq('status', 'queued')
+  if (error) throw new Error(`The sheet is marked cut, but its re-cut queue could not be updated: ${error.message}. Mark those replacements re-cut in the queue.`)
+}

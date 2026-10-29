@@ -39,6 +39,16 @@ describe('re-cut queue', () => {
     expect(mock.change).toHaveBeenCalledExactlyOnceWith('alice', entry, 'completed')
   })
 
+  it('adds a replacement to the selected job without marking it cut or allowing a duplicate', async () => {
+    const add = vi.fn(async () => {})
+    const view = render(<QueuePage userId="alice" onAddRecut={add} addedRecuts={[]} sheetName="2026-10-29-001 · 18 mm" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to sheet' }))
+    await waitFor(() => expect(add).toHaveBeenCalledExactlyOnceWith(entry, expect.any(AbortSignal)))
+    expect(mock.change).not.toHaveBeenCalled()
+    view.rerender(<QueuePage userId="alice" onAddRecut={add} addedRecuts={[entry.id]} sheetName="2026-10-29-001 · 18 mm" />)
+    expect(screen.getByRole('button', { name: 'Added to job' })).toBeDisabled()
+  })
+
   it('retains the pending part after a save failure and lets the operator remove it on retry', async () => {
     mock.change.mockRejectedValueOnce(new Error('Changed on another device'))
     render(<QueuePage userId="alice" />)

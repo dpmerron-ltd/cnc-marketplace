@@ -16,6 +16,8 @@ export interface TabLocation {
   inferred: boolean
 }
 export interface TabMapPart {
+  partId?: string
+  itemId?: string
   number: string
   name: string
   sheetIndex: number
@@ -131,7 +133,7 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
       const source = cache.get(part.id)!
       const transform = (point: Point) => transformLocalPoint(part, instance, point)
       return {
-        number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
+        partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
         paths: source.paths.map(path => path.map(transform)),
         tabs: source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: source.warnings,
       }

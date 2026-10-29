@@ -112,7 +112,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
       `Account program settings applied; ${programs.spindleStartGcode.trim() ? `spindle start S${spindleRpm(programs)} M03` : 'manual cutter control, no automatic spindle start'}. Source machining feeds and cutting depths are preserved. Verify tool, startup/end programs and controller start-up delay.`,
       'Maximum X/Y reach check precedes each sheet. Confirm the physical machine can reach these coordinates. M05 only stops automatically controlled spindles.',
       settings.screwMarks ? 'Screw marking enabled: 6 mm cutter, recessed screws, 2 mm marking depth, followed by M05 / M00 pause to fit screws.' : 'Screw marking is disabled. Secure the material before starting.',
-      'Load each physical sheet separately, align its origin and use its matching sheet-N.nc file. Apply labels only with the machine and spindle stopped.',
+      'Load each physical sheet separately, align its origin and use its matching sheet-N file (including the cutting-side suffix where present). Apply labels only with the machine and spindle stopped.',
       ...exported.map(file => `Sheet ${file.sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, file.sheetIndex))}.`),
       'Dimensions are source toolpath footprints, not finished-part dimensions. Layout drawings are not to scale. Timing excludes manual setup and pauses.',
     ],

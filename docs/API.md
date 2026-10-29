@@ -459,3 +459,5 @@ Component creation and staged item-import components accept optional `cutSide`: 
 Job nesting separates pattern-side-up and non-pattern-side-up components onto different physical sheets. Either-side components can share either face. Job manifest cuts and sheets include `cutSide`; sheet plans, NC headers and labels include the corresponding face instruction. Source geometry and cutting depths are preserved. Existing job files and historical item versions retain their original settings.
 
 For shallow centre marks in 18 mm stock, set the mark layer to `{"kind":"drill","depthMm":2}`. Unspecified drill depths still use the selected material preset. Explicit depths are preserved across material variants; incompatible thicknesses are blocked. The cutter remains 6.35 mm: DXF circle diameter does not select another tool. `settings.drillDepthMm` reports the preset default; each entry in `operations` reports its actual depth.
+
+Physical NC artifacts append `-pattern-side-up` or `-non-pattern-side-up` when required, for example `sheet-1-pattern-side-up.nc`. Use the returned `files[].name` to download an artifact; unrestricted sheets retain `sheet-N.nc`.
