@@ -148,7 +148,7 @@ describe('API credential verification', () => {
     const repo = supabaseRepository({ from: () => query, rpc } as unknown as SupabaseClient)
     const input = { id: 'item', name: 'Cabinet', sku: 'CAB', description: '', image: testImage }
     await repo.createItem('alice', input, 'api_key:test')
-    expect(calls.find(c => c.method === 'insert')?.args[0]).toEqual({ ...input, owner_id: 'alice', uploaded_by: 'api_key:test' })
+    expect(calls.find(c => c.method === 'insert')?.args[0]).toEqual({ ...input, default_material: null, owner_id: 'alice', uploaded_by: 'api_key:test' })
     error = { code: '23505', message: 'Duplicate' }
     await expect(repo.createItem('bob', input, 'api_key:bob')).rejects.toMatchObject({ status: 409 })
     error = null; data = { image: testImage }; calls.length = 0

@@ -461,3 +461,9 @@ Job nesting separates pattern-side-up and non-pattern-side-up components onto di
 For shallow centre marks in 18 mm stock, set the mark layer to `{"kind":"drill","depthMm":2}`. Unspecified drill depths still use the selected material preset. Explicit depths are preserved across material variants; incompatible thicknesses are blocked. The cutter remains 6.35 mm: DXF circle diameter does not select another tool. `settings.drillDepthMm` reports the preset default; each entry in `operations` reports its actual depth.
 
 Physical NC artifacts append `-pattern-side-up` or `-non-pattern-side-up` when required, for example `sheet-1-pattern-side-up.nc`. Use the returned `files[].name` to download an artifact; unrestricted sheets retain `sheet-N.nc`.
+
+### Stock requirements and mixed materials
+
+Item creation/import accepts optional `defaultMaterial`; component creation/import accepts optional `stockMaterial` as an override. Both use `{ "thicknessMm": 12, "type": "Plywood", "finish": "Black hex" }`. Omitted component stock inherits the immutable item version's default. Catalogue responses expose `default_material` and `stock_material`. Existing catalogue requirements can be edited in the browser's Materials and finishes panel; the edit creates a new version.
+
+Job requests accept `sheet.stockMaterial` for actual stock, independently of the existing `sheet.thicknessMm`/passes/drill/ramp cutting preset. For example, actual stock can be 12 mm with a 13 mm four-pass preset. Mixed jobs allocate parts onto separate compatible physical sheets and choose an available preset for each material. Each manifest sheet includes `materialSetup`; cuts/labels and filenames carry the matching stock. Original NC remains available for components without generated variants. No cutting program is synthesized by changing stock metadata.

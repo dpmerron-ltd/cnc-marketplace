@@ -1,3 +1,4 @@
+import type { StockMaterial, SheetMaterial } from '../models/stockMaterial'
 import type { RampProfile } from '../cam/materialProfiles'
 import type { PartLabel } from '../labels/partLabels'
 import type { Bounds } from '../models/geometry'
@@ -10,7 +11,7 @@ export interface JobRequest {
   orderNumber: string
   notes: string
   items: Array<{ itemId?: string; sku?: string; quantity: number }>
-  sheet: { widthMm: number; heightMm: number; material: string; thicknessMm?: number; profilePasses?: 1 | 2 | 3 | 4; drillDepthMm?: 2 | 9; rampProfile?: RampProfile; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
+  sheet: { stockMaterial?: StockMaterial; widthMm: number; heightMm: number; material: string; thicknessMm?: number; profilePasses?: 1 | 2 | 3 | 4; drillDepthMm?: 2 | 9; rampProfile?: RampProfile; spacingMm: number; borderMm: number; safeZMm: number; screwMarks: boolean }
   labels: { widthMm: number; heightMm: number }
 }
 export interface JobCut extends PartLabel {
@@ -27,10 +28,10 @@ export interface JobManifest {
   request: JobRequest
   items: Array<{ id: string; sku: string; name: string; quantity: number; componentsPerItem: number }>
   cuts: JobCut[]
-  sheets: Array<{ number: number; cutSide?: SheetCutSide; partCount: number; maxX: number; maxY: number; deepestCutMm: number; estimatedSeconds: number; screwMarks: number }>
+  sheets: Array<{ materialSetup?: SheetMaterial; number: number; cutSide?: SheetCutSide; partCount: number; maxX: number; maxY: number; deepestCutMm: number; estimatedSeconds: number; screwMarks: number }>
   warnings: string[]
   setup: string[]
-  sources: Array<{ id: string; filename: string; sha256: string; feeds: number[]; spindleSpeeds: number[] }>
+  sources: Array<{ materialProfile?: string; id: string; filename: string; sha256: string; feeds: number[]; spindleSpeeds: number[] }>
 }
 export interface JobFile { name: string; contentType: string; bytes: number; sha256: string }
 export interface CuttingJob {

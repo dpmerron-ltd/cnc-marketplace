@@ -147,18 +147,18 @@ describe('account switching', () => {
     mock.load.mockResolvedValue(cutSideLibrary())
     render(<App />)
     await openSheet()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet material thickness' }), { target: { value: '12' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet cutting preset' }), { target: { value: '12' } })
     fireEvent.click(screen.getByRole('button', { name: 'New job' }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet material thickness' }), { target: { value: '18' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet cutting preset' }), { target: { value: '18' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'SECOND' } })
     const tabs = screen.getAllByRole('tab')
     expect(tabs).toHaveLength(2)
     fireEvent.click(tabs[0])
-    expect(screen.getByRole('combobox', { name: 'Sheet material thickness' })).toHaveValue('12')
+    expect(screen.getByRole('combobox', { name: 'Sheet cutting preset' })).toHaveValue('12')
     expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('')
     await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[5]).toMatchObject({ jobs: [
-      expect.objectContaining({ sheet: expect.objectContaining({ materialProfile: '12', instances: [expect.anything()] }) }),
-      expect.objectContaining({ sheet: expect.objectContaining({ materialProfile: '18', orderNumber: 'SECOND', instances: [] }) }),
+      expect.objectContaining({ sheet: expect.objectContaining({ instances: [expect.objectContaining({ materialSetup: expect.objectContaining({ materialProfile: '12' }) })] }) }),
+      expect.objectContaining({ sheet: expect.objectContaining({ sheetMaterials: { 0: expect.objectContaining({ materialProfile: '18' }) }, orderNumber: 'SECOND', instances: [] }) }),
     ] }))
     const saved = mock.save.mock.calls.at(-1)![5]
     cleanup()
@@ -167,7 +167,7 @@ describe('account switching', () => {
     await openSheet()
     expect(screen.getAllByRole('tab')).toHaveLength(2)
     fireEvent.click(screen.getAllByRole('tab')[1])
-    expect(screen.getByRole('combobox', { name: 'Sheet material thickness' })).toHaveValue('18')
+    expect(screen.getByRole('combobox', { name: 'Sheet cutting preset' })).toHaveValue('18')
     expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('SECOND')
   })
 
@@ -520,7 +520,7 @@ describe('account switching', () => {
     expect(screen.queryByRole('textbox', { name: 'Job name' })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: 'Order number' }), { target: { value: 'ORD-2048' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Material' }), { target: { value: '18 mm plywood' } })
-    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ orderNumber: 'ORD-2048', material: '18 mm plywood' }), expect.anything(), 'alice', expect.anything()))
+    await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ orderNumber: 'ORD-2048', sheetMaterials: { 0: expect.objectContaining({ material: '18 mm plywood' }) } }), expect.anything(), 'alice', expect.anything()))
     mock.load.mockResolvedValue(library('bob'))
     await switchAccount('bob')
     await screen.findByText("bob's private item")

@@ -1,3 +1,5 @@
+import { stockMaterialSchema, physicalSheet, sheetMaterial, requiredMaterial, stockLabel } from '../models/stockMaterial'
+import { allocateMaterials } from '../nesting/allocateMaterials'
 import { z } from 'zod'
 import { autoNest, partFitsSheet } from '../nesting/nestingEngine'
 import { buildPartLabels, numberSheetParts } from '../labels/partLabels'
@@ -28,7 +30,7 @@ export const jobRequestSchema = z.strictObject({
   jobName: text(160), orderNumber: text(100), notes: z.string().trim().max(2000).default(''),
   items: z.array(z.strictObject({ itemId: z.uuid().optional(), sku: text(100).optional(), quantity: z.number().int().min(1).max(20) }).refine(value => Boolean(value.itemId) !== Boolean(value.sku), 'Supply either itemId or sku, not both.')).min(1).max(20),
   sheet: z.strictObject({
-    widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(13), z.literal(14), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(), rampProfile: rampProfileSchema.optional(),
+    stockMaterial: stockMaterialSchema.optional(), widthMm: z.number().min(50).max(10000), heightMm: z.number().min(50).max(10000), material: text(160), thicknessMm: z.union([z.literal(6), z.literal(12), z.literal(13), z.literal(14), z.literal(15), z.literal(18)]).optional(), profilePasses: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), drillDepthMm: z.union([z.literal(2), z.literal(9)]).optional(), rampProfile: rampProfileSchema.optional(),
     spacingMm: z.number().min(0).max(100).default(30), borderMm: z.number().min(0).max(200).default(10), safeZMm: z.number().min(0.5).max(200).default(20), screwMarks: z.boolean().default(true),
   }).refine(value => value.rampProfile === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.').refine(value => value.borderMm * 2 < Math.min(value.widthMm, value.heightMm), 'Border must leave usable sheet area.').refine(value => validProfilePassSelection(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile), 'Pass selection requires a supported 12 mm preset, or 13/14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.').refine(value => value.drillDepthMm === undefined || (value.thicknessMm !== undefined && materialProfileId(value.thicknessMm, value.profilePasses, value.drillDepthMm, value.rampProfile) !== undefined), 'Use a supported material, pass, drill depth and ramp combination.'),
   labels: z.strictObject({ widthMm: z.number().min(40).max(190).default(50), heightMm: z.number().min(20).max(277).default(25) }).default({ widthMm: 50, heightMm: 25 }),
@@ -54,9 +56,10 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
     counts.set(matches[0].id, (counts.get(matches[0].id) ?? 0) + line.quantity)
   }
   const items = catalog.filter(item => counts.has(item.id))
-  const sourceParts = components.filter(part => counts.has(part.itemId ?? '')).sort((a, b) => a.id.localeCompare(b.id))
+  const sourceParts = components.filter(part => counts.has(part.itemId ?? '')).map(part => ({ ...part, defaultStockMaterial: part.defaultStockMaterial ?? items.find(item => item.id === part.itemId)?.defaultMaterial })).sort((a, b) => a.id.localeCompare(b.id))
   const materialProfile = request.sheet.thicknessMm === undefined ? undefined : materialProfileId(request.sheet.thicknessMm, request.sheet.profilePasses, request.sheet.drillDepthMm, request.sheet.rampProfile)
-  const selection = selectMaterialParts(sourceParts, { materialProfile, instances: sourceParts.map(part => ({ partId: part.id })) })
+  const mixed = Boolean(request.sheet.stockMaterial || sourceParts.some(requiredMaterial))
+  const selection = mixed ? { parts: sourceParts, errors: [] } : selectMaterialParts(sourceParts, { materialProfile, instances: sourceParts.map(part => ({ partId: part.id })) })
   if (selection.errors.length) throw new JobError('The selected sheet thickness is unavailable for one or more components.', 422, selection.errors)
   const parts = selection.parts
   if (parts.reduce((sum, part) => sum + part.gcode.length, 0) > 2000000) throw new JobError('Selected component programs exceed 2 MB. Split the order into smaller jobs.')
@@ -71,7 +74,7 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   if (sourceLines > 5000) throw new JobError('Expanded machining programs exceed 5,000 lines. Split this order into smaller jobs.')
   const settings = request.sheet
   let sheet: Sheet = {
-    name: request.jobName, orderNumber: request.orderNumber, material: settings.material, materialProfile,
+    name: request.jobName, orderNumber: request.orderNumber, material: settings.material, materialProfile, stockMaterial: settings.stockMaterial,
     width: settings.widthMm, height: settings.heightMm, spacing: settings.spacingMm, borderSpacing: settings.borderMm,
     safeZOverrideMm: settings.safeZMm, screwMarkingEnabled: settings.screwMarks,
     gcodeSettings: { ...programs, safeZ: settings.safeZMm },
@@ -83,7 +86,15 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
     for (let copy = 0; copy < counts.get(part.itemId!)!; copy++) sheet.instances.push({ id: crypto.randomUUID(), partId: part.id, sheetIndex: 0, x: settings.borderMm, y: settings.borderMm, rotation: 0, locked: false })
   }
   sheet = numberSheetParts(sheet)
-  sheet.instances = autoNest(parts, sheet)
+  if (mixed) {
+    try { sheet = allocateMaterials(parts, { ...sheet, instances: [] }, sheet.instances) } catch (error) { throw new JobError((error as Error).message) }
+  } else sheet.instances = autoNest(parts, sheet)
+  const selectedBySheet = new Map([...new Set(sheet.instances.map(i => i.sheetIndex))].map(index => [index, selectMaterialParts(parts, physicalSheet(sheet, index)).parts]))
+  const selectedSources = [...new Map(sheet.instances.map(i => {
+    const part = selectedBySheet.get(i.sheetIndex)!.find(p => p.id === i.partId)!
+    return [`${part.id}/${sheetMaterial(sheet,i.sheetIndex).materialProfile ?? ''}`, { ...part, selectedProfile: sheetMaterial(sheet,i.sheetIndex).materialProfile }]
+  })).values()]
+  if (selectedSources.reduce((sum, part) => sum + part.gcode.length, 0) > 2000000 || sheet.instances.reduce((sum,i) => sum + selectedBySheet.get(i.sheetIndex)!.find(p => p.id === i.partId)!.parsed.lines.length, 0) > 5000) throw new JobError('Selected machining programs exceed job limits. Split the order into smaller jobs.')
   const issues = validateSheet(parts, sheet)
   const exported = exportPhysicalSheetGCodes(parts, sheet, programs)
   const simulations = exported.map(result => simulateGCode(result.gcode))
@@ -93,16 +104,17 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
   const labels = buildPartLabels(parts, items, sheet)
   const cuts = labels.map(label => {
     const instance = sheet.instances.find(instance => instance.id === label.instanceId)!
-    const part = parts.find(part => part.id === instance.partId)!
+    const part = selectedBySheet.get(instance.sheetIndex)!.find(part => part.id === instance.partId)!
     return { ...label, partId: part.id, widthMm: part.width, heightMm: part.height, bounds: instanceBounds(part, instance), deepestCutMm: originalFinalDepth(part) ?? 0, sourceFilename: part.originalFilename }
   })
-  if (settings.thicknessMm && cuts.some(cut => cut.deepestCutMm > settings.thicknessMm! + 1)) warnings.push('Some source cuts exceed the stated material thickness by more than 1 mm. Verify the stock, work zero and spoilboard allowance.')
+  if (cuts.some(cut => { const instance = sheet.instances.find(i => i.id === cut.instanceId)!; const thickness = sheetMaterial(sheet,instance.sheetIndex).stockMaterial?.thicknessMm ?? settings.thicknessMm; return thickness && cut.deepestCutMm > thickness + 1 })) warnings.push('Some source cuts exceed the stated material thickness by more than 1 mm. Verify the stock, work zero and spoilboard allowance.')
   const manifest: JobManifest = {
     version: 1, request, items: manifestItems, cuts, programSettings: { ...programs },
     sheets: exported.map((file, i) => {
-      const instances = sheet.instances.filter(instance => instance.sheetIndex === i)
-      const bounds = instances.map(instance => preparationBounds(parts.find(part => part.id === instance.partId)!, instance, settings.safeZMm).bounds)
-      return { number: i + 1, cutSide: sheetCutSide(parts, sheet, file.sheetIndex), partCount: instances.length, maxX: Math.max(...bounds.map(bounds => bounds.maxX)), maxY: Math.max(...bounds.map(bounds => bounds.maxY)), deepestCutMm: simulations[i].deepestCutMm, estimatedSeconds: simulations[i].estimatedSeconds, screwMarks: planScrewPositions(parts, sheet, file.sheetIndex).points.length }
+      const instances = sheet.instances.filter(instance => instance.sheetIndex === file.sheetIndex)
+      const selected = selectedBySheet.get(file.sheetIndex)!
+      const bounds = instances.map(instance => preparationBounds(selected.find(part => part.id === instance.partId)!, instance, settings.safeZMm).bounds)
+      return { materialSetup: sheetMaterial(sheet, file.sheetIndex), number: file.sheetIndex + 1, cutSide: sheetCutSide(parts, sheet, file.sheetIndex), partCount: instances.length, maxX: Math.max(...bounds.map(bounds => bounds.maxX)), maxY: Math.max(...bounds.map(bounds => bounds.maxY)), deepestCutMm: simulations[i].deepestCutMm, estimatedSeconds: simulations[i].estimatedSeconds, screwMarks: planScrewPositions(selected, physicalSheet(sheet,file.sheetIndex), file.sheetIndex).points.length }
     }),
     warnings,
     setup: [
@@ -113,10 +125,10 @@ export async function generateJob(request: JobRequest, catalog: MarketplaceItem[
       'Maximum X/Y reach check precedes each sheet. Confirm the physical machine can reach these coordinates. M05 only stops automatically controlled spindles.',
       settings.screwMarks ? 'Screw marking enabled: 6 mm cutter, recessed screws, 2 mm marking depth, followed by M05 / M00 pause to fit screws.' : 'Screw marking is disabled. Secure the material before starting.',
       'Load each physical sheet separately, align its origin and use its matching sheet-N file (including the cutting-side suffix where present). Apply labels only with the machine and spindle stopped.',
-      ...exported.map(file => `Sheet ${file.sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, file.sheetIndex))}.`),
+      ...exported.map(file => `Sheet ${file.sheetIndex + 1}: ${stockLabel(sheetMaterial(sheet, file.sheetIndex).stockMaterial)}; ${cutSideLabel(sheetCutSide(parts, sheet, file.sheetIndex))}.`),
       'Dimensions are source toolpath footprints, not finished-part dimensions. Layout drawings are not to scale. Timing excludes manual setup and pauses.',
     ],
-    sources: await Promise.all(parts.map(async part => ({ id: part.id, filename: part.originalFilename, sha256: await sha256(part.gcode), feeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'F').map(word => word.value)))], spindleSpeeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'S').map(word => word.value)))] }))),
+    sources: await Promise.all(selectedSources.map(async part => ({ materialProfile: part.selectedProfile, id: part.id, filename: part.originalFilename, sha256: await sha256(part.gcode), feeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'F').map(word => word.value)))], spindleSpeeds: [...new Set(part.parsed.lines.flatMap(line => line.words.filter(word => word.letter === 'S').map(word => word.value)))] }))),
   }
   return { manifest, sheet, parts, exported, simulations }
 }

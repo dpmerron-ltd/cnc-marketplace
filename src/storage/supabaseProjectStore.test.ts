@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { newWorkspace } from '../jobs/production'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteMaterials, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { natural, hex } from '../test/materialFixtures'
 import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
@@ -10,7 +11,7 @@ const mock = vi.hoisted(() => ({ userId: 'alice', conflict: false, error: null a
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
-    rpc: async (name: string, input: { p_actor: string; p_item: string; p_action: string; p_payload: { components?: Record<string, unknown>[]; expected?: Record<string, string>; next?: Record<string, unknown>; image?: unknown } }) => {
+    rpc: async (name: string, input: { p_actor: string; p_item: string; p_action: string; p_payload: { components?: Record<string, unknown>[] | Record<string, unknown>; defaultMaterial?: unknown; expected?: Record<string, string>; next?: Record<string, unknown>; image?: unknown } }) => {
       if (name === 'save_cnc_workspace') {
         const request = input as unknown as { p_expected_version: number }
         mock.queries.push({ table: 'workspace-rpc', write: input, filters: [] })
@@ -18,11 +19,11 @@ vi.mock('./supabaseClient', () => ({
       }
       expect(name).toBe('update_item_version')
       const payload = input.p_payload
-      mock.queries.push({ table: input.p_action === 'add_components' ? 'cnc_components' : 'marketplace_items', write: payload.components ?? payload.next ?? payload, filters: [['id', input.p_item], ...Object.entries(input.p_action === 'metadata' ? payload.expected ?? {} : {})] })
+      mock.queries.push({ table: input.p_action === 'add_components' ? 'cnc_components' : 'marketplace_items', write: input.p_action === 'materials' ? payload : payload.components ?? payload.next ?? payload, filters: [['id', input.p_item], ...Object.entries(input.p_action === 'metadata' ? payload.expected ?? {} : {})] })
       if (mock.error || mock.conflict) return { data: null, error: mock.error ?? { message: 'ITEM_VERSION_CONFLICT' } }
       const previous = { id: input.p_item, owner_id: 'alice', name: 'Test', sku: 'TEST', description: '', packing: {}, created_at: '', updated_at: '', ...(mock.rows.find(row => (row as { id: string }).id === input.p_item) as object ?? {}), version_family_id: input.p_item, version_number: 1, version_status: 'published', version_default: false }
       const current = { ...previous, ...payload.next, ...(input.p_action === 'image' ? { image: payload.image } : {}), id: `${input.p_item}-v2`, version_number: 2, version_default: true }
-      return { data: { changed: true, previous, current, components: (payload.components ?? []).map(row => ({ ...row, component_family_id: row.id, item_id: current.id })) }, error: null }
+      return { data: { changed: true, previous, current, components: (Array.isArray(payload.components) ? payload.components : []).map(row => ({ ...row, component_family_id: row.id, item_id: current.id })) }, error: null }
     },
     auth: { getUser: async () => ({ data: { user: { id: mock.userId } } }) },
     from: (table: string) => {
@@ -69,6 +70,22 @@ describe('cloud account boundaries', () => {
     await expect(saveRemoteCutSide(part, 'either', 'alice')).rejects.toThrow('changed in another session')
     mock.userId = 'bob'
     await expect(saveRemoteCutSide(part, 'either', 'alice')).rejects.toThrow('account changed')
+  })
+
+  it('loads inherited stock and overrides and saves all material requirements in one versioned operation', async () => {
+    mock.rows = [{ id: 'mixed', owner_id: 'alice', name: 'Mixed', sku: 'MIX', default_material: natural }]
+    mock.components = [{ id: 'front', owner_id: 'alice', item_id: 'mixed', sku: 'FRONT', name: 'Front', original_filename: 'front.nc', gcode: testParts[0].gcode, stock_material: hex }]
+    const project = await loadRemoteProject('alice')
+    expect(project!.items[0].defaultMaterial).toEqual(natural)
+    expect(project!.componentIndex![0]).toMatchObject({ stockMaterial: hex, defaultStockMaterial: natural })
+    const [part] = await loadRemoteItemComponents(project!.items[0], 'alice')
+    expect(part).toMatchObject({ stockMaterial: hex, defaultStockMaterial: natural })
+    await saveRemoteMaterials(project!.items[0], natural, { front: hex }, 'alice')
+    expect(mock.queries.at(-1)?.write).toEqual({ expectedVersionId: 'mixed', defaultMaterial: natural, components: { front: hex } })
+    mock.conflict = true
+    await expect(saveRemoteMaterials(project!.items[0], natural, { front: null }, 'alice')).rejects.toThrow('changed in another session')
+    mock.userId = 'bob'
+    await expect(saveRemoteMaterials(project!.items[0], natural, {}, 'alice')).rejects.toThrow('account changed')
   })
 
   it('loads a shared item and components from different creators through bounded program pages', async () => {

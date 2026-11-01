@@ -1,3 +1,5 @@
+import { allocateMaterials } from './allocateMaterials'
+import { hasSheetMaterials, requiredMaterial } from '../models/stockMaterial'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
@@ -7,7 +9,12 @@ import { selectMaterialParts } from '../gcode/materialSelection'
 
 export function addItemToSheet(item: MarketplaceItem, parts: Part[], sheet: Sheet, ownerId: string, sheetIndex: number, componentIds?: string[]): Sheet {
   if (!ownerId) throw new Error('Sign in to use the shared catalogue.')
-  const selection = selectMaterialParts(parts, { ...sheet, instances: [...sheet.instances, ...parts.filter(part => part.itemId === item.id).map(part => ({ partId: part.id }))] })
+  const requested = parts.filter(p => p.itemId === item.id && (!componentIds || componentIds.includes(p.id)))
+  if (hasSheetMaterials(sheet) || requested.some(requiredMaterial)) {
+    if (!requested.length) throw new Error('This item has no components.')
+    return allocateMaterials(parts, sheet, requested.map(p => ({ id: crypto.randomUUID(), partId: p.id, sheetIndex, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0, locked: false })), sheetIndex)
+  }
+  const selection = selectMaterialParts(parts, { ...sheet, instances: [...sheet.instances, ...parts.filter(part => part.itemId === item.id && (!componentIds || componentIds.includes(part.id))).map(part => ({ partId: part.id }))] })
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   parts = selection.parts
   const components = parts.filter(part => part.itemId === item.id && (!componentIds || componentIds.includes(part.id)))

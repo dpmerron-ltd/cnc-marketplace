@@ -1,3 +1,4 @@
+import { requiredMaterial, stockLabel } from '../models/stockMaterial'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import { LayoutGrid } from 'lucide-react'
@@ -75,6 +76,7 @@ export function PartLibrary({
             <span>{part.name}</span>
             <small>{part.sku}</small>
             <small>{cutSideLabel(part.cutSide)}</small>
+            <small>{stockLabel(requiredMaterial(part))}</small>
             <small>
               {part.width.toFixed(1)} x {part.height.toFixed(1)} mm
               {part.dxf ? ' + DXF' : ''}

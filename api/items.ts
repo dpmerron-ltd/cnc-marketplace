@@ -1,7 +1,9 @@
+import { stockMaterialSchema } from '../src/models/stockMaterial'
 import { z } from 'zod'
 import { itemImageSchema } from '../src/models/ItemImage'
 
 export const createItemSchema = z.strictObject({
+  defaultMaterial: stockMaterialSchema.optional(),
   id: z.uuid().optional(),
   name: z.string().trim().min(1).max(200),
   sku: z.string().trim().min(1).max(100),

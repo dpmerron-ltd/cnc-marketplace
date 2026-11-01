@@ -1,3 +1,4 @@
+import { requiredMaterial } from '../models/stockMaterial'
 import type { ComponentSummary } from '../models/Part'
 import type { PackingEstimate, PackingPiece, PackingPlan, PackingSettings, PackingSize } from './types'
 
@@ -12,7 +13,7 @@ export function packingPieces(parts: (ComponentSummary & { gcode?: string })[], 
     const entered = settings.components?.[part.id]
     const header = part.gcode?.match(/\(Material\s+(\d+(?:\.\d+)?)\s*mm\s*\//i)?.[1] ?? part.materialThicknessMm
     const filename = part.originalFilename.match(/(?:^|[_ -])(\d+(?:\.\d+)?)\s*mm(?:[_ .-]|$)/i)?.[1]
-    const hint = header ?? filename
+    const hint = requiredMaterial(part)?.thicknessMm ?? header ?? filename
     return {
       id: part.id, name: part.name,
       width: entered?.widthMm ?? part.width, height: entered?.heightMm ?? part.height,

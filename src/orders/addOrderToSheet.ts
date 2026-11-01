@@ -1,3 +1,5 @@
+import { allocateMaterials } from '../nesting/allocateMaterials'
+import { hasSheetMaterials, requiredMaterial } from '../models/stockMaterial'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
@@ -19,14 +21,13 @@ export function matchOrderItems(order: ShopifyOrder, items: MarketplaceItem[], o
   }))
 }
 
-export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceItem[], parts: Part[], sheet: Sheet, ownerId: string, sheetIndex: number) {
+export function prepareOrderAdditions(request: AddOrderRequest, items: MarketplaceItem[], parts: Part[], sheet: Sheet, ownerId: string) {
   if (!ownerId) throw new Error('Sign in to use the shared catalogue.')
   const { order, shop, matches } = request
   if (order.lineItems.pageInfo.hasNextPage) throw new Error('Load all order items before adding this order.')
   const key = `${shop}/${order.id}`
-  const ids = new Set(sheet.instances.map(instance => instance.id))
+  const ids = new Set([...sheet.instances, ...(sheet.pendingParts ?? [])].map(instance => instance.id))
   if (sheet.orderImports?.some(entry => entry.key === key && entry.instanceIds.some(id => ids.has(id)))) throw new Error(`${order.name} is already on this sheet. Remove its existing components before adding it again.`)
-  while (sheet.unavailableSheetIndices?.includes(sheetIndex)) sheetIndex++
   const additions: PartInstance[] = []
   for (const line of order.lineItems.nodes) {
     if (!Number.isSafeInteger(line.currentQuantity) || line.currentQuantity < 0) throw new Error(`${line.title}: invalid order quantity.`)
@@ -37,9 +38,26 @@ export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceIt
     const components = parts.filter(part => part.itemId === item.id)
     if (!components.length) throw new Error(`${item.name} has no components.`)
     if (additions.length + components.length * line.currentQuantity > 500) throw new Error('This order exceeds 500 components. Split it into smaller cutting jobs.')
-    for (let copy = 0; copy < line.currentQuantity; copy++) for (const part of components) additions.push({ id: crypto.randomUUID(), partId: part.id, orderName: order.name, sheetIndex: 0, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0, locked: false })
+    for (let copy = 0; copy < line.currentQuantity; copy++) for (const part of components) additions.push({ id: crypto.randomUUID(), partId: part.id, orderName: order.name, orderKey: key, sheetIndex: 0, x: sheet.borderSpacing, y: sheet.borderSpacing, rotation: 0, locked: false })
   }
   if (!additions.length) throw new Error('This order has no current items to add.')
+  return { additions, key, order }
+}
+
+export function prepareOrderSheet(request: AddOrderRequest, items: MarketplaceItem[], parts: Part[], sheet: Sheet, ownerId: string, sheetIndex: number) {
+  const { additions, key, order } = prepareOrderAdditions(request, items, parts, sheet, ownerId)
+  while (sheet.unavailableSheetIndices?.includes(sheetIndex)) sheetIndex++
+  if (hasSheetMaterials(sheet) || parts.some(p => additions.some(i => i.partId === p.id) && requiredMaterial(p))) {
+    const allocated = allocateMaterials(parts, sheet, additions, sheetIndex)
+    const originalLocks = new Map(sheet.instances.map(i => [i.id, i.locked]))
+    return { parts, count: additions.length,
+      sheet: { ...allocated, instances: allocated.instances.map(i => originalLocks.has(i.id) ? { ...i, locked: true } : i) },
+      finish(instances: PartInstance[]): Sheet {
+        if (instances.length !== allocated.instances.length || instances.some((i,n) => i.id !== allocated.instances[n].id || i.partId !== allocated.instances[n].partId)) throw new Error('Nesting returned an incomplete order. Your sheet is unchanged.')
+        return numberSheetParts({ ...allocated, instances: instances.map(i => originalLocks.has(i.id) ? { ...i, locked: originalLocks.get(i.id)! } : i), orderNumber: [...new Set([sheet.orderNumber, order.name].filter(Boolean))].join(', '), orderImports: [...(sheet.orderImports ?? []), { key, name: order.name, instanceIds: additions.map(i => i.id) }] })
+      },
+    }
+  }
   const selection = selectMaterialParts(parts, { ...sheet, instances: [...sheet.instances, ...additions] })
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   const knownParts = new Set(selection.parts.map(part => part.id))

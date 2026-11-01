@@ -1,3 +1,4 @@
+import { stockMaterialSchema, type StockMaterial } from '../models/stockMaterial'
 import { createPartFromGCode } from '../gcode/importPart'
 import type { MarketplaceItem } from '../models/Item'
 import { itemImageSchema, type ItemImage } from '../models/ItemImage'
@@ -21,6 +22,7 @@ interface ComponentRow {
   dxf: string | null
   date_imported: string
   material_variants?: unknown
+  stock_material?: StockMaterial | null
   cut_side?: CutSide
 }
 
@@ -80,7 +82,7 @@ function componentRow(part: Part) {
   return {
     id: part.id, owner_id: part.ownerId, item_id: part.itemId, sku: part.sku, name: part.name,
     original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
-    width: part.width, height: part.height, bounding_box: part.boundingBox, cut_side: part.cutSide ?? 'either',
+    width: part.width, height: part.height, bounding_box: part.boundingBox, cut_side: part.cutSide ?? 'either', stock_material: part.stockMaterial ?? null,
     original_bounds: part.originalBounds, metadata, date_imported: part.dateImported,
     ...(materialVariants ? { material_variants: materialVariants } : {}),
   }
@@ -178,7 +180,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
 
   // A JSONB profile projection still decompresses the NC bundle. Never scan
   // every historical bundle at startup; old versions load when opened.
-  const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height,cut_side'
+  const indexColumns = 'id,owner_id,item_id,sku,name,original_filename,width,height,cut_side,stock_material'
   const readIndex = async (column: 'item_id' | 'id', ids: string[]) => {
     const rows = []
     for (let offset = 0; offset < ids.length; offset += 40) {
@@ -193,7 +195,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const indexedIds = new Set(componentRows.map(row => row.id))
   // Saved sheets deliberately retain the exact revisions they were built with.
   const savedSheets = [projectResult.data?.sheet, ...(workspace?.jobs.map(job => job.sheet) ?? []), ...(recoveryWorkspace(userId)?.jobs.map(job => job.sheet) ?? []), ...((historyResult.data ?? []) as SheetHistoryRow[]).map(row => row.sheet)]
-  const pinnedIds = [...new Set(savedSheets.flatMap(sheet => sheet?.instances.map(instance => instance.partId) ?? []))].filter(id => !indexedIds.has(id))
+  const pinnedIds = [...new Set(savedSheets.flatMap(sheet => sheet ? [...sheet.instances, ...(sheet.pendingParts ?? [])].map(instance => instance.partId) : []))].filter(id => !indexedIds.has(id))
   componentRows.push(...await readIndex('id', pinnedIds))
   // Fetch profiles by the exact page IDs so PostgreSQL cannot decompress a
   // whole item's bundles before sorting/limiting the summary query.
@@ -215,6 +217,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     packing: row.packing ?? undefined,
+    defaultMaterial: row.default_material ?? undefined,
     image: itemImageSchema.safeParse(row.image).success ? row.image : undefined,
     ...(row.version_family_id ? { version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } } : {}),
   }))
@@ -226,7 +229,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const componentIndex: ComponentSummary[] = componentRows.filter(row => itemSkuById.has(row.item_id)).map(row => ({
     id: row.id, ownerId: row.owner_id, itemId: row.item_id,
     sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
-    originalFilename: row.original_filename, width: row.width, height: row.height, cutSide: row.cut_side ?? 'either',
+    originalFilename: row.original_filename, width: row.width, height: row.height, cutSide: row.cut_side ?? 'either', stockMaterial: row.stock_material ?? undefined, defaultStockMaterial: items.find(i => i.id === row.item_id)?.defaultMaterial,
     ...(profileById.get(row.id) ? { materialThicknessMm: profileById.get(row.id)!.thickness } : {}),
   }))
 
@@ -267,7 +270,7 @@ export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUs
   if (!supabase || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const client = supabase
   const rows = await readLibraryPages<ComponentRow>((from, to) => client.from('cnc_components')
-    .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants,cut_side')
+    .select('id,owner_id,item_id,sku,name,original_filename,gcode,dxf,date_imported,material_variants,cut_side,stock_material')
     .eq('item_id', item.id).order('date_imported').order('id').range(from, to), 'item components')
   if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const parts: Part[] = []
@@ -280,7 +283,7 @@ export async function loadRemoteItemComponents(item: MarketplaceItem, expectedUs
       if (!variants.success) throw new Error(`${row.sku ?? row.name}: saved cutting profiles could not be read. No components have been removed.`)
       part.metadata.materialVariants = variants.data
     }
-    parts.push({ ...part, id: row.id, ownerId: row.owner_id, sku: row.sku ?? fallbackComponentSku(row.id, item.sku), name: row.name, dateImported: row.date_imported, cutSide: row.cut_side ?? 'either' })
+    parts.push({ ...part, id: row.id, ownerId: row.owner_id, sku: row.sku ?? fallbackComponentSku(row.id, item.sku), name: row.name, dateImported: row.date_imported, cutSide: row.cut_side ?? 'either', stockMaterial: row.stock_material ?? undefined, defaultStockMaterial: item.defaultMaterial })
   }
   return parts
 }
@@ -319,7 +322,7 @@ async function applyItemUpdate(userId: string, itemId: string, action: string, p
   if (previous) snapshots.set(previous.id, structuredClone(previous))
   snapshots.set(current.id, structuredClone(current)); catalogueSnapshots.set(userId, snapshots)
   for (const part of result.components) if (part.component_source_id) componentSuccessors.set(part.component_source_id, part.id)
-  emitCatalogueChange({ userId, current, previous, submittedItem, parts, components: result.components.map(part => ({ id: part.id, ownerId: part.owner_id, itemId: part.item_id, sku: part.sku, name: part.name, originalFilename: part.original_filename, width: part.width, height: part.height, cutSide: part.cut_side ?? 'either', sourceId: part.component_source_id ?? undefined, materialThicknessMm: materialProfiles.find(profile => profile.id === part.material_profile)?.thickness })) })
+  emitCatalogueChange({ userId, current, previous, submittedItem, parts, components: result.components.map(part => ({ id: part.id, ownerId: part.owner_id, itemId: part.item_id, sku: part.sku, name: part.name, originalFilename: part.original_filename, width: part.width, height: part.height, cutSide: part.cut_side ?? 'either', stockMaterial: part.stock_material ?? undefined, defaultStockMaterial: current.defaultMaterial, sourceId: part.component_source_id ?? undefined, materialThicknessMm: materialProfiles.find(profile => profile.id === part.material_profile)?.thickness })) })
   return result
 }
 export function saveCatalogueItem(item: MarketplaceItem, userId: string): Promise<RemoteSaveResult> {
@@ -337,7 +340,7 @@ async function persistCatalogueItem(item: MarketplaceItem, userId: string): Prom
     if (item.ownerId !== userId) return { ok: false, error: 'Reload the shared catalogue before editing this item.' }
     const result = await supabase!.from('marketplace_items').upsert([{
       id: item.id, owner_id: userId, uploaded_by: item.uploadedBy ?? '',
-      ...editableMetadata(item), created_at: item.createdAt, updated_at: item.updatedAt,
+      ...editableMetadata(item), default_material: item.defaultMaterial ?? null, created_at: item.createdAt, updated_at: item.updatedAt,
     }], { onConflict: 'id', ignoreDuplicates: true }).select('id')
     if (result.error) return { ok: false, error: result.error.message }
     // Ignore-duplicates protects existing IDs (including items deleted/recreated
@@ -480,4 +483,10 @@ export async function deleteRemoteGCodePreset(presetId: string): Promise<void> {
   if (!userId) return
   const result = await supabase.from('gcode_presets').delete().eq('id', presetId).eq('owner_id', userId)
   if (result.error) console.warn('Supabase G-code preset delete failed.', result.error)
+}
+
+export async function saveRemoteMaterials(item: MarketplaceItem, defaultMaterial: StockMaterial | undefined, overrides: Record<string, StockMaterial | null>, userId: string): Promise<void> {
+  if (defaultMaterial) stockMaterialSchema.parse(defaultMaterial)
+  Object.values(overrides).forEach(value => { if (value) stockMaterialSchema.parse(value) })
+  await updateRemoteItem(userId, item.id, 'materials', { expectedVersionId: item.id, defaultMaterial: defaultMaterial ?? null, components: overrides })
 }

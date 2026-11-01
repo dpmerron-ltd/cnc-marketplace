@@ -1,3 +1,4 @@
+import type { StockMaterial } from '../models/stockMaterial'
 import type { MarketplaceItem } from '../models/Item'
 import type { ComponentSummary, Part } from '../models/Part'
 import { itemImageSchema } from '../models/ItemImage'
@@ -6,12 +7,13 @@ import type { CutSide } from '../models/cutSide'
 
 export interface VersionItemRow {
   id: string; owner_id: string; uploaded_by: string; sku: string; name: string; description: string
-  created_at: string; updated_at: string; packing: PackingSettings; image: unknown
+  default_material?: StockMaterial | null; created_at: string; updated_at: string; packing: PackingSettings; image: unknown
   version_family_id: string; version_number: number; version_status: 'draft' | 'published'; version_default: boolean; published_at: string | null
 }
 export interface VersionComponentRow {
   id: string; owner_id: string; item_id: string; sku: string; name: string; original_filename: string
   width: number; height: number; component_family_id: string; component_source_id: string | null; material_profile?: string
+  stock_material?: StockMaterial | null
   cut_side?: CutSide
 }
 export interface VersionUpdateResult { changed: boolean; current: VersionItemRow; previous: VersionItemRow | null; components: VersionComponentRow[] }
@@ -22,7 +24,7 @@ export interface CatalogueChange {
 }
 export function versionItem(row: VersionItemRow): MarketplaceItem {
   const image = itemImageSchema.safeParse(row.image)
-  return { id: row.id, ownerId: row.owner_id, uploadedBy: row.uploaded_by, sku: row.sku, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at, packing: row.packing, image: image.success ? image.data : null,
+  return { defaultMaterial: row.default_material ?? undefined, id: row.id, ownerId: row.owner_id, uploadedBy: row.uploaded_by, sku: row.sku, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at, packing: row.packing, image: image.success ? image.data : null,
     version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } }
 }
 const listeners = new Set<(change: CatalogueChange) => void>()

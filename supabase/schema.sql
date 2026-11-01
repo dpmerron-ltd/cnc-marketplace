@@ -439,6 +439,7 @@ returns trigger language plpgsql set search_path = '' as $$
 declare
   source public.cnc_machine_runs;
   source_part jsonb;
+  source_sheet jsonb;
 begin
   if tg_op = 'INSERT' then
     if new.status <> 'queued' then raise exception 'New re-cuts must be queued' using errcode = '23514'; end if;
@@ -450,8 +451,9 @@ begin
     new.part_name := coalesce(nullif(source_part->>'name', ''), 'Unnamed part');
     new.job_name := source.name;
     new.order_number := source.order_number;
-    new.material := source.material;
-    new.thickness := source.thickness;
+    select value into source_sheet from jsonb_array_elements(coalesce(source.snapshot->'sheets','[]'::jsonb)) where value->>'index'=new.sheet_index::text;
+    new.material := coalesce((source_sheet#>>'{materialSetup,stockMaterial,type}') || ' · ' || (source_sheet#>>'{materialSetup,stockMaterial,finish}'),source_sheet#>>'{materialSetup,material}',source.material);
+    new.thickness := coalesce((source_sheet#>>'{materialSetup,stockMaterial,thicknessMm}') || ' mm',source.thickness);
     new.created_at := now();
     new.updated_at := new.created_at;
   else

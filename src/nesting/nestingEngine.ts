@@ -7,6 +7,7 @@ import { boundsPolygon, expandedFootprint, footprintScale, footprintsOverlap, fr
 import { convexSum } from './convexSum'
 import { selectMaterialParts } from '../gcode/materialSelection'
 import { compatibleCutSides, cutSideErrors, cutSides, type CutSide } from '../models/cutSide'
+import { hasSheetMaterials, materialSetupKey, snapshotMaterials, stockErrors } from '../models/stockMaterial'
 
 interface PlacedShape { sheetIndex: number; cutSide?: CutSide; bounds: Bounds; points: Point[]; localPoints: Point[]; origin: Point }
 type NoFit = (obstacle: PlacedShape, candidate: Point[]) => ClipperLib.Path
@@ -81,6 +82,7 @@ export function partFitsSheet(part: Part, sheet: Sheet): boolean {
 }
 
 export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {
+  if (hasSheetMaterials(sheet)) return nestMaterials(parts, sheet, onProgress)
   const closed = new Set(sheet.unavailableSheetIndices ?? [])
   if (!closed.size) return nestAvailable(parts, sheet, onProgress)
   const indices: number[] = []
@@ -90,6 +92,51 @@ export function autoNest(parts: Part[], sheet: Sheet, onProgress?: (completed: n
   const nested = nestAvailable(parts, { ...sheet, unavailableSheetIndices: undefined, instances: waiting.map(i => ({ ...i, sheetIndex: indices.indexOf(i.sheetIndex) })) }, onProgress)
   const placed = new Map(nested.map(i => [i.id, { ...i, sheetIndex: indices[i.sheetIndex] }]))
   return sheet.instances.map(i => placed.get(i.id) ?? i)
+}
+
+function nestMaterials(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {
+  const closed = new Set(sheet.unavailableSheetIndices ?? [])
+  const instances = snapshotMaterials(sheet)
+  const groups = new Map<string, PartInstance[]>()
+  for (const i of instances.filter(i => !closed.has(i.sheetIndex))) {
+    const key = materialSetupKey(i.materialSetup!)
+    groups.set(key, [...(groups.get(key) ?? []), i])
+  }
+  const occupied = new Set(instances.map(i => i.sheetIndex))
+  const mapped = new Map<string, PartInstance>()
+  const claimed = new Set(closed)
+  let completed = 0
+  const total = instances.filter(i => !i.locked && !closed.has(i.sheetIndex)).length
+  for (const group of groups.values()) {
+    const originalIndices = [...new Set(group.map(i => i.sheetIndex))].sort((a,b) => a-b)
+    const indices = originalIndices.map(original => {
+      let index = original
+      if (claimed.has(index)) {
+        if (group.some(i => i.sheetIndex === original && i.locked)) throw new Error('Locked parts mix different materials on one sheet.')
+        index = 0
+        while (occupied.has(index) || closed.has(index)) index++
+        occupied.add(index)
+      }
+      claimed.add(index)
+      return index
+    })
+    const setup = group[0].materialSetup!
+    const local = { ...sheet, ...setup, sheetMaterials: undefined, unavailableSheetIndices: undefined,
+      instances: group.map(({ materialSetup: _setup, ...i }) => ({ ...i, sheetIndex: originalIndices.indexOf(i.sheetIndex) })) }
+    const errors = stockErrors(parts, local)
+    if (errors.length) throw new Error(errors.join(' '))
+    const nested = nestAvailable(parts, local, (n) => onProgress?.(completed + n, total))
+    for (const i of nested) {
+      while (indices.length <= i.sheetIndex) {
+        let index = 0
+        while (occupied.has(index) || closed.has(index)) index++
+        occupied.add(index); indices.push(index)
+      }
+      mapped.set(i.id, { ...i, sheetIndex: indices[i.sheetIndex], materialSetup: setup })
+    }
+    completed += group.filter(i => !i.locked).length
+  }
+  return sheet.instances.map(i => closed.has(i.sheetIndex) ? i : mapped.get(i.id) ?? i)
 }
 
 function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: number, total: number) => void): PartInstance[] {

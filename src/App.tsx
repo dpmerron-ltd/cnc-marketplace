@@ -1,3 +1,8 @@
+import { addItemToSheet } from './nesting/addItemToSheet'
+import { MaterialAllocationDialog } from './ui/MaterialAllocationDialog'
+import { StockFields } from './ui/MaterialEditor'
+import { allocateMaterials } from './nesting/allocateMaterials'
+import { hasSheetMaterials, physicalSheet, requiredMaterial, sheetMaterial, setSheetMaterial, stockLabel, type SheetMaterial } from './models/stockMaterial'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import type { SetStateAction } from 'react'
@@ -21,7 +26,7 @@ import { MachinePage } from './ui/MachinePage'
 import { buildExportSnapshot } from './machine/exportSnapshot'
 import { loadMachineRun, saveMachineRun } from './storage/machineRunsStore'
 import { OrdersPage } from './ui/OrdersPage'
-import { nestOrder, prepareOrderSheet, type AddOrderRequest, type NestProgress } from './orders/addOrderToSheet'
+import { nestOrder, prepareOrderAdditions, prepareOrderSheet, type AddOrderRequest, type NestProgress } from './orders/addOrderToSheet'
 import { BoxStockPage } from './ui/BoxStockPage'
 import { originalFinalDepth } from './gcode/depth'
 import { exportCombinedGCode, exportPhysicalSheetGCodes } from './gcode/exporter'
@@ -44,7 +49,6 @@ import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
 import { footprintsOverlap, instanceFootprint, polygonBounds } from './gcode/footprint'
 import { AutoNestButton } from './ui/AutoNestButton'
-import { addItemToSheet } from './nesting/addItemToSheet'
 import { downloadText, loadProject, saveProject } from './storage/projectStorage'
 import { copyProjectToAccount, privateProject } from './storage/accountProject'
 import { supabase } from './storage/supabaseClient'
@@ -56,6 +60,7 @@ import {
   loadRemoteItemComponents,
   saveRemoteComponent,
   saveRemoteCutSide,
+  saveRemoteMaterials,
   saveRemoteItemImage,
   saveRemoteProject,
   saveRemoteSheetHistory,
@@ -142,6 +147,7 @@ function pruneMissingSheetInstances(sheet: Sheet, availableParts: { id: string }
   return {
     ...sheet,
     instances: sheet.instances.filter((instance) => partIds.has(instance.partId)),
+    pendingParts: sheet.pendingParts?.filter(instance => partIds.has(instance.partId)),
   }
 }
 
@@ -295,6 +301,10 @@ function newItem(name = 'Untitled Item', uploadedBy?: string, ownerId?: string):
   }
 }
 
+interface AllocationRequest {
+  name: string; parts: Part[]; sheet: Sheet; additions: PartInstance[]; startIndex: number
+  apply: (sheet: Sheet) => void; cancel: () => void
+}
 interface AppPersistenceState {
   workspace?: SheetWorkspace
   items: MarketplaceItem[]
@@ -459,6 +469,7 @@ function App() {
   const loadingItems = useRef(new Map<string, Promise<Part[]>>())
   const [workspace, replaceWorkspace] = useState<SheetWorkspace>(() => newWorkspace(normalizeSheet(initialState.sheet)))
   const [workspaceSaveError, setWorkspaceSaveError] = useState('')
+  const [allocation, setAllocation] = useState<AllocationRequest>()
   const [recoverableWorkspace, setRecoverableWorkspace] = useState<SheetWorkspace>()
   const [savedWorkspaceAt, setSavedWorkspaceAt] = useState('')
   const workspaceRef = useRef(workspace)
@@ -486,7 +497,7 @@ function App() {
     setPage('sheet')
   }
   function addJob() {
-    const job = newProductionJob({ ...defaultSheet, materialProfile: sheet.materialProfile, material: sheet.material, name: today() })
+    const job = newProductionJob({ ...defaultSheet, ...sheetMaterial(sheet, currentSheetIndex), name: today() })
     setWorkspace(current => ({ activeId: job.id, jobs: [...current.jobs, job] }))
     setActiveSheetIndex(0); setSelectedInstanceId(undefined); setPendingExport(undefined); setPage('sheet')
   }
@@ -609,7 +620,7 @@ function App() {
   const catalogueComponents = useMemo(() => [...new Map<ComponentSummary['id'], ComponentSummary>([...componentIndex, ...parts.map(summarizePart)].map(part => [part.id, part])).values()], [componentIndex, parts])
   const sheetReady = sheet.instances.every(instance => parts.some(part => part.id === instance.partId))
   const requiredSheetItems = JSON.stringify([...new Set([
-    ...sheet.instances.flatMap(instance => { const part = catalogueComponents.find(part => part.id === instance.partId); return part?.itemId ? [part.itemId] : [] }),
+    ...[...sheet.instances, ...(sheet.pendingParts ?? [])].flatMap(instance => { const part = catalogueComponents.find(part => part.id === instance.partId); return part?.itemId ? [part.itemId] : [] }),
     ...(selectedItemId ? [selectedItemId] : []),
   ])])
   useEffect(() => {
@@ -656,13 +667,14 @@ function App() {
     return false
   }
 
-  const sheetParts = useMemo(() => selectMaterialParts(parts, sheet).parts, [parts, sheet])
+  const sheetCount = sheetCountFor(sheet)
+  const currentSheetIndex = Math.min(activeSheetIndex, sheetCount - 1)
+  const currentMaterial = sheetMaterial(sheet, currentSheetIndex)
+  const sheetParts = useMemo(() => selectMaterialParts(parts, physicalSheet(sheet, currentSheetIndex)).parts, [parts, sheet, currentSheetIndex])
   const selectedInstance = sheet.instances.find((instance) => instance.id === selectedInstanceId)
   const selectedInstancePart = selectedInstance ? sheetParts.find((part) => part.id === selectedInstance.partId) : undefined
   const selectedItem = items.find((item) => item.id === selectedItemId)
   const visibleParts = selectedItemId ? sheetParts.filter((part) => part.itemId === selectedItemId) : []
-  const sheetCount = sheetCountFor(sheet)
-  const currentSheetIndex = Math.min(activeSheetIndex, sheetCount - 1)
   const issues = useMemo(() => sheetReady ? validateSheet(parts, sheet) : [], [parts, sheet, sheetReady])
   const errors = issues.filter((issue) => issue.level === 'error')
   const warnings = issues.filter((issue) => issue.level === 'warning')
@@ -1073,6 +1085,11 @@ function App() {
     } catch (error) { if (accountRef.current === userId) setStatus(`Component was not removed: ${errorMessage(error)}`) }
   }
 
+  function changePhysicalMaterial(setup: SheetMaterial) {
+    try { setSheet(setSheetMaterial(sheet, currentSheetIndex, setup)); setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined) }
+    catch(error) { setStatus(errorMessage(error)) }
+  }
+
   async function saveCutSide(partId: string, cutSide: CutSide) {
     const part = parts.find(candidate => candidate.id === partId)
     const item = items.find(candidate => candidate.id === part?.itemId)
@@ -1086,6 +1103,14 @@ function App() {
     const parent = items.find(item => item.id === parts.find(part => part.id === partId)?.itemId)
     if (parent?.version?.status === 'draft') { setStatus('This item version is incomplete. Reload the catalogue before adding it.'); return }
     const part = parts.find(candidate => candidate.id === partId)
+    if (part && (requiredMaterial(part) || hasSheetMaterials(sheet))) {
+      try {
+        const next = allocateMaterials(parts, planningSheet, [newInstance(partId, x, y, currentSheetIndex)], currentSheetIndex)
+        const added = next.instances.at(-1)!
+        setSheet(next); setActiveSheetIndex(added.sheetIndex); setStatus(`Added ${part.name} to matching Sheet ${added.sheetIndex + 1}.`)
+      } catch(error) { setStatus(errorMessage(error)) }
+      return
+    }
     const currentIsClosed = planningSheet.unavailableSheetIndices.includes(currentSheetIndex)
     const side = sheetCutSide(catalogueComponents, sheet, currentSheetIndex)
     if (part && (currentIsClosed || side === 'mixed' || !compatibleCutSides(side, part.cutSide))) {
@@ -1118,17 +1143,28 @@ function App() {
     const latest = orderSheetInputs.current
     if (componentEpoch.current !== epoch || accountRef.current !== userId || initial.sheet !== latest.sheet || initial.items !== latest.items) throw new Error('Your sheet or catalogue changed. Try again.')
     if (latest.sheet.instances.some(instance => !latest.parts.some(part => part.id === instance.partId))) throw new Error('The sheet contains unavailable components. Refresh before adding this item.')
-    const next = addItemToSheet(item, latest.parts, { ...latest.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex)
-    const count = next.instances.length - latest.sheet.instances.length
-    setSheet(next)
-    setStatus(`Added all ${count} components of ${item.name} to the sheet.`)
-    return count
+    const additions = latest.parts.filter(part => part.itemId === item.id).map(part => newInstance(part.id, sheet.borderSpacing, sheet.borderSpacing, currentSheetIndex))
+    if (!additions.length) throw new Error('This item has no components.')
+    if (!hasSheetMaterials(latest.sheet) && !latest.parts.some(p => p.itemId === item.id && requiredMaterial(p))) {
+      setSheet(addItemToSheet(item, latest.parts, { ...latest.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex))
+      return additions.length
+    }
+    const before = workspaceRef.current, owner = userId
+    return new Promise<number>((resolve, reject) => setAllocation({ name: item.name, parts: latest.parts, sheet: { ...latest.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, additions, startIndex: currentSheetIndex,
+      cancel: () => { setAllocation(undefined); resolve(0) },
+      apply: next => {
+        if (workspaceRef.current !== before || accountRef.current !== owner) { setAllocation(undefined); reject(new Error('The job or account changed. Review the allocation again.')); return }
+        setSheet(next); setAllocation(undefined)
+        setStatus(`Added ${additions.length} parts: ${next.pendingParts?.length ?? 0} awaiting allocation.`)
+        resolve(additions.length)
+      },
+    }))
   }
 
   async function addOrderToSheet(request: AddOrderRequest, signal: AbortSignal, onProgress: (progress: NestProgress) => void) {
     if (!userId || accountRef.current !== userId || loadedAccountId !== userId) throw new Error('Wait for your account catalogue to finish loading.')
     const importKey = `${request.shop}/${request.order.id}`
-    if (workspaceRef.current.jobs.some(job => job.sheet.orderImports?.some(order => order.key === importKey && order.instanceIds.some(id => job.sheet.instances.some(i => i.id === id))))) throw new Error(`${request.order.name} is already included in a cutting job.`)
+    if (workspaceRef.current.jobs.some(job => [...job.sheet.instances, ...(job.sheet.pendingParts ?? [])].some(i => i.orderKey === importKey || job.sheet.orderImports?.some(order => order.key === importKey && order.instanceIds.includes(i.id))))) throw new Error(`${request.order.name} is already included in a cutting job.`)
     const initial = orderSheetInputs.current
     const epoch = componentEpoch.current
     const required = new Set([...Object.values(request.matches), ...initial.sheet.instances.flatMap(instance => {
@@ -1141,6 +1177,25 @@ function App() {
     }
     const snapshot = orderSheetInputs.current
     if (signal.aborted || accountRef.current !== userId || componentEpoch.current !== epoch || initial.sheet !== snapshot.sheet || initial.items !== snapshot.items) throw new Error('Your sheet or catalogue changed. Try again.')
+    const requested = prepareOrderAdditions(request, snapshot.items, snapshot.parts, snapshot.sheet, userId)
+    if (hasSheetMaterials(snapshot.sheet) || snapshot.parts.some(p => requested.additions.some(i => i.partId === p.id) && requiredMaterial(p))) {
+      const before = workspaceRef.current, owner = userId
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => { signal.removeEventListener('abort', cancel); setAllocation(undefined); reject(new Error('Adding order cancelled.')) }
+        signal.addEventListener('abort', cancel, { once: true })
+        setAllocation({ name: request.order.name, parts: snapshot.parts, sheet: { ...snapshot.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, additions: requested.additions, startIndex: currentSheetIndex, cancel,
+          apply: next => {
+            if (signal.aborted || workspaceRef.current !== before || accountRef.current !== owner) { cancel(); return }
+            signal.removeEventListener('abort', cancel)
+            setSheet({ ...next, orderNumber: [...new Set([next.orderNumber, request.order.name].filter(Boolean))].join(', '), orderImports: [...(next.orderImports ?? []), { key: requested.key, name: request.order.name, instanceIds: requested.additions.map(i => i.id) }] })
+            setAllocation(undefined); setPendingExport(undefined); setPreview(undefined); setSelectedInstanceId(undefined)
+            resolve()
+          },
+        })
+      })
+      setPage('sheet'); setStatus(`Added ${requested.additions.length} parts for ${request.order.name}. Review allocated sheets and any parts awaiting material.`)
+      return
+    }
     const prepared = prepareOrderSheet(request, snapshot.items, snapshot.parts, { ...snapshot.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex)
     const instances = await nestOrder(prepared.parts, prepared.sheet, signal, onProgress)
     const latest = orderSheetInputs.current
@@ -1158,7 +1213,7 @@ function App() {
     const owner = userId, epoch = componentEpoch.current
     if (!owner || loadedAccountId !== owner) throw new Error('Wait for your catalogue to load.')
     const current = orderSheetInputs.current
-    const ids = new Set(jobs.flatMap(job => job.sheet.instances.map(i => i.partId)))
+    const ids = new Set(jobs.flatMap(job => [...job.sheet.instances, ...(job.sheet.pendingParts ?? [])].map(i => i.partId)))
     const itemIds = new Set([...current.componentIndex, ...current.parts].filter(part => ids.has(part.id)).flatMap(part => part.itemId ? [part.itemId] : []))
     for (const id of itemIds) await ensureItemComponents(id)
     if (accountRef.current !== owner || componentEpoch.current !== epoch) throw new Error('Your account or catalogue changed. Try again.')
@@ -1230,11 +1285,11 @@ function App() {
     const latest = orderSheetInputs.current, part = latest.parts.find(part => part.id === partId), item = latest.items.find(item => item.id === itemId)
     if (!part || !item) throw new Error('The original component revision is unavailable.')
     const profile = run.snapshot.materialProfile ?? materialProfiles.find(profile => profile.label === run.snapshot.thickness)?.id
-    if (sheet.instances.length && (sheet.materialProfile !== profile || (sheet.material ?? '').trim().toLowerCase() !== run.snapshot.material.trim().toLowerCase())) throw new Error(`Select a job using ${run.snapshot.thickness} ${run.snapshot.material}, or create an empty job for this replacement.`)
-    const target = sheet.instances.length ? planningSheet : { ...planningSheet, materialProfile: profile, material: run.snapshot.material }
-    const next = addItemToSheet(item, latest.parts, target, owner, currentSheetIndex, [part.id])
+    const sourceSetup = run.snapshot.sheets?.find(s => s.index === entry.sheet_index)?.materialSetup ?? { materialProfile: profile, material: run.snapshot.material }
+    const replacement = { ...newInstance(part.id, sheet.borderSpacing, sheet.borderSpacing, currentSheetIndex), materialSetup: sourceSetup }
+    const next = allocateMaterials(latest.parts, planningSheet, [replacement], currentSheetIndex)
     const added = next.instances.at(-1)!
-    added.recutId = entry.id; added.orderName = entry.order_number
+    added.recutId = entry.id; added.orderName = entry.order_number; added.orderKey = source.orderKey
     setSheet(next); setSelectedInstanceId(added.id); setActiveSheetIndex(added.sheetIndex); setPage('sheet')
     setPendingExport(undefined); setPreview(undefined)
     setStatus(`Added replacement ${entry.part_number} to Sheet ${added.sheetIndex + 1}. Review and export the updated layout.`)
@@ -1419,21 +1474,21 @@ function App() {
   }
 
   function exportSummary(exportWarnings: string[], simulations: GCodeSimulation[], target: Sheet): ExportSummary {
-    const targetParts = selectMaterialParts(parts, target).parts
+    const selectedSheets = sheetIndices(target).map(index => { const sheet = physicalSheet(target, index); return { index, sheet, parts: selectMaterialParts(parts, sheet).parts } })
     const estimatedCuttingTimeSeconds = simulations.reduce((total, simulation) => total + simulation.estimatedSeconds, 0)
     return {
       sheetName: target.name.trim() || defaultSheet.name,
       physicalSheets: sheetIndices(target).length,
       placedParts: target.instances.length,
       uniqueComponents: new Set(target.instances.map((instance) => instance.partId)).size,
-      deepestCutMm: deepestSourceCut(targetParts, target),
+      deepestCutMm: Math.max(0, ...selectedSheets.map(s => deepestSourceCut(s.parts, s.sheet) ?? 0)),
       safeZ: effectiveSafeZ(target),
       estimatedCuttingTimeSeconds,
       simulatedDistanceMm: simulations.reduce((total, simulation) => total + simulation.totalDistanceMm, 0),
       simulationErrors: simulations.reduce((total, simulation) => total + simulation.errors.length, 0),
       simulationWarnings: simulations.reduce((total, simulation) => total + simulation.warnings.length, 0),
       reachCheckEnabled: target.instances.length > 0,
-      screwMarkCount: sheetIndices(target).map(index => planScrewPositions(targetParts, target, index).points.length).reduce((total, count) => total + count, 0),
+      screwMarkCount: selectedSheets.map(s => planScrewPositions(s.parts, s.sheet, s.index).points.length).reduce((total, count) => total + count, 0),
       spindleStartEnabled: target.gcodeSettings.spindleStartGcode.trim().length > 0,
       validationErrors: errors.length,
       validationWarnings: warnings.length,
@@ -1582,7 +1637,7 @@ function App() {
           <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
         </nav>
         {loadedAccountId === userId && (page === 'sheet' || page === 'history') && <div className="production-tabs" role="tablist" aria-label="Open cutting jobs">
-          {workspace.jobs.filter(job => !job.archived && (!job.sheet.instances.length || waitingSheetIndices(job).length)).map((job, index) => <button type="button" role="tab" aria-selected={job.id === activeJob.id} key={job.id} disabled={exportBusy} onClick={() => openJob(job.id)}>{job.name} · {materialProfiles.find(p => p.id === job.sheet.materialProfile)?.thickness ?? 'Original'} mm · {index + 1}</button>)}
+          {workspace.jobs.filter(job => !job.archived && (!job.sheet.instances.length || job.sheet.pendingParts?.length || waitingSheetIndices(job).length)).map((job, index) => <button type="button" role="tab" aria-selected={job.id === activeJob.id} key={job.id} disabled={exportBusy} onClick={() => openJob(job.id)}>{job.name} · {new Set(job.sheet.instances.map(i => JSON.stringify(i.materialSetup ?? {}))).size > 1 ? 'Mixed materials' : sheetMaterial(job.sheet, job.sheet.instances[0]?.sheetIndex ?? 0).stockMaterial ? stockLabel(sheetMaterial(job.sheet, job.sheet.instances[0]?.sheetIndex ?? 0).stockMaterial) : 'Sheets'} · {index + 1}</button>)}
           <button type="button" disabled={exportBusy} onClick={addJob}>New job</button>
           <button type="button" disabled={exportBusy || activeJob.archived || Object.values(activeJob.sheets).some(sheet => sheet.stage === 'cutting')} title="Remove this job and its waiting parts; keep previous exports and cut-sheet records. Mark any cutting sheets cut first." onClick={() => removeJob(activeJob.id)}>Remove job</button>
         </div>}
@@ -1597,19 +1652,21 @@ function App() {
           </label>
           <label className="sheet-name-control">
             Material
-            <input value={sheet.material ?? ''} onChange={(event) => setSheet({ ...sheet, material: event.target.value })} />
+            <input value={currentMaterial.material ?? ''} onChange={(event) => changePhysicalMaterial({ ...currentMaterial, material: event.target.value })} />
           </label>
           <label>
-            Thickness
-            <select aria-label="Sheet material thickness" value={sheet.materialProfile ?? ''} onChange={event => {
-              setSheet({ ...sheet, materialProfile: event.target.value ? event.target.value as MaterialProfileId : undefined })
+            Cutting preset
+            <select aria-label="Sheet cutting preset" value={currentMaterial.materialProfile ?? ''} onChange={event => {
+              changePhysicalMaterial({ ...currentMaterial, materialProfile: event.target.value ? event.target.value as MaterialProfileId : undefined })
               setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
-              setStatus('Sheet material changed. Review the updated machining before export.')
+              setStatus('Cutting preset changed for this sheet. Its actual stock is unchanged.')
             }}>
               <option value="">Original NC</option>
               {materialProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
             </select>
           </label>
+          <label><input type="checkbox" checked={Boolean(currentMaterial.stockMaterial)} onChange={e => changePhysicalMaterial({ ...currentMaterial, stockMaterial: e.target.checked ? { thicknessMm: 12, type: 'Plywood', finish: 'Natural' } : undefined })} /> Specify actual stock</label>
+          {currentMaterial.stockMaterial && <StockFields label={`Sheet ${currentSheetIndex + 1}`} value={currentMaterial.stockMaterial} onChange={stockMaterial => changePhysicalMaterial({ ...currentMaterial, stockMaterial })} disabled={planningSheet.unavailableSheetIndices.includes(currentSheetIndex)} />}
           <label>
             W
             <input type="number" value={sheet.width} onChange={(event) => setSheet({ ...sheet, width: Number(event.target.value) })} />
@@ -1662,6 +1719,7 @@ function App() {
       {loadedAccountId === userId && <div className="workspace-save-status" role="status">{workspaceSaveError ? <>Cloud save failed: {workspaceSaveError} <button type="button" onClick={() => void saveCurrentProject()}>Retry save</button><button type="button" onClick={() => setLibraryReload(value => value + 1)}>Reload saved plan</button></> : savedWorkspaceAt === workspace.updatedAt ? 'All job tabs saved' : 'Saving job tabs…'}{recoverableWorkspace && <button type="button" onClick={() => void downloadWorkspaceRecovery()}>Download unsaved recovery</button>}</div>}
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
+      {allocation && <MaterialAllocationDialog name={allocation.name} parts={allocation.parts} sheet={allocation.sheet} additions={allocation.additions} startIndex={allocation.startIndex} onApply={allocation.apply} onCancel={allocation.cancel} />}
       {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
@@ -1678,6 +1736,10 @@ function App() {
           onImportComponents={(itemId, files) => void importFilesForItem(itemId, files)}
           onDeleteComponent={deleteComponent}
           onAddToSheet={addPart}
+          onSaveMaterials={async (item, stock, overrides) => {
+            if (!userId || !canEditItem(item)) throw new Error('This item is read-only.')
+            await saveRemoteMaterials(item, stock, overrides, userId)
+          }}
           onSaveCutSide={saveCutSide}
           onAddItemToSheet={addAllItemComponents}
           onOpenSheet={() => setPage('sheet')}
@@ -1702,6 +1764,10 @@ function App() {
             onSelect={setSelectedPartId}
           />
           <main className="sheet-stage">
+            {Boolean(sheet.pendingParts?.length) && <section className="pending-materials"><strong>{sheet.pendingParts!.length} parts awaiting material allocation</strong><ul>{sheet.pendingParts!.map(i => <li key={i.id}>{parts.find(p => p.id === i.partId)?.name ?? i.partId} · {stockLabel(parts.find(p => p.id === i.partId) ? requiredMaterial(parts.find(p => p.id === i.partId)!) : undefined)}</li>)}</ul><button type="button" onClick={() => {
+              try { setSheet(allocateMaterials(parts, { ...planningSheet, pendingParts: [] }, sheet.pendingParts!, currentSheetIndex)) } catch(e) { setStatus(errorMessage(e)) }
+            }}>Allocate remaining parts</button></section>}
+
             <div className="sheet-tabs" aria-label="Physical sheets">
               {Array.from({ length: sheetCount }, (_, index) => (
                 <button
@@ -1713,7 +1779,7 @@ function App() {
                     setSelectedInstanceId(undefined)
                   }}
                 >
-                  Sheet {index + 1}
+                  Sheet {index + 1}{sheetMaterial(sheet, index).stockMaterial ? ` · ${stockLabel(sheetMaterial(sheet, index).stockMaterial)}` : ''}
                 </button>
               ))}
               <button

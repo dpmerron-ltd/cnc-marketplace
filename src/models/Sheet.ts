@@ -1,5 +1,6 @@
 import type { PartInstance } from './PartInstance'
 import type { MaterialProfileId } from '../cam/materialProfiles'
+import type { SheetMaterial, StockMaterial } from './stockMaterial'
 
 export interface GCodeSettings {
   startGcode: string
@@ -17,6 +18,9 @@ export interface GCodePreset {
 }
 
 export interface Sheet {
+  pendingParts?: PartInstance[]
+  stockMaterial?: StockMaterial
+  sheetMaterials?: Record<number, SheetMaterial>
   name: string
   unavailableSheetIndices?: number[]
   orderNumber?: string

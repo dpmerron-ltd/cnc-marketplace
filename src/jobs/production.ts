@@ -1,3 +1,4 @@
+import { hasSheetMaterials, physicalSheet, snapshotMaterials } from '../models/stockMaterial'
 import type { Sheet } from '../models/Sheet'
 import type { Part } from '../models/Part'
 import { autoNest } from '../nesting/nestingEngine'
@@ -37,8 +38,8 @@ export function waitingSheetIndices(job: ProductionJob): number[] {
 }
 export function sheetSignature(sheet: Sheet, index: number): string {
   // Catalogue component IDs identify immutable revisions. Ignore names and other sheets.
-  const { instances, name: _name, orderImports: _imports, orderNumber: _order, nextPartNumber: _next, unavailableSheetIndices: _blocked, ...settings } = sheet
-  return JSON.stringify({ settings, instances: instances.filter(i => i.sheetIndex === index).map(({ locked: _locked, orderName: _orderName, ...i }) => i) })
+  const { pendingParts: _pending, sheetMaterials: _materials, instances, name: _name, orderImports: _imports, orderNumber: _order, nextPartNumber: _next, unavailableSheetIndices: _blocked, ...settings } = physicalSheet(sheet, index)
+  return JSON.stringify({ settings, instances: instances.filter(i => i.sheetIndex === index).map(({ materialSetup: _material, locked: _locked, orderName: _orderName, ...i }) => i) })
 }
 export function sheetNeedsExport(job: ProductionJob, index: number): boolean {
   const state = job.sheets[index]
@@ -64,13 +65,8 @@ export function planWaitingSheets(job: ProductionJob, parts: Part[]): Production
   const closed = new Set(sheetIndices(job.sheet).filter(i => job.sheets[i]?.stage && job.sheets[i].stage !== 'waiting'))
   const waiting = job.sheet.instances.filter(i => !closed.has(i.sheetIndex))
   if (!waiting.length) return job
-  const openIndices: number[] = []
-  for (let i = 0; openIndices.length < waiting.length; i++) if (!closed.has(i)) openIndices.push(i)
-  const nested = autoNest(parts, { ...job.sheet, instances: waiting.map(i => ({ ...i, locked: false, sheetIndex: 0 })) })
-  const sheet = numberSheetParts({ ...job.sheet, instances: [
-    ...job.sheet.instances.filter(i => closed.has(i.sheetIndex)),
-    ...nested.map(i => ({ ...i, sheetIndex: openIndices[i.sheetIndex] })),
-  ] })
+  const nested = autoNest(parts, { ...job.sheet, unavailableSheetIndices: [...closed], instances: job.sheet.instances.map(i => closed.has(i.sheetIndex) ? i : { ...i, locked: false }) })
+  const sheet = numberSheetParts({ ...job.sheet, instances: nested })
   return updateProductionSheet(job, sheet)
 }
 export function waitingExportSheet(job: ProductionJob): Sheet {
@@ -88,12 +84,12 @@ export function removeProductionJob(workspace: SheetWorkspace, id: string): Shee
   const keepRecord = job.revision > 0 || Object.values(job.sheets).some(sheet => sheet.runId || sheet.stage === 'cut')
   const retained = job.sheet.instances.filter(instance => job.sheets[instance.sheetIndex]?.stage === 'cut')
   const jobs = keepRecord
-    ? workspace.jobs.map(candidate => candidate.id === id ? { ...job, archived: true, sheet: { ...job.sheet, instances: retained } } : candidate)
+    ? workspace.jobs.map(candidate => candidate.id === id ? { ...job, archived: true, sheet: { ...job.sheet, pendingParts: [], instances: retained } } : candidate)
     : workspace.jobs.filter(candidate => candidate.id !== id)
   let active = jobs.find(candidate => candidate.id === workspace.activeId && !candidate.archived)
     ?? jobs.find(candidate => !candidate.archived && (!candidate.sheet.instances.length || waitingSheetIndices(candidate).length))
   if (!active) {
-    active = newProductionJob({ ...job.sheet, name: today(), instances: [], orderNumber: undefined, orderImports: undefined, nextPartNumber: undefined })
+    active = newProductionJob({ ...job.sheet, name: today(), instances: [], pendingParts: [], sheetMaterials: undefined, orderNumber: undefined, orderImports: undefined, nextPartNumber: undefined })
     jobs.push(active)
   }
   return { ...workspace, activeId: active.id, jobs }
@@ -104,23 +100,37 @@ export function replanWorkspace(workspace: SheetWorkspace, parts: Part[]): Sheet
   for (const job of workspace.jobs) {
     if (job.archived || !waitingSheetIndices(job).length) continue
     const sheet = job.sheet
-    const key = JSON.stringify([sheet.materialProfile, sheet.material?.trim().toLowerCase(), sheet.width, sheet.height, sheet.spacing, sheet.borderSpacing, sheet.safeZOverrideMm, sheet.screwMarkingEnabled, sheet.gcodeSettings])
+    const key = JSON.stringify([sheet.width, sheet.height, sheet.spacing, sheet.borderSpacing, sheet.safeZOverrideMm, sheet.screwMarkingEnabled, sheet.gcodeSettings, hasSheetMaterials(sheet) ? 'configured' : [sheet.material, sheet.materialProfile]])
     groups.set(key, [...(groups.get(key) ?? []), job])
   }
   const replacements = new Map<string, ProductionJob>()
   for (const group of groups.values()) {
     const target = group[0]
-    const additions = group.flatMap(job => job.sheet.instances.filter(i => (job.sheets[i.sheetIndex]?.stage ?? 'waiting') === 'waiting').map(i => ({
+    const additions = group.flatMap(job => snapshotMaterials(job.sheet).filter(i => (job.sheets[i.sheetIndex]?.stage ?? 'waiting') === 'waiting').map(i => ({
       ...i, partNumber: job.id === target.id ? i.partNumber : undefined,
       orderName: i.orderName || job.sheet.orderImports?.find(order => order.instanceIds.includes(i.id))?.name || job.sheet.orderNumber,
+      orderKey: i.orderKey || job.sheet.orderImports?.find(order => order.instanceIds.includes(i.id))?.key,
     })))
     const retained = target.sheet.instances.filter(i => target.sheets[i.sheetIndex]?.stage && target.sheets[i.sheetIndex].stage !== 'waiting')
     const firstOpen = Array.from({ length: retained.length + 1 }, (_, i) => i).find(i => !target.sheets[i]?.stage || target.sheets[i].stage === 'waiting')!
     const merged = { ...target, sheet: numberSheetParts({ ...target.sheet, instances: [...retained, ...additions.map(i => ({ ...i, sheetIndex: firstOpen }))] }) }
     replacements.set(target.id, planWaitingSheets(merged, parts))
-    for (const job of group.slice(1)) replacements.set(job.id, { ...job, archived: !job.sheet.instances.some(i => job.sheets[i.sheetIndex]?.stage && job.sheets[i.sheetIndex].stage !== 'waiting'), sheet: { ...job.sheet, instances: job.sheet.instances.filter(i => job.sheets[i.sheetIndex]?.stage && job.sheets[i.sheetIndex].stage !== 'waiting') } })
+    for (const job of group.slice(1)) replacements.set(job.id, { ...job, archived: !job.sheet.pendingParts?.length && !job.sheet.instances.some(i => job.sheets[i.sheetIndex]?.stage && job.sheets[i.sheetIndex].stage !== 'waiting'), sheet: { ...job.sheet, instances: job.sheet.instances.filter(i => job.sheets[i.sheetIndex]?.stage && job.sheets[i.sheetIndex].stage !== 'waiting') } })
   }
   const jobs = workspace.jobs.map(job => replacements.get(job.id) ?? job)
   const activeId = jobs.find(job => job.id === workspace.activeId && !job.archived)?.id ?? jobs.find(job => !job.archived)!.id
   return { ...workspace, activeId, jobs }
+}
+
+export function orderProgress(jobs: ProductionJob[]) {
+  const orders = new Map<string, { name: string; pending: number; waiting: number; cutting: number; cut: number }>()
+  for (const job of jobs) for (const [instances, pending] of [[job.sheet.instances, false], [job.sheet.pendingParts ?? [], true]] as const) for (const instance of instances) {
+    const imported = job.sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))
+    const key = instance.orderKey ?? imported?.key ?? instance.orderName
+    if (!key) continue
+    const progress = orders.get(key) ?? { name: instance.orderName ?? imported?.name ?? key, pending: 0, waiting: 0, cutting: 0, cut: 0 }
+    progress[pending ? 'pending' : job.sheets[instance.sheetIndex]?.stage ?? 'waiting']++
+    orders.set(key, progress)
+  }
+  return [...orders.values()]
 }

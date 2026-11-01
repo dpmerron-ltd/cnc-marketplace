@@ -1,3 +1,4 @@
+import { physicalSheet } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import type { Bounds, Point } from '../models/geometry'
@@ -16,6 +17,7 @@ export interface TabLocation {
   inferred: boolean
 }
 export interface TabMapPart {
+  orderKey?: string
   partId?: string
   itemId?: string
   number: string
@@ -113,9 +115,11 @@ export function locatePartTabs(part: Part) {
 }
 
 export function buildTabMap(parts: Part[], input: Sheet): TabMap {
-  const selection = selectMaterialParts(parts, input)
-  if (selection.errors.length) throw new Error(selection.errors.join(' '))
-  parts = selection.parts
+  const selected = new Map([...new Set(input.instances.map(i => i.sheetIndex))].map(index => {
+    const selection = selectMaterialParts(parts, physicalSheet(input, index))
+    if (selection.errors.length) throw new Error(selection.errors.join(' '))
+    return [index, selection.parts] as const
+  }))
   if (![input.width, input.height].every(value => Number.isFinite(value) && value > 0)) throw new Error('Tab maps require valid sheet dimensions.')
   if (!input.instances.length) throw new Error('Place parts on the sheet before downloading a tab map.')
   const sheet = numberSheetParts(input)
@@ -125,15 +129,16 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
     sheetCount: Math.max(...sheet.instances.map(instance => instance.sheetIndex)) + 1,
     cutSides: Array.from({ length: Math.max(...sheet.instances.map(instance => instance.sheetIndex)) + 1 }, (_, index) => sheetCutSide(parts, sheet, index)),
     parts: [...sheet.instances].sort((a, b) => a.sheetIndex - b.sheetIndex).map(instance => {
-      const part = parts.find(part => part.id === instance.partId)
+      const part = selected.get(instance.sheetIndex)!.find(part => part.id === instance.partId)
       if (!part) throw new Error('A placed component is missing. Reopen export after restoring or removing it.')
       const bounds = instanceBounds(part, instance)
       if (!isFiniteBounds(bounds)) throw new Error(`${part.name}: invalid machining bounds.`)
-      if (!cache.has(part.id)) cache.set(part.id, locatePartTabs(part))
-      const source = cache.get(part.id)!
+      const cacheKey = `${instance.sheetIndex}/${part.id}`
+      if (!cache.has(cacheKey)) cache.set(cacheKey, locatePartTabs(part))
+      const source = cache.get(cacheKey)!
       const transform = (point: Point) => transformLocalPoint(part, instance, point)
       return {
-        partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
+        orderKey: instance.orderKey ?? sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))?.key, partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
         paths: source.paths.map(path => path.map(transform)),
         tabs: source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: source.warnings,
       }

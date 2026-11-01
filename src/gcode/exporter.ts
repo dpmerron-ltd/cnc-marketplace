@@ -1,3 +1,4 @@
+import { physicalSheet, stockErrors, stockLabel } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { isFiniteBounds } from '../models/geometry'
@@ -205,11 +206,8 @@ function transformedInstanceLines(
 }
 
 export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: ProgramSettings): ExportResult {
-  const sideErrors = cutSideErrors(parts, sheet)
+  const sideErrors = [...cutSideErrors(parts, sheet), ...stockErrors(parts, sheet)]
   if (sideErrors.length) return { gcode: '', errors: sideErrors, warnings: [] }
-  const selection = selectMaterialParts(parts, sheet)
-  if (selection.errors.length) return { gcode: '', errors: selection.errors, warnings: [] }
-  parts = selection.parts
   const safeZ = effectiveSafeZ(sheet)
   if (programs) {
     const errors = validatePrograms(programs, safeZ)
@@ -227,13 +225,18 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
   output.push(`(Sheet name: ${commentText(sheet.name)})`)
   if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
   output.push(`(Sheet: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
-  if (sheet.materialProfile) output.push(`(Material thickness: ${commentText(materialProfiles.find(profile => profile.id === sheet.materialProfile)!.label)})`)
   output.push(`(Physical sheets: ${sheetCount})`)
   output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
 
   let instanceNumber = 0
   const usedSheetIndices = [...new Set(sheet.instances.map(instance => instance.sheetIndex))].sort((a, b) => a - b)
   for (const sheetIndex of usedSheetIndices) {
+    const current = physicalSheet(sheet, sheetIndex)
+    const selection = selectMaterialParts(parts, current)
+    if (selection.errors.length) return { gcode: '', errors: selection.errors, warnings: [] }
+    const selectedParts = selection.parts
+    output.push(`(Stock: ${commentText(current.stockMaterial ? stockLabel(current.stockMaterial) : current.material ?? 'Not specified')})`)
+    if (current.materialProfile) output.push(`(Cutting preset: ${commentText(materialProfiles.find(p => p.id === current.materialProfile)!.label)})`)
     if (sheetIndex !== usedSheetIndices[0]) {
       output.push('')
       output.push(`(Load physical sheet ${sheetIndex + 1}: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))}; align material to X0 Y0, then resume)`)
@@ -245,17 +248,17 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
     output.push('')
     output.push(`(Physical sheet ${sheetIndex + 1} of ${sheetCount})`)
     output.push(`(Load material: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))})`)
-    const reachCheck = reachCheckLines(parts, sheet, sheetIndex)
+    const reachCheck = reachCheckLines(selectedParts, current, sheetIndex)
     errors.push(...reachCheck.errors)
     output.push(...reachCheck.lines)
-    const screwMarking = screwMarkingLines(parts, sheet, sheetIndex)
+    const screwMarking = screwMarkingLines(selectedParts, current, sheetIndex)
     errors.push(...screwMarking.errors)
     warnings.push(...screwMarking.warnings)
     output.push(...screwMarking.lines)
     output.push(...sheet.gcodeSettings.spindleStartGcode.split('\n').filter(Boolean))
 
     const sheetInstanceIds = sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex).map((instance) => instance.id)
-    const transformed = transformedInstanceLines(parts, sheet, sheetInstanceIds, instanceNumber)
+    const transformed = transformedInstanceLines(selectedParts, current, sheetInstanceIds, instanceNumber)
     instanceNumber = transformed.nextInstanceNumber
     errors.push(...transformed.errors)
     warnings.push(...transformed.warnings)
@@ -272,11 +275,8 @@ export function exportCombinedGCode(parts: Part[], sheet: Sheet, programs?: Prog
 
 export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?: ProgramSettings): SheetExportResult[] {
   const sheetCount = Math.max(1, ...sheet.instances.map((instance) => instance.sheetIndex + 1))
-  const sideErrors = cutSideErrors(parts, sheet)
+  const sideErrors = [...cutSideErrors(parts, sheet), ...stockErrors(parts, sheet)]
   if (sideErrors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: sideErrors, warnings: [] }))
-  const selection = selectMaterialParts(parts, sheet)
-  if (selection.errors.length) return Array.from({ length: sheetCount }, (_, sheetIndex) => ({ sheetIndex, gcode: '', errors: selection.errors, warnings: [] }))
-  parts = selection.parts
   const safeZ = effectiveSafeZ(sheet)
   if (programs) {
     const errors = validatePrograms(programs, safeZ)
@@ -288,21 +288,26 @@ export function exportPhysicalSheetGCodes(parts: Part[], sheet: Sheet, programs?
 
   const usedSheetIndices = [...new Set(sheet.instances.map(instance => instance.sheetIndex))].sort((a, b) => a - b)
   return (usedSheetIndices.length ? usedSheetIndices : [0]).map(sheetIndex => {
+    const current = physicalSheet(sheet, sheetIndex)
+    const selection = selectMaterialParts(parts, current)
+    if (selection.errors.length) return { sheetIndex, gcode: '', errors: selection.errors, warnings: [] }
+    const selectedParts = selection.parts
     const output: string[] = []
     const sheetInstanceIds = sheet.instances.filter((candidate) => candidate.sheetIndex === sheetIndex).map((instance) => instance.id)
-    const transformed = transformedInstanceLines(parts, sheet, sheetInstanceIds)
+    const transformed = transformedInstanceLines(selectedParts, current, sheetInstanceIds)
 
     output.push('(CNC sheet program generated by Sheet Builder)')
+    output.push(`(Stock: ${commentText(current.stockMaterial ? stockLabel(current.stockMaterial) : current.material ?? 'Not specified')})`)
     output.push(`(Sheet name: ${commentText(sheet.name)})`)
     if (sheet.orderNumber) output.push(`(Order number: ${commentText(sheet.orderNumber)})`)
     output.push(`(Physical sheet: ${sheetIndex + 1} of ${sheetCount})`)
     output.push(`(Load material: ${cutSideLabel(sheetCutSide(parts, sheet, sheetIndex))})`)
     output.push(`(Sheet size: ${formatNumber(sheet.width)} x ${formatNumber(sheet.height)} mm)`)
-    if (sheet.materialProfile) output.push(`(Material thickness: ${commentText(materialProfiles.find(profile => profile.id === sheet.materialProfile)!.label)})`)
+    if (current.materialProfile) output.push(`(Cutting preset: ${commentText(materialProfiles.find(profile => profile.id === current.materialProfile)!.label)})`)
     output.push(...(programs ? startProgramLines(programs, safeZ) : sheet.gcodeSettings.startGcode.split('\n').filter(Boolean)))
-    const reachCheck = reachCheckLines(parts, sheet, sheetIndex)
+    const reachCheck = reachCheckLines(selectedParts, current, sheetIndex)
     output.push(...reachCheck.lines)
-    const screwMarking = screwMarkingLines(parts, sheet, sheetIndex)
+    const screwMarking = screwMarkingLines(selectedParts, current, sheetIndex)
     output.push(...screwMarking.lines)
     output.push(...sheet.gcodeSettings.spindleStartGcode.split('\n').filter(Boolean))
     output.push(...transformed.lines)

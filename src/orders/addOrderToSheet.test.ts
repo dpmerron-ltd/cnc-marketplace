@@ -1,5 +1,8 @@
+import { addition, hex, materialPart, materialSheet } from '../test/materialFixtures'
+import { allocateMaterials } from '../nesting/allocateMaterials'
+import { newProductionJob, orderProgress } from '../jobs/production'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { matchOrderItems, nestOrder, prepareOrderSheet } from './addOrderToSheet'
+import { matchOrderItems, nestOrder, prepareOrderAdditions, prepareOrderSheet } from './addOrderToSheet'
 import { testItem, testParts } from '../test/jobFixtures'
 import { autoNest } from '../nesting/nestingEngine'
 import { validateSheet } from '../gcode/validator'
@@ -15,6 +18,17 @@ const request = { order, shop: 'test.myshopify.com', matches: { line1: item.id }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('add Shopify order to sheet', () => {
+  it('tracks an order across stock groups, deferred parts and cut sheets', () => {
+    const mixed = [materialPart('panel'), materialPart('hex', hex)]
+    const prepared = prepareOrderAdditions(request, [item], mixed, materialSheet(), 'alice')
+    expect(prepared.additions).toHaveLength(4)
+    const allocated = allocateMaterials(mixed, materialSheet(), prepared.additions, 0, true)
+    const job = newProductionJob(allocated)
+    job.sheets[0] = { stage: 'cut' }
+    expect(orderProgress([job])).toEqual([{ name: order.name, pending: 2, waiting: 0, cutting: 0, cut: 2 }])
+    const second = newProductionJob({ ...materialSheet(), instances: [{ ...addition('panel'), orderKey: prepared.key, orderName: order.name }] })
+    expect(orderProgress([job, second])[0]).toMatchObject({ pending: 2, cut: 2, waiting: 1 })
+  })
   it('matches unique SKUs in the shared catalogue, never guesses missing or duplicate SKUs', () => {
     expect(matchOrderItems(order, [item, { ...item, id: 'foreign', ownerId: 'bob' }], 'alice')).toEqual({ line1: '' })
     expect(matchOrderItems(order, [item], 'bob')).toEqual({ line1: item.id })

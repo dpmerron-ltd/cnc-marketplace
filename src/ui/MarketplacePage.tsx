@@ -1,3 +1,5 @@
+import { MaterialEditor } from './MaterialEditor'
+import { requiredMaterial, stockLabel, type StockMaterial } from '../models/stockMaterial'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
@@ -28,6 +30,7 @@ interface MarketplacePageProps {
   onSaveImage: (itemId: string, image: ItemImage | null) => Promise<void>
   onImportComponents: (itemId: string, files: FileList) => void
   onDeleteComponent: (partId: string) => void
+  onSaveMaterials?: (item: MarketplaceItem, stock: StockMaterial | undefined, overrides: Record<string, StockMaterial | null>) => Promise<void>
   onSaveCutSide?: (partId: string, cutSide: CutSide) => Promise<void>
   onAddToSheet: (partId: string) => void
   onAddItemToSheet: (itemId: string) => number | Promise<number>
@@ -39,7 +42,7 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onSaveCutSide, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
+export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onSaveMaterials, onSaveCutSide, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
   const [detailId, setDetailId] = useState<string>()
   const [followDefault, setFollowDefault] = useState(true)
   const [query, setQuery] = useState('')
@@ -107,7 +110,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         <div className="items-actions">
           <button type="button" disabled={adding || !componentsReady || !selectedParts.length} onClick={async () => {
             setAddError(''); setAdding(true)
-            try { const count = await onAddItemToSheet(selectedItem.id); setAdded(`${count} components from ${selectedItem.name}`) }
+            try { const count = await onAddItemToSheet(selectedItem.id); if (count) setAdded(`${count} components from ${selectedItem.name}`) }
             catch (error) { setAdded(undefined); setAddError(error instanceof Error ? error.message : 'The item could not be added.') }
             finally { setAdding(false) }
           }}><Plus size={16} /> {adding ? 'Adding components...' : 'Add all to sheet'}</button>
@@ -128,6 +131,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         <label>Description<textarea readOnly={!editable} aria-label="Description" rows={2} value={selectedItem.description} onChange={event => onUpdateItem(selectedItem.id, { description: event.target.value })} /></label>
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
+      {componentsReady && onSaveMaterials && <MaterialEditor key={selectedItem.id} item={selectedItem} parts={selectedParts} readOnly={!editable} onSave={(stock, overrides) => onSaveMaterials(selectedItem, stock, overrides)} />}
       {editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
       {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${itemFamily(selectedItem)}`} userId={currentUserId} item={selectedItem} readOnly={!editable} />}
       {componentsReady && selectedParts.length > 0 && <PackingPanel readOnly={!editable} pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
@@ -140,7 +144,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
       {!componentsReady ? <div className="items-empty">{componentLoad?.error ? <><p role="alert">{componentLoad.error}</p><button type="button" onClick={() => void onLoadComponents?.(selectedItem.id).catch(() => {})}><RefreshCw size={16} /> Retry components</button></> : <p role="status">Loading components...</p>}</div> : visibleParts.length ? <div className="items-grid items-components">
         {visibleParts.map(part => <article key={part.id} className="items-component-card">
           <ItemPreview parts={[part]} label={`${part.name} toolpath`} />
-          <div className="items-card-body"><h4>{part.name}</h4><span className="items-sku">{part.sku}</span><p>{part.width.toFixed(1)} x {part.height.toFixed(1)} mm</p><p className="items-filename">{part.originalFilename}{part.dxf ? ' + DXF' : ''}</p></div>
+          <div className="items-card-body"><h4>{part.name}</h4><span className="items-sku">{part.sku}</span><p>{part.width.toFixed(1)} x {part.height.toFixed(1)} mm</p><p>{stockLabel(requiredMaterial(part))}</p><p className="items-filename">{part.originalFilename}{part.dxf ? ' + DXF' : ''}</p></div>
           <label className="items-cut-side">Cutting side<select aria-label={`Cutting side for ${part.name}`} value={part.cutSide ?? 'either'} disabled={!editable || !onSaveCutSide || savingCutSide} onChange={async event => {
             const side = event.target.value as CutSide
             setSavingCutSide(true); setCutSideError('')

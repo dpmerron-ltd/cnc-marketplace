@@ -27,6 +27,18 @@ function fixture(): Project {
 describe('account-local projects', () => {
   beforeEach(() => localStorage.clear())
 
+  it('preserves and remaps deferred parts and material setups in project backups', () => {
+    const original = fixture()
+    original.sheet.pendingParts = [{ ...original.sheet.instances[0], id: 'pending', orderKey: 'shop/order7', materialSetup: { stockMaterial: { thicknessMm: 12, type: 'Plywood', finish: 'Natural' }, materialProfile: '13-4pass-2mm-ramp10-5deg' } }]
+    original.sheet.orderImports = [{ key: 'shop/order7', name: '#1007', instanceIds: ['pending'] }]
+    expect(privateProject(original, 'alice').sheet.pendingParts).toEqual(original.sheet.pendingParts)
+    const copy = copyProjectToAccount(original, 'bob')
+    expect(copy.sheet.pendingParts![0].partId).toBe(copy.parts[0].id)
+    expect(copy.sheet.pendingParts![0].id).not.toBe('pending')
+    expect(copy.sheet.pendingParts![0].materialSetup).toEqual(original.sheet.pendingParts[0].materialSetup)
+    expect(copy.sheet.orderImports![0].instanceIds).toEqual([copy.sheet.pendingParts![0].id])
+  })
+
   it('retains unloaded owned placements and history but preserves shared index references', () => {
     const original = fixture()
     const project = { ...original, parts: [], componentIndex: original.parts.map(summarizePart), sheetHistory: [{ id: 'history', name: '', savedAt: '', sheet: original.sheet, itemCount: 2, componentCount: 2, placedCount: 2 }] }

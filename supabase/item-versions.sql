@@ -1,5 +1,19 @@
 -- Run after schema.sql and item-documents.sql. Existing programs keep their IDs.
 begin;
+alter table public.marketplace_items add column if not exists default_material jsonb;
+alter table public.cnc_components add column if not exists stock_material jsonb;
+create or replace function public.valid_stock_material(value jsonb)
+returns boolean language sql immutable set search_path = '' as $$
+ select value is null or (jsonb_typeof(value)='object' and value ?& array['thicknessMm','type','finish']
+   and jsonb_typeof(value->'thicknessMm')='number' and (value->>'thicknessMm')::numeric > 0 and (value->>'thicknessMm')::numeric <= 100
+   and jsonb_typeof(value->'type')='string' and length(btrim(value->>'type')) between 1 and 80
+   and jsonb_typeof(value->'finish')='string' and length(btrim(value->>'finish')) between 1 and 80
+   and value - array['thicknessMm','type','finish']='{}'::jsonb)
+$$;
+alter table public.marketplace_items drop constraint if exists valid_default_material;
+alter table public.marketplace_items add constraint valid_default_material check(public.valid_stock_material(default_material));
+alter table public.cnc_components drop constraint if exists valid_component_material;
+alter table public.cnc_components add constraint valid_component_material check(public.valid_stock_material(stock_material));
 alter table public.marketplace_items add column if not exists version_family_id uuid;
 alter table public.marketplace_items add column if not exists version_number integer not null default 1;
 alter table public.marketplace_items add column if not exists version_status text not null default 'draft';
@@ -97,12 +111,12 @@ begin
   if source.version_status <> 'published' then raise exception 'ITEM_VERSION_CONFLICT: publish the draft first'; end if;
   if exists(select 1 from public.marketplace_items where version_family_id = source.version_family_id and version_status = 'draft') then raise exception 'ITEM_VERSION_CONFLICT: this item already has a draft'; end if;
   select max(version_number) + 1 into next_number from public.marketplace_items where version_family_id = source.version_family_id;
-  insert into public.marketplace_items(id,owner_id,uploaded_by,sku,name,description,packing,image,version_family_id,version_number,version_status,version_default,version_source_id)
-    values(p_id,p_actor,p_actor::text,source.sku,source.name,source.description,source.packing,source.image,source.version_family_id,next_number,'draft',false,p_source) returning * into result;
+  insert into public.marketplace_items(id,owner_id,uploaded_by,sku,name,description,packing,image,default_material,version_family_id,version_number,version_status,version_default,version_source_id)
+    values(p_id,p_actor,p_actor::text,source.sku,source.name,source.description,source.packing,source.image,source.default_material,source.version_family_id,next_number,'draft',false,p_source) returning * into result;
   for component in select * from public.cnc_components where item_id = p_source loop
     component_id := gen_random_uuid()::text;
-    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,component_source_id,cut_side)
-      values(component_id,component.owner_id,p_id,component.sku,component.name,component.original_filename,component.gcode,component.dxf,component.width,component.height,component.bounding_box,component.original_bounds,component.metadata,component.date_imported,component.material_variants,coalesce(component.component_family_id,component.id),component.id,component.cut_side);
+    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,component_source_id,cut_side,stock_material)
+      values(component_id,component.owner_id,p_id,component.sku,component.name,component.original_filename,component.gcode,component.dxf,component.width,component.height,component.bounding_box,component.original_bounds,component.metadata,component.date_imported,component.material_variants,coalesce(component.component_family_id,component.id),component.id,component.cut_side,component.stock_material);
     if source.packing->'components' ? component.id then packing_components := packing_components || jsonb_build_object(component_id,source.packing->'components'->component.id); end if;
   end loop;
   if source.packing ? 'components' then update public.marketplace_items set packing = jsonb_set(packing,'{components}',packing_components) where id = p_id returning * into result; end if;
@@ -137,7 +151,7 @@ create or replace function public.item_update_result(p_id uuid, p_changed boolea
 returns jsonb language sql security definer set search_path = '' as $$
   select jsonb_build_object('changed',p_changed,'current',to_jsonb(i),
     'previous',(select to_jsonb(previous) from public.marketplace_items previous where previous.id=i.version_source_id),
-    'components',coalesce((select jsonb_agg(jsonb_build_object('id',c.id,'owner_id',c.owner_id,'item_id',c.item_id,'sku',c.sku,'name',c.name,'original_filename',c.original_filename,'width',c.width,'height',c.height,'cut_side',c.cut_side,'component_family_id',c.component_family_id,'component_source_id',c.component_source_id,'material_profile',c.material_variants->>'primaryProfile')) from public.cnc_components c where c.item_id=i.id),'[]'::jsonb))
+    'components',coalesce((select jsonb_agg(jsonb_build_object('id',c.id,'owner_id',c.owner_id,'item_id',c.item_id,'sku',c.sku,'name',c.name,'original_filename',c.original_filename,'width',c.width,'height',c.height,'cut_side',c.cut_side,'stock_material',c.stock_material,'component_family_id',c.component_family_id,'component_source_id',c.component_source_id,'material_profile',c.material_variants->>'primaryProfile')) from public.cnc_components c where c.item_id=i.id),'[]'::jsonb))
   from public.marketplace_items i where i.id=p_id
 $$;
 
@@ -154,7 +168,13 @@ begin
   select * into current_item from public.marketplace_items where version_family_id=family and version_default;
   if not found then raise exception 'ITEM_VERSION_NOT_FOUND'; end if;
 
-  if p_action='metadata' then
+  if p_action='materials' then
+    if current_item.id::text is distinct from p_payload->>'expectedVersionId' then raise exception 'ITEM_VERSION_CONFLICT: material requirements changed'; end if;
+    if not public.valid_stock_material(nullif(p_payload->'defaultMaterial','null'::jsonb)) or jsonb_typeof(p_payload->'components') is distinct from 'object' then raise exception 'ITEM_VERSION_INVALID: invalid material'; end if;
+    for logical_id,entry in select key,value from jsonb_each(p_payload->'components') loop
+      if not exists(select 1 from public.cnc_components where id=logical_id and item_id=current_item.id) or not public.valid_stock_material(nullif(entry,'null'::jsonb)) then raise exception 'ITEM_VERSION_INVALID: invalid component material'; end if;
+    end loop;
+  elsif p_action='metadata' then
     old_metadata := jsonb_build_object('sku',current_item.sku,'name',current_item.name,'description',current_item.description,'packing',current_item.packing);
     new_metadata := p_payload->'next';
     if old_metadata=new_metadata then return public.item_update_result(current_item.id,false); end if;
@@ -168,8 +188,8 @@ begin
     for entry in select * from jsonb_array_elements(p_payload->'components') loop
       select * into component from public.cnc_components where item_id=current_item.id and coalesce(component_family_id,id)=entry->>'id';
       if found then
-        if component.owner_id<>p_actor or row(component.name,component.sku,component.gcode,component.dxf,component.material_variants,component.original_filename,component.cut_side)
-          is distinct from row(entry->>'name',entry->>'sku',entry->>'gcode',entry->>'dxf',nullif(entry->'material_variants','null'::jsonb),entry->>'original_filename',coalesce(entry->>'cut_side','either')) then raise exception 'ITEM_VERSION_CONFLICT: component ID reused'; end if;
+        if component.owner_id<>p_actor or row(component.name,component.sku,component.gcode,component.dxf,component.material_variants,component.original_filename,component.cut_side,component.stock_material)
+          is distinct from row(entry->>'name',entry->>'sku',entry->>'gcode',entry->>'dxf',nullif(entry->'material_variants','null'::jsonb),entry->>'original_filename',coalesce(entry->>'cut_side','either'),nullif(entry->'stock_material','null'::jsonb)) then raise exception 'ITEM_VERSION_CONFLICT: component ID reused'; end if;
       else
         if exists(select 1 from public.cnc_components where id=entry->>'id') then raise exception 'ITEM_VERSION_CONFLICT: component ID already exists'; end if;
         additions := additions+1;
@@ -206,7 +226,12 @@ begin
   else raise exception 'ITEM_VERSION_INVALID'; end if;
 
   next_item := public.create_item_version(p_actor,current_item.id,gen_random_uuid());
-  if p_action='metadata' then
+  if p_action='materials' then
+    update public.marketplace_items set default_material=nullif(p_payload->'defaultMaterial','null'::jsonb) where id=next_item.id;
+    for logical_id,entry in select key,value from jsonb_each(p_payload->'components') loop
+      update public.cnc_components set stock_material=nullif(entry,'null'::jsonb) where item_id=next_item.id and component_source_id=logical_id;
+    end loop;
+  elsif p_action='metadata' then
     -- Component IDs change on copy; remap per-component packing overrides.
     if new_metadata->'packing' ? 'components' then
       new_metadata := jsonb_set(new_metadata,'{packing,components}',coalesce((select jsonb_object_agg(c.id,new_metadata->'packing'->'components'->c.component_source_id) from public.cnc_components c where c.item_id=next_item.id and new_metadata->'packing'->'components' ? c.component_source_id),'{}'::jsonb));
@@ -217,8 +242,8 @@ begin
   elsif p_action='add_components' then
     for entry in select * from jsonb_array_elements(p_payload->'components') loop
       if exists(select 1 from public.cnc_components where item_id=next_item.id and component_family_id=entry->>'id') then continue; end if;
-      insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,cut_side)
-      values(entry->>'id',p_actor,next_item.id,entry->>'sku',entry->>'name',entry->>'original_filename',entry->>'gcode',entry->>'dxf',(entry->>'width')::double precision,(entry->>'height')::double precision,entry->'bounding_box',entry->'original_bounds',entry->'metadata',coalesce((entry->>'date_imported')::timestamptz,now()),nullif(entry->'material_variants','null'::jsonb),entry->>'id',coalesce(entry->>'cut_side','either'));
+      insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,cut_side,stock_material)
+      values(entry->>'id',p_actor,next_item.id,entry->>'sku',entry->>'name',entry->>'original_filename',entry->>'gcode',entry->>'dxf',(entry->>'width')::double precision,(entry->>'height')::double precision,entry->'bounding_box',entry->'original_bounds',entry->'metadata',coalesce((entry->>'date_imported')::timestamptz,now()),nullif(entry->'material_variants','null'::jsonb),entry->>'id',coalesce(entry->>'cut_side','either'),nullif(entry->'stock_material','null'::jsonb));
     end loop;
   elsif p_action='remove_component' then
     delete from public.cnc_components where item_id=next_item.id and component_family_id=logical_id;

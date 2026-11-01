@@ -1,3 +1,4 @@
+import { materialPart, natural } from '../test/materialFixtures'
 import { describe, expect, it } from 'vitest'
 import { estimatePacking, packingPieces } from './packing'
 import type { PackingPiece } from './types'
@@ -101,4 +102,10 @@ describe('flat-pack box estimates', () => {
     expect(entered).toMatchObject({ width: 800, height: 400, thickness: 15, thicknessSource: 'entered', footprintSource: 'entered' })
     expect(packingPieces([{ ...noHint, gcode: '(Material 12 mm / cutter 6.35 mm)\n' + part.gcode }])[0].thickness).toBe(12)
   })
+})
+
+it('uses actual stock thickness ahead of cutting preset hints when packing', () => {
+  const part = { ...materialPart('panel'), gcode: '(Material 13 mm / machining preset)', materialThicknessMm: 13 }
+  expect(packingPieces([part])[0].thickness).toBe(12)
+  expect(packingPieces([{ ...part, stockMaterial: { ...natural, thicknessMm: 18 } }])[0].thickness).toBe(18)
 })

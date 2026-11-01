@@ -1,7 +1,9 @@
 import type { PackingSettings } from '../packing/types'
 import type { ItemImage } from './ItemImage'
+import type { StockMaterial } from './stockMaterial'
 
 export interface MarketplaceItem {
+  defaultMaterial?: StockMaterial
   id: string
   ownerId?: string
   uploadedBy?: string

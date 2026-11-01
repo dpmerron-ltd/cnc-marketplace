@@ -1,3 +1,4 @@
+import { physicalSheet, stockErrors } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { footprintsOverlap, instanceFootprint } from './footprint'
@@ -11,9 +12,12 @@ export interface ValidationIssue {
 }
 
 export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
+  const indices = [...new Set(sheet.instances.map(i => i.sheetIndex))]
+  if (indices.length > 1) return indices.flatMap(index => validateSheet(parts, physicalSheet(sheet, index)))
+  if (indices.length) sheet = physicalSheet(sheet, indices[0])
   const selection = selectMaterialParts(parts, sheet)
   parts = selection.parts
-  const issues: ValidationIssue[] = [...selection.errors, ...cutSideErrors(parts, sheet)].map(message => ({ level: 'error', message }))
+  const issues: ValidationIssue[] = [...selection.errors, ...cutSideErrors(parts, sheet), ...stockErrors(parts, sheet)].map(message => ({ level: 'error', message }))
   if (sheet.width <= 0 || sheet.height <= 0) issues.push({ level: 'error', message: 'Sheet dimensions must be positive.' })
   if (sheet.borderSpacing < 0) issues.push({ level: 'error', message: 'Border spacing cannot be negative.' })
 

@@ -86,17 +86,17 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       return row ? normalizePrograms({ startGcode: row.start_gcode, spindleStartGcode: row.spindle_start_gcode, endGcode: row.end_gcode }) : undefined
     },
     async catalog(_owner, limit, offset) {
-      return checked(await db.from('marketplace_items').select('id,sku,name,description,version_family_id,version_number,version_status,version_default,published_at,imageContentType:image->>contentType,cnc_components(id,sku,name,width,height,cut_side)').eq('version_default', true).order('id').range(offset, offset + limit - 1)) ?? []
+      return checked(await db.from('marketplace_items').select('id,sku,name,description,default_material,version_family_id,version_number,version_status,version_default,published_at,imageContentType:image->>contentType,cnc_components(id,sku,name,width,height,cut_side,stock_material)').eq('version_default', true).order('id').range(offset, offset + limit - 1)) ?? []
     },
     async itemVersions(_owner, id, limit, offset) {
       const item = checked(await db.from('marketplace_items').select('version_family_id').eq('id', id).maybeSingle())
       if (!item) throw new JobError('Item not found.', 404)
-      return checked(await db.from('marketplace_items').select('id,sku,name,description,version_family_id,version_number,version_status,version_default,published_at,cnc_components(id,sku,name,width,height,cut_side)').eq('version_family_id', item.version_family_id).order('version_number', { ascending: false }).range(offset, offset + limit - 1)) ?? []
+      return checked(await db.from('marketplace_items').select('id,sku,name,description,default_material,version_family_id,version_number,version_status,version_default,published_at,cnc_components(id,sku,name,width,height,cut_side,stock_material)').eq('version_family_id', item.version_family_id).order('version_number', { ascending: false }).range(offset, offset + limit - 1)) ?? []
     },
     async createItem(owner, input, actor) {
       const result = await db.from('marketplace_items').insert({
         id: input.id ?? crypto.randomUUID(), owner_id: owner, uploaded_by: actor,
-        name: input.name, sku: input.sku, description: input.description, image: input.image ?? null,
+        name: input.name, sku: input.sku, description: input.description, default_material: input.defaultMaterial ?? null, image: input.image ?? null,
       }).select('id,name,sku,description,version_family_id,version_number,version_status,version_default').single()
       if (result.error?.code === '23505') throw new JobError('Item ID already exists. Use GET /v1/items to check your catalogue before retrying.', 409)
       const row = checked(result)
@@ -133,7 +133,7 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
         id: part.id, owner_id: owner, item_id: part.itemId, name: part.name, sku: part.sku,
         original_filename: part.originalFilename, gcode: part.gcode, dxf: part.dxf ?? null,
         width: part.width, height: part.height, bounding_box: part.boundingBox, original_bounds: part.originalBounds,
-        metadata, date_imported: part.dateImported, cut_side: part.cutSide ?? 'either',
+        metadata, date_imported: part.dateImported, cut_side: part.cutSide ?? 'either', stock_material: part.stockMaterial ?? null,
         ...(materialVariants ? { material_variants: materialVariants } : {}),
       }
       const result = await revise(owner, part.itemId, 'add_components', { components: [row] })
@@ -141,13 +141,13 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
       return { created: result.changed, id: saved?.id ?? part.id, itemId: result.current.id }
     },
     async componentSource(_owner, itemId, id) {
-      const row = checked(await db.from('cnc_components').select('id,item_id,name,sku,original_filename,gcode,dxf,material_variants,cut_side').eq('item_id', itemId).eq('id', id).maybeSingle())
+      const row = checked(await db.from('cnc_components').select('id,item_id,name,sku,original_filename,gcode,dxf,material_variants,cut_side,stock_material').eq('item_id', itemId).eq('id', id).maybeSingle())
       if (!row) return undefined
       return {
         id: row.id, itemId: row.item_id, name: row.name, sku: row.sku,
         filename: row.original_filename, gcode: row.gcode, dxf: row.dxf,
         materialVariants: row.material_variants == null ? null : materialVariantsSchema.parse(row.material_variants),
-        sha256: await sha256(row.gcode), cutSide: row.cut_side ?? 'either',
+        sha256: await sha256(row.gcode), cutSide: row.cut_side ?? 'either', stockMaterial: row.stock_material ?? undefined,
       }
     },
     async replaceComponent(owner, itemId, id, input) {
@@ -169,16 +169,16 @@ export function supabaseRepository(db: SupabaseClient): JobRepository {
     async loadComponents(_owner, request: JobRequest) {
       const ids = request.items.flatMap(item => item.itemId ? [item.itemId] : [])
       const skus = request.items.flatMap(item => item.sku ? [item.sku] : [])
-      const select = 'id,owner_id,sku,name,description,created_at,updated_at,version_family_id,version_number,version_status,version_default,published_at'
+      const select = 'id,owner_id,sku,name,description,created_at,updated_at,default_material,version_family_id,version_number,version_status,version_default,published_at'
       const byId = ids.length ? checked(await db.from('marketplace_items').select(select).in('id', ids).eq('version_status', 'published').limit(21)) ?? [] : []
       const bySku = skus.length ? checked(await db.from('marketplace_items').select(select).in('sku', skus).eq('version_default', true).limit(21)) ?? [] : []
       const rows = [...new Map([...byId, ...bySku].map(item => [item.id, item])).values()]
       if (rows.length > 20) throw new JobError('Too many matching items or ambiguous SKUs.')
-      const items = rows.map(row => ({ id: row.id, ownerId: row.owner_id, sku: row.sku, name: row.name, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at, version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } }))
-      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported,material_variants,cut_side').in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
+      const items = rows.map(row => ({ id: row.id, ownerId: row.owner_id, sku: row.sku, name: row.name, description: row.description, defaultMaterial: row.default_material ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } }))
+      const components = rows.length ? checked(await db.from('cnc_components').select('id,owner_id,item_id,sku,name,original_filename,gcode,date_imported,material_variants,cut_side,stock_material').in('item_id', rows.map(item => item.id)).order('id').limit(21)) ?? [] : []
       if (components.length > 20 || components.reduce((sum, row) => sum + row.gcode.length + JSON.stringify(row.material_variants ?? {}).length, 0) > 12000000) throw new JobError('Selected component library exceeds the per-job limit. Split the order into smaller jobs.')
       const parts = components.map(row => {
-        const part = { ...createPartFromGCode(row.original_filename, row.gcode, undefined, row.item_id), id: row.id, ownerId: row.owner_id, name: row.name, sku: row.sku, dateImported: row.date_imported, cutSide: row.cut_side ?? 'either' }
+        const part = { ...createPartFromGCode(row.original_filename, row.gcode, undefined, row.item_id), id: row.id, ownerId: row.owner_id, name: row.name, sku: row.sku, dateImported: row.date_imported, cutSide: row.cut_side ?? 'either', stockMaterial: row.stock_material ?? undefined, defaultStockMaterial: rows.find(item => item.id === row.item_id)?.default_material ?? undefined }
         if (row.material_variants != null) part.metadata.materialVariants = materialVariantsSchema.parse(row.material_variants)
         return part
       })

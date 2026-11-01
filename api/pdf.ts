@@ -1,3 +1,6 @@
+import { physicalSheet, stockLabel } from '../src/models/stockMaterial'
+import { selectMaterialParts } from '../src/gcode/materialSelection'
+import { materialProfiles } from '../src/cam/materialProfiles'
 import { PDFDocument, rgb, type PDFPage, type PDFFont } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import type { generateJob } from '../src/jobs/generateJob'
@@ -56,7 +59,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
   const request = manifest.request
   const { pdf, font } = await document(fontBytes, `${request.jobName} - Sheet plan and cutting list`)
   const supported = new Set(font.getCharacterSet())
-  const content = [request.jobName, request.orderNumber, request.notes, request.sheet.material, ...manifest.cuts.flatMap(cut => [cut.component, cut.item, cut.sku, cut.sourceFilename])].join('')
+  const content = [request.jobName, request.orderNumber, request.notes, request.sheet.material, ...manifest.cuts.flatMap(cut => [cut.component, cut.item, cut.sku, cut.sourceFilename, cut.material])].join('')
   if (Array.from(content).some(char => !/\s/.test(char) && !supported.has(char.codePointAt(0)!))) throw new JobError('Job text contains characters unsupported by the PDF font. Use Latin, Greek or Cyrillic text for this API version.')
   let page!: PDFPage
   let y = 0
@@ -80,7 +83,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
   paragraph(`Job: ${request.jobName}`)
   paragraph(`Order: ${request.orderNumber}`)
   paragraph(`${manifest.sheets.length} sheets | ${manifest.cuts.length} parts | ${request.sheet.widthMm} x ${request.sheet.heightMm} mm stock`)
-  paragraph(`Material: ${request.sheet.material}${request.sheet.thicknessMm ? ` | ${request.sheet.thicknessMm} mm thick` : ' | thickness not specified'}`)
+  paragraph(`Materials: ${[...new Set(manifest.cuts.map(cut => cut.material))].join('; ') || request.sheet.material}`)
   paragraph('Order Contents', 12)
   for (const item of manifest.items) paragraph(`${item.quantity} x ${item.name} [${item.sku}] - ${item.componentsPerItem} components per item`, 9)
   if (request.notes) { paragraph('Order Notes', 12); paragraph(request.notes) }
@@ -90,21 +93,24 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
   for (const warning of manifest.warnings) paragraph(warning, 9)
 
   for (const sheet of manifest.sheets) {
-    newPage(`Sheet ${sheet.number} of ${manifest.sheets.length}`)
+    newPage(`Sheet ${sheet.number}`)
+    const selected = selectMaterialParts(job.parts, physicalSheet(job.sheet,sheet.number - 1)).parts
+    paragraph(`Stock: ${sheet.materialSetup?.stockMaterial ? stockLabel(sheet.materialSetup.stockMaterial) : sheet.materialSetup?.material ?? request.sheet.material}`, 10)
+    paragraph(`Cutting preset: ${materialProfiles.find(p => p.id === sheet.materialSetup?.materialProfile)?.label ?? 'Original NC'}`, 9)
     paragraph(`Load material: ${cutSideLabel(sheet.cutSide)}`, 12)
     paragraph(`${sheet.partCount} parts | Reach X${sheet.maxX.toFixed(2)} Y${sheet.maxY.toFixed(2)} mm | deepest cut ${sheet.deepestCutMm.toFixed(2)} mm`, 9)
     paragraph(`Safe Z ${request.sheet.safeZMm} mm | ${sheet.screwMarks} screw marks | estimated ${Math.ceil(sheet.estimatedSeconds / 60)} minutes (excluding setup)`, 9)
-    const scale = Math.min(505 / job.sheet.width, 570 / job.sheet.height)
+    const scale = Math.min(505 / job.sheet.width, Math.min(570, y - 70) / job.sheet.height)
     const x = 45, bottom = y - job.sheet.height * scale - 15
     page.drawRectangle({ x, y: bottom, width: job.sheet.width * scale, height: job.sheet.height * scale, borderColor: ink, borderWidth: 0.8 })
     const cuts = manifest.cuts.filter(cut => cut.sheetNumber === sheet.number)
     for (const instance of job.sheet.instances.filter(instance => instance.sheetIndex === sheet.number - 1)) {
-      const part = job.parts.find(part => part.id === instance.partId)!
+      const part = selected.find(part => part.id === instance.partId)!
       const points = instanceFootprint(part, instance)
       page.drawSvgPath(`${points.map((p, i) => `${i ? 'L' : 'M'} ${p.x * scale} ${-p.y * scale}`).join(' ')} Z`, { x, y: bottom, color: rgb(0.93, 0.95, 0.96) })
     }
     const drawn = new Set<string>()
-    for (const move of job.simulations[sheet.number - 1].moves.filter(move => move.type !== 'rapid')) {
+    for (const move of job.simulations[job.exported.findIndex(file => file.sheetIndex === sheet.number - 1)].moves.filter(move => move.type !== 'rapid')) {
       if (move.start.x === move.end.x && move.start.y === move.end.y && move.end.z < move.start.z) {
         const key = `plunge:${move.end.x.toFixed(3)},${move.end.y.toFixed(3)}`
         if (!drawn.has(key)) page.drawCircle({ x: x + move.end.x * scale, y: bottom + move.end.y * scale, size: 1.3, color: rgb(0.12, 0.35, 0.45) })
@@ -120,7 +126,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
     }
     for (const cut of cuts) {
       const instance = job.sheet.instances.find(instance => instance.id === cut.instanceId)!
-      const part = job.parts.find(part => part.id === instance.partId)!
+      const part = selected.find(part => part.id === instance.partId)!
       const interior = footprintInterior(instanceFootprint(part, instance))
       const size = Math.max(2, Math.min(10, Math.max(0, interior.radius * scale - 2) * 2 / Math.hypot(cut.partNumber.length * 0.7, 1)))
       const tx = x + interior.center.x * scale - font.widthOfTextAtSize(cut.partNumber, size) / 2 - 1, ty = bottom + interior.center.y * scale - size / 3

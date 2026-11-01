@@ -10,7 +10,7 @@ set local request.jwt.claim.sub = '00000000-0000-4000-8000-000000000091';
 set local request.jwt.claim.aal = 'aal2';
 insert into public.cnc_machine_runs(id, owner_id, name, order_number, material, thickness, sheet_count, part_count, snapshot)
 values ('00000000-0000-4000-8000-000000000093', auth.uid(), 'Rack', '1007', 'Ply', '12 mm', 2, 2,
-  '{"version":1,"files":[],"map":{"parts":[{"number":"P001","name":"Side","sheetIndex":0},{"number":"P002","name":"Shelf","sheetIndex":1}]}}');
+  '{"version":1,"files":[],"sheets":[{"index":1,"materialSetup":{"stockMaterial":{"thicknessMm":18,"type":"Plywood","finish":"Black hex"},"materialProfile":"18"}}],"map":{"parts":[{"number":"P001","name":"Side","sheetIndex":0},{"number":"P002","name":"Shelf","sheetIndex":1}]}}');
 insert into public.cnc_machine_recuts(owner_id, source_run_id, sheet_index, part_number, part_name, material)
 values (auth.uid(), '00000000-0000-4000-8000-000000000093', 0, 'P001', 'Forged name', 'Forged stock');
 do $$ begin
@@ -51,6 +51,9 @@ end $$;
 insert into public.cnc_machine_recuts(owner_id, source_run_id, sheet_index, part_number)
 values (auth.uid(), '00000000-0000-4000-8000-000000000093', 0, 'P001'),
        (auth.uid(), '00000000-0000-4000-8000-000000000093', 1, 'P002');
+do $$ begin
+  if not exists(select 1 from public.cnc_machine_recuts where part_number='P002' and material='Plywood · Black hex' and thickness='18 mm') then raise exception 'Recut did not use its physical sheet stock'; end if;
+end $$;
 update public.cnc_machine_recuts set status = 'cancelled' where part_number = 'P002';
 do $$ begin
   if (select count(*) from public.cnc_machine_recuts) <> 3 then raise exception 'Re-cut history missing'; end if;

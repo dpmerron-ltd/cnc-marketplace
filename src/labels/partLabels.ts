@@ -1,3 +1,4 @@
+import { sheetMaterial, stockLabel } from '../models/stockMaterial'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
@@ -47,7 +48,7 @@ export function buildPartLabels(parts: Part[], items: MarketplaceItem[], input: 
     return {
       instanceId: instance.id, partNumber: partNumberText(instance.partNumber!),
       component: part.name, item: items.find(item => item.id === part.itemId)?.name ?? '', sku: part.sku,
-      job: sheet.name.trim() || 'Untitled Job', order: instance.orderName || sheet.orderImports?.find(entry => entry.instanceIds.includes(instance.id))?.name || sheet.orderNumber?.trim() || '-', material: sheet.material?.trim() || '',
+      job: sheet.name.trim() || 'Untitled Job', order: instance.orderName || sheet.orderImports?.find(entry => entry.instanceIds.includes(instance.id))?.name || sheet.orderNumber?.trim() || '-', material: sheetMaterial(sheet, instance.sheetIndex).stockMaterial ? stockLabel(sheetMaterial(sheet, instance.sheetIndex).stockMaterial) : sheetMaterial(sheet, instance.sheetIndex).material?.trim() || '',
       sheetNumber: instance.sheetIndex + 1, cutOrder: index + 1, totalParts: ordered.length,
       x: instance.x, y: instance.y, rotation: instance.rotation,
       cutSide: part.cutSide ?? 'either',

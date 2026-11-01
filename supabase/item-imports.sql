@@ -102,17 +102,17 @@ begin
     or (select count(distinct payload->>'sku') from public.item_import_entries where import_id=p_id and kind='component')<>jsonb_array_length(imp.manifest->'componentIds') then raise exception 'IMPORT_INCOMPLETE'; end if;
   new_id := gen_random_uuid();
   select max(version_number)+1 into next_number from public.marketplace_items where version_family_id=imp.family_id;
-  insert into public.marketplace_items(id,owner_id,uploaded_by,sku,name,description,packing,image,version_family_id,version_number,version_status,version_default,version_source_id)
+  insert into public.marketplace_items(id,owner_id,uploaded_by,sku,name,description,packing,image,default_material,version_family_id,version_number,version_status,version_default,version_source_id)
     values(new_id,p_actor,p_actor::text,imp.manifest->'item'->>'sku',imp.manifest->'item'->>'name',coalesce(imp.manifest->'item'->>'description',''),'{}'::jsonb,
-      nullif(imp.manifest->'item'->'image','null'::jsonb),imp.family_id,next_number,'draft',false,current_id);
+      nullif(imp.manifest->'item'->'image','null'::jsonb),nullif(imp.manifest->'item'->'defaultMaterial','null'::jsonb),imp.family_id,next_number,'draft',false,current_id);
   for c in select payload from public.item_import_entries where import_id=p_id and kind='component' order by key loop
     select jsonb_object_agg(payload->>'profileId',payload-array['componentId','profileId']) into profiles from public.item_import_entries
       where import_id=p_id and kind='profile' and payload->>'componentId'=c->>'id';
     if profiles is null or not(profiles ?& profile_ids) or profiles->(c->>'primaryProfile')->>'gcode' is distinct from c->>'gcode' then raise exception 'IMPORT_INCOMPLETE: profiles missing or primary differs'; end if;
     if exists(select 1 from public.cnc_components where id=c->>'id') then raise exception 'IMPORT_CONFLICT: component ID exists'; end if;
-    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,cut_side)
+    insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,dxf,width,height,bounding_box,original_bounds,metadata,date_imported,material_variants,component_family_id,cut_side,stock_material)
       values(c->>'id',p_actor,new_id,c->>'sku',c->>'name',c->>'original_filename',c->>'gcode',c->>'dxf',(c->>'width')::double precision,(c->>'height')::double precision,
-        c->'bounding_box',c->'original_bounds',c->'metadata',now(),jsonb_build_object('version',1,'primaryProfile',c->>'primaryProfile','profiles',profiles),c->>'id',coalesce(c->>'cut_side','either'));
+        c->'bounding_box',c->'original_bounds',c->'metadata',now(),jsonb_build_object('version',1,'primaryProfile',c->>'primaryProfile','profiles',profiles),c->>'id',coalesce(c->>'cut_side','either'),nullif(c->'stock_material','null'::jsonb));
   end loop;
   for d in select payload from public.item_import_entries where import_id=p_id and kind='document' order by key loop
     if not exists(select 1 from storage.objects where bucket_id='cnc-item-documents' and name=p_actor::text || '/' || (d->>'id') || '/document.pdf') then raise exception 'IMPORT_INCOMPLETE: PDF missing'; end if;

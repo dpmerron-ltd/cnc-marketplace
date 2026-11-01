@@ -1,3 +1,4 @@
+import { physicalSheet, sheetMaterial, stockLabel, stockErrors, type SheetMaterial } from '../models/stockMaterial'
 import { buildPartLabels, type PartLabel } from '../labels/partLabels'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
@@ -28,7 +29,7 @@ export interface ExportSnapshot {
   warnings: string[]
   programs: Sheet['gcodeSettings']
   files: MachineFile[]
-  sheets: Array<{ index: number; cutSide?: SheetCutSide; maxX: number; maxY: number; screws: Point[] }>
+  sheets: Array<{ materialSetup?: SheetMaterial; index: number; cutSide?: SheetCutSide; maxX: number; maxY: number; screws: Point[] }>
 }
 export interface MachineRunSummary {
   id: string; owner_id: string; name: string; order_number: string
@@ -51,14 +52,14 @@ export async function buildExportSnapshot(input: {
 }): Promise<ExportSnapshot> {
   // Detach before the first await: later editor changes must never alter a saved export.
   const sheet = structuredClone(input.sheet)
-  const sideErrors = cutSideErrors(input.parts, sheet)
+  const sideErrors = [...cutSideErrors(input.parts, sheet), ...stockErrors(input.parts, sheet)]
   if (sideErrors.length) throw new Error(sideErrors.join(' '))
   const map = buildTabMap(input.parts, sheet)
-  const selected = selectMaterialParts(input.parts, sheet)
-  if (selected.errors.length) throw new Error(selected.errors.join(' '))
   const safeZ = effectiveSafeZ(sheet)
   const preparedSheet = { ...sheet, gcodeSettings: { ...sheet.gcodeSettings, safeZ } }
   const sheets = Array.from({ length: map.sheetCount }, (_, index) => {
+    const selected = selectMaterialParts(input.parts, physicalSheet(sheet, index))
+    if (selected.errors.length) throw new Error(selected.errors.join(' '))
     const bounds = sheet.instances.filter(instance => instance.sheetIndex === index).map(instance => {
       const part = selected.parts.find(part => part.id === instance.partId)!
       const result = preparationBounds(part, instance, safeZ)
@@ -67,15 +68,15 @@ export async function buildExportSnapshot(input: {
     })
     const screws = planScrewPositions(selected.parts, preparedSheet, index)
     if (screws.errors.length) throw new Error(screws.errors.join(' '))
-    return { index, cutSide: sheetCutSide(selected.parts, sheet, index), maxX: Math.max(0, ...bounds.map(bound => bound.maxX)), maxY: Math.max(0, ...bounds.map(bound => bound.maxY)), screws: screws.points }
+    return { index, materialSetup: sheetMaterial(sheet, index), cutSide: sheetCutSide(selected.parts, sheet, index), maxX: Math.max(0, ...bounds.map(bound => bound.maxX)), maxY: Math.max(0, ...bounds.map(bound => bound.maxY)), screws: screws.points }
   })
   if (input.files.length !== (input.mode === 'combined' ? 1 : new Set(sheet.instances.map(i => i.sheetIndex)).size)) throw new Error('Export file count does not match the sheet layout.')
   const files: MachineFile[] = []
   for (const file of input.files) files.push({ sheetIndices: file.sheetIndices, filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
   return {
     version: 1, jobId: input.jobId, labels: buildPartLabels(input.parts, input.items ?? [], sheet), materialProfile: sheet.materialProfile, mode: input.mode, map, sheets, files, safeZ,
-    material: sheet.material?.trim() || 'Not specified',
-    thickness: materialProfiles.find(profile => profile.id === sheet.materialProfile)?.label ?? 'Original NC - verify stock thickness',
+    material: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => s.materialSetup?.stockMaterial ? stockLabel(s.materialSetup.stockMaterial) : s.materialSetup?.material?.trim() || 'Not specified'))].join('; '),
+    thickness: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => materialProfiles.find(profile => profile.id === s.materialSetup?.materialProfile)?.label ?? 'Original NC - verify stock thickness'))].join('; '),
     deepestCutMm: input.summary.deepestCutMm, warnings: [...input.summary.exportWarnings], programs: sheet.gcodeSettings,
   }
 }

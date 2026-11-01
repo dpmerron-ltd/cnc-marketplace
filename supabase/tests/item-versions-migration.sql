@@ -9,7 +9,8 @@ create temporary table original_version_component as select to_jsonb(c) as row f
 \ir ../item-versions.sql
 \ir ../item-versions.sql
 do $$ begin
-  if (select to_jsonb(i) - array['version_family_id','version_number','version_status','version_default','published_at','version_source_id'] from public.marketplace_items i where id='91000000-0000-4000-8000-000000000001') is distinct from (select row from original_version_item) then raise exception 'Migration changed original item'; end if;
-  if (select to_jsonb(c) - array['component_family_id','component_source_id'] from public.cnc_components c where id='migration-component') is distinct from (select row from original_version_component) then raise exception 'Migration changed original component'; end if;
+  if exists(select 1 from public.marketplace_items where id='91000000-0000-4000-8000-000000000001' and default_material is not null) or exists(select 1 from public.cnc_components where id='migration-component' and stock_material is not null) then raise exception 'Migration invented stock requirements'; end if;
+  if (select to_jsonb(i) - array['default_material','version_family_id','version_number','version_status','version_default','published_at','version_source_id'] from public.marketplace_items i where id='91000000-0000-4000-8000-000000000001') is distinct from (select row from original_version_item) then raise exception 'Migration changed original item'; end if;
+  if (select to_jsonb(c) - array['stock_material','component_family_id','component_source_id'] from public.cnc_components c where id='migration-component') is distinct from (select row from original_version_component) then raise exception 'Migration changed original component'; end if;
   if not exists(select 1 from public.marketplace_items where id='91000000-0000-4000-8000-000000000001' and version_family_id=id and version_number=1 and version_status='published' and version_default) then raise exception 'Existing item is not default version 1'; end if;
 end $$;

@@ -14,6 +14,10 @@ Each item also has a [stacked flat-pack estimate](docs/PACKING.md), capped at fi
 
 For patterned or single-faced stock, open an item and set each component's **Cutting side** to **Either side**, **Pattern side up**, or **Non-pattern side up**. The selected face points up toward the cutter. Existing components default to either side. Item/order additions and auto-nesting put opposite-facing components on separate physical sheets; unrestricted components can share either. Manual additions use a compatible sheet, and conflicting layouts block export. Sheet review, NC files, labels, job plans and Cutting Jobs show the required face.
 
+For mixed-material items, use **Materials and finishes** to set the item's actual stock thickness, material type and finish, with overrides for individual parts. **Add all to sheet** and order additions preview the allocation by stock, cutting face and preset. Allocate the entire item within the active job, or add only matching parts and keep the rest in **Awaiting material allocation**. Use **Allocate remaining parts** later. The **Re-plan waiting sheets** button combines compatible waiting work across jobs; cutting and cut sheets stay fixed.
+
+Every physical sheet has its own actual stock and separate **Cutting preset**. For example, 12 mm plywood can use the 13 mm four-pass preset. Thickness and finish must match the component requirements; unavailable machining variants block allocation/export. Labels, NC filenames and machine records carry the physical sheet's stock and face. Recuts retain the source sheet's stock and preset. Material edits create a new item version, preserving requirements in existing jobs. Legacy items without structured requirements keep their existing behavior until stock is specified.
+
 Cutting-side edits create a new item version. Existing sheets and queued/exported programs retain their original version; remove and re-add the item to use the revised requirements. NC geometry is preserved, so source programs must already machine the component from the chosen face. This setting does not mirror geometry or generate a two-sided machining operation.
 
 ```bash

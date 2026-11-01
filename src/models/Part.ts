@@ -2,6 +2,7 @@ import type { Bounds } from './geometry'
 import type { ParsedProgram, ToolpathSegment } from '../gcode/types'
 import type { MaterialVariants } from '../cam/materialProfiles'
 import type { CutSide } from './cutSide'
+import type { StockMaterial } from './stockMaterial'
 
 export interface PartMetadata {
   units: 'mm' | 'inch' | 'unknown'
@@ -11,6 +12,8 @@ export interface PartMetadata {
 }
 
 export interface Part {
+  stockMaterial?: StockMaterial
+  defaultStockMaterial?: StockMaterial
   id: string
   ownerId?: string
   itemId?: string
@@ -33,13 +36,13 @@ export interface Part {
 }
 
 // Catalogue metadata only: never use this as a machinable Part.
-export type ComponentSummary = Pick<Part, 'id' | 'ownerId' | 'itemId' | 'sku' | 'name' | 'cutSide' | 'originalFilename' | 'width' | 'height'> & { materialThicknessMm?: number }
+export type ComponentSummary = Pick<Part, 'id' | 'ownerId' | 'itemId' | 'sku' | 'name' | 'cutSide' | 'stockMaterial' | 'defaultStockMaterial' | 'originalFilename' | 'width' | 'height'> & { materialThicknessMm?: number }
 
 export function summarizePart(part: Part): ComponentSummary {
   const hint = part.gcode.match(/\(Material\s+(\d+(?:\.\d+)?)\s*mm\s*\//i)?.[1]
     ?? part.metadata.materialVariants?.primaryProfile
   return { id: part.id, ownerId: part.ownerId, itemId: part.itemId, sku: part.sku, name: part.name,
-    originalFilename: part.originalFilename, width: part.width, height: part.height, cutSide: part.cutSide ?? 'either',
+    originalFilename: part.originalFilename, width: part.width, height: part.height, cutSide: part.cutSide ?? 'either', stockMaterial: part.stockMaterial, defaultStockMaterial: part.defaultStockMaterial,
     ...(hint ? { materialThicknessMm: Number.parseFloat(hint) } : {}),
   }
 }

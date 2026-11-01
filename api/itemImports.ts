@@ -39,7 +39,7 @@ export function parseImportComponent(value: unknown, owner: string, item: string
   checkDepth(primaryProfile, part.gcode)
   return {
     id: part.id, name: part.name, sku: part.sku, original_filename: part.originalFilename,
-    gcode: part.gcode, dxf: part.dxf ?? null, primaryProfile, cut_side: part.cutSide ?? 'either',
+    gcode: part.gcode, dxf: part.dxf ?? null, primaryProfile, cut_side: part.cutSide ?? 'either', stock_material: part.stockMaterial ?? null,
     width: part.width, height: part.height, bounding_box: part.boundingBox,
     original_bounds: part.originalBounds, metadata: part.metadata,
   }
