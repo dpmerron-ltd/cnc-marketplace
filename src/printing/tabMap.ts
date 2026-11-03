@@ -76,6 +76,11 @@ export function locatePartTabs(part: Part) {
       groups.push(group)
       tabMarker = false
     }
+    // Only the finishing contour defines the surviving physical tabs.
+    // Roughing lifts are offset by the allowance and must not appear twice.
+    if (/^\(Finishing pass:/i.test(line.raw.trim())) {
+      group.moves = []; group.markers.clear(); tabMarker = false
+    }
     if (/^\(Tab \d+\)$/i.test(line.raw.trim())) tabMarker = true
     const move = byLine.get(line.lineNumber + 1)
     if (move) {

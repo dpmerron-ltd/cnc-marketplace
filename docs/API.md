@@ -128,6 +128,8 @@ jq -ej '.gcode // error("No NC was generated")' component-result.json > componen
 
 Request fields:
 
+New profiles and pockets automatically leave 0.3 mm on the walls during roughing, then finish at the operation's full depth. The response reports `settings.finishingAllowanceMm: 0.3` and `settings.fullDepthFinishing: true`; no extra request setting is needed. Holding tabs remain in place. Cutter-width slots and shared tool-centreline paths receive a full-depth spring pass, and blind drilling keeps its peck cycle. Existing saved component programs need regeneration to gain finishing passes.
+
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `dxf` | Yes | ASCII DXF text, at most 2,000,000 UTF-8 bytes |

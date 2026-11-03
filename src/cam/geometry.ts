@@ -3,6 +3,8 @@ import type { Point } from '../models/geometry'
 
 export const tolerance = 0.02
 export const scale = 10000
+// Corner relief diameter matches the physical cutter; the 20% enlargement is reverted.
+export const cornerReliefScale = 1.0
 export const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 export const toClipper = (points: Point[]) => points.map(p => ({ X: Math.round(p.x * scale), Y: Math.round(p.y * scale) }))
 export const fromClipper = (points: ClipperLib.Path) => points.map(p => ({ x: p.X / scale, y: p.Y / scale }))

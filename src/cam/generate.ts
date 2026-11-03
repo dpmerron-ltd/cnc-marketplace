@@ -4,12 +4,13 @@ import { calculateMachiningBounds } from '../gcode/bounds'
 import { parseGCode } from '../gcode/parser'
 import { defaultProgramSettings, programLines, startProgramLines, validatePrograms } from '../gcode/programSettings'
 import { hasControllerStart } from '../gcode/controllerStart'
-import { arcPoints, area, contains, cornerOvercuts, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
+import { arcPoints, area, contains, cornerOvercuts, cornerReliefScale, distance, intersectionArea, offset, pathMetric, pocketPaths } from './geometry'
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
 import { cutFeedPreset, materialProfileId, rampPreset, validProfilePassSelection } from './materialProfiles'
 import { profileEntry, routeOperations, type RouteOperation } from './routing'
+import { finishingAllowanceMm, machiningOutline, pocketPerimeters, roughingTabs } from './finishing'
 
 const toolRadius = camPreset.diameter / 2
 const n = (value: number) => Number(value.toFixed(4)).toString()
@@ -77,7 +78,9 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
   }
   if (intervals.length < requestedTabs) warnings.push(`${f.name}: ${intervals.length} of ${requestedTabs} tabs fit with the required spacing.`)
   if (!requestedTabs && !tabFree) warnings.push(`${f.name}: no holding tabs; verify independent workholding.`)
-  return { path, intervals, centers, warnings, onLine }
+  const roughPath = onLine ? path.map(point => ({ ...point })) : offset(machiningOutline(f.points, centers, toolRadius), f.kind === 'outside' ? toolRadius + finishingAllowanceMm : -toolRadius - finishingAllowanceMm)
+  if ((area(roughPath) > 0) !== (f.kind === 'outside')) roughPath.reverse()
+  return { path, intervals, roughPath, roughIntervals: onLine ? intervals : roughingTabs(path, roughPath, intervals), centers, warnings, onLine }
 }
 
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
@@ -106,7 +109,8 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const operations: CamOperation[] = []
   const lines: string[] = []
   const emit = (...code: string[]) => { lines.push(...code); if (lines.length > 50000) throw new Error('Generated program exceeds 50,000 lines. Split the drawing.') }
-  const linear = (point: Point, depth: number, feed: number) => emit(`G01 ${xy(point)} Z${n(-depth)} F${feed}`)
+  // Small clearing loops need finer Z rounding to retain the preset ramp angle.
+  const linear = (point: Point, depth: number, feed: number) => emit(`G01 ${xy(point)} Z${Number((-depth).toFixed(6))} F${feed}`)
   const approach = (point: Point) => emit('G00 Z20', `G00 ${xy(point)}`, 'G00 Z0.5', 'G01 Z0 F600')
   const contours: Array<{ feature: CamFeature; path: Point[] }> = []
   const overcuts: Array<{ feature: CamFeature; centers: Point[] }> = []
@@ -115,15 +119,13 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     return rectangle ? [[feature.id, cutterWidthGeometry(rectangle, camPreset.diameter, false).outline] as const] : []
   }))
   const predecessors = new Map(active.map(feature => [feature.id, new Set<string>()]))
-  const relieve = (feature: CamFeature, paths: Point[][]) => {
-    if (feature.circle || settings.operations[feature.id]?.cornerOvercuts === false) return paths
-    const result = cornerOvercuts(feature.points, paths, toolRadius)
-    if (result.centers.length) {
-      overcuts.push({ feature, centers: result.centers })
-      emit(`(Automatic corner overcuts: ${result.centers.length})`)
-      warnings.push(`${feature.name}: ${result.centers.length} dogbone corner overcuts extend beyond the DXF outline.`)
+  const reportRelief = (feature: CamFeature, centers: Point[]) => {
+    if (centers.length) {
+      overcuts.push({ feature, centers })
+      emit(`(Automatic corner overcuts: ${centers.length})`)
+      emit(`(Corner relief diameter ${n(camPreset.diameter * cornerReliefScale)} mm; cutter ${n(camPreset.diameter)} mm)`)
+      warnings.push(`${feature.name}: ${centers.length} dogbone corner overcuts extend beyond the DXF outline.`)
     }
-    return result.paths
   }
 
   // Reject intersecting/duplicate outlines before applying tool compensation.
@@ -143,7 +145,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
     return rank[a.kind] - rank[b.kind] || Math.abs(area(a.points)) - Math.abs(area(b.points))
   })
   const profiles = new Map<string, ReturnType<typeof prepareProfile>>()
-  const pockets = new Map<string, Point[][]>()
+  const pockets = new Map<string, { rough: Point[][]; finish: Point[][]; centers: Point[] }>()
   const slots = new Map<string, ReturnType<typeof cutterWidthGeometry>>()
   const preparationErrors = new Map<string, unknown>()
   const route = sorted.map((f): RouteOperation & { feature: CamFeature } => {
@@ -155,12 +157,16 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         entry = () => ({ point })
       }
       else if (f.kind === 'pocket' && f.circle) {
-        const radius = f.circle.radius - toolRadius, center = f.circle.center
+        const radius = f.circle.radius - toolRadius - finishingAllowanceMm, center = f.circle.center
         entry = () => ({ point: { x: center.x + Math.min(toolRadius * 0.75, radius), y: center.y }, exit: { x: center.x + radius, y: center.y } })
       } else if (f.kind === 'pocket') {
-        const paths = pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4)
-        pockets.set(f.id, paths)
-        entry = () => ({ point: paths[0][0], exit: paths.at(-1)![0] })
+        // Validate the source before building the finishing perimeters.
+        pocketPaths(f.points, toolRadius, camPreset.diameter * 0.4)
+        const perimeters = pocketPerimeters(f.points, toolRadius)
+        const finish = settings.operations[f.id]?.cornerOvercuts === false ? { paths: perimeters, centers: [] } : cornerOvercuts(f.points, perimeters, toolRadius)
+        const rough = pocketPaths(machiningOutline(f.points, finish.centers, toolRadius), toolRadius + finishingAllowanceMm, camPreset.diameter * 0.4)
+        pockets.set(f.id, { rough, finish: finish.paths, centers: finish.centers })
+        entry = () => ({ point: rough[0][0], exit: finish.paths.at(-1)![0] })
       } else if (f.kind === 'inside' || f.kind === 'outside') {
         const opening = cutterWidthOpening(f)
         if (opening) {
@@ -171,7 +177,12 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
           profiles.set(f.id, profile)
           const passDepth = Math.max(...material.passes.map((depth, i) => depth - (material.passes[i - 1] ?? 0)))
           // Reserve space for the slower standard ramp too, keeping entry geometry stable across ramp presets.
-          entry = profileEntry(profile.path, profile.intervals, f.circle ? 0 : toolRadius, passDepth / (2 * Math.tan(camPreset.rampDegrees * Math.PI / 180)))
+          const roughEntry = profileEntry(profile.roughPath, profile.roughIntervals, f.circle ? 0 : toolRadius, passDepth / (2 * Math.tan(camPreset.rampDegrees * Math.PI / 180)))
+          const finishEntry = profileEntry(profile.path, profile.intervals, f.circle ? 0 : toolRadius, material.depth / (2 * Math.tan(camPreset.rampDegrees * Math.PI / 180)))
+          entry = (from, optimise) => {
+            const rough = roughEntry(from, optimise)
+            return { ...rough, exit: finishEntry(rough.point, true).point }
+          }
         }
       }
     } catch (error) { preparationErrors.set(f.id, error) }
@@ -206,36 +217,42 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         if (depth === undefined || !Number.isFinite(depth) || depth <= 0 || depth >= settings.thickness) throw new Error(`Set a blind pocket depth greater than 0 and less than ${settings.thickness} mm. Use an inside cut for a through-hole.`)
         const passes = [...material.passes.filter(pass => pass < depth), depth]
         if (!f.circle) {
-          const paths = relieve(f, pockets.get(f.id)!)
+          const { rough: paths, finish, centers } = pockets.get(f.id)!
+          reportRelief(f, centers)
+          const cutLoop = (path: Point[], previous: number, target: number) => {
+            const metric = pathMetric(path)
+            approach(path[0])
+            if (previous) emit(`G01 Z-${n(previous)} F600`)
+            // Each closed loop is ramped independently; no uncleared linking cuts.
+            const turns = Math.ceil((target - previous) / (metric.length * slope))
+            if (turns > 1000) throw new Error('Pocket entry is too small for a ramp.')
+            let current = previous
+            for (let turn = 0; turn < turns; turn++) {
+              const next = Math.min(target, current + metric.length * slope)
+              for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, rampSettings.rampFeed)
+              current = next
+            }
+            for (const entry of metric.between(0, metric.length)) linear(entry.point, target, cutFeed)
+            emit('G00 Z20')
+          }
+          emit(`(Roughing: leave ${n(finishingAllowanceMm)} mm on walls)`)
           let previous = 0
           for (const target of passes) {
             emit(`(Pass depth ${n(target)} mm)`)
-            for (const path of paths) {
-              const metric = pathMetric(path)
-              approach(path[0])
-              if (previous) emit(`G01 Z-${n(previous)} F600`)
-              // Each closed loop is ramped independently; no uncleared linking cuts.
-              const turns = Math.ceil((target - previous) / (metric.length * slope))
-              if (turns > 1000) throw new Error('Pocket entry is too small for a ramp.')
-              let current = previous
-              for (let turn = 0; turn < turns; turn++) {
-                const next = Math.min(target, current + metric.length * slope)
-                for (const entry of metric.between(0, metric.length)) linear(entry.point, current + (next - current) * entry.s / metric.length, rampSettings.rampFeed)
-                current = next
-              }
-              for (const entry of metric.between(0, metric.length)) linear(entry.point, target, cutFeed)
-              emit('G00 Z20')
-            }
+            for (const path of paths) cutLoop(path, previous, target)
             previous = target
           }
-          operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: paths.flat(), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
+          emit(`(Finishing pass: ${n(finishingAllowanceMm)} mm allowance / full depth ${n(depth)} mm)`)
+          for (const path of finish) cutLoop(path, 0, depth)
+          operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [...paths, ...finish].flat(), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
           warnings.push(`${f.name}: internal corners and narrow recesses are limited by the 6.35 mm cutter; verify the pocket preview.`)
           continue
         }
-        const radius = f.circle.radius - toolRadius, center = f.circle.center
-        if (radius < 0.1) throw new Error('Pocket is too small for the 6.35 mm cutter; use cutter-size drilling where appropriate.')
+        const finishRadius = f.circle.radius - toolRadius, radius = finishRadius - finishingAllowanceMm, center = f.circle.center
+        if (radius < 0.1) throw new Error('Pocket is too small for the 6.35 mm cutter and 0.3 mm finishing allowance; use a smaller cutter or cutter-size drilling where appropriate.')
         const entryRadius = Math.min(toolRadius * 0.75, radius)
         const entry = { x: center.x + entryRadius, y: center.y }
+        emit(`(Roughing: leave ${n(finishingAllowanceMm)} mm on walls)`)
         let previous = 0
         for (const target of passes) {
           approach(entry)
@@ -259,6 +276,14 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
             }
             if (r >= radius - 1e-6) break
           }
+          if (target === depth) {
+            emit(`(Finishing pass: ${n(finishingAllowanceMm)} mm allowance / full depth ${n(depth)} mm)`)
+            linear({ x: center.x + finishRadius, y: center.y }, depth, cutFeed)
+            for (let third = 1; third <= 3; third++) {
+              const a = -(third - 1) * Math.PI * 2 / 3, b = -third * Math.PI * 2 / 3
+              emit(`G02 ${xy({ x: center.x + finishRadius * Math.cos(b), y: center.y + finishRadius * Math.sin(b) })} I${n(-finishRadius * Math.cos(a))} J${n(-finishRadius * Math.sin(a))} F${cutFeed}`)
+            }
+          }
           emit('G00 Z20'); previous = target
         }
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: offset(f.points, -toolRadius), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
@@ -272,6 +297,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         if (centers.length) {
           overcuts.push({ feature: f, centers })
           emit(`(Automatic corner overcuts: ${centers.length})`)
+          emit(`(Corner relief diameter ${n(camPreset.diameter * cornerReliefScale)} mm; cutter ${n(camPreset.diameter)} mm)`)
           warnings.push(`${f.name}: ${centers.length} dogbone corner overcuts extend beyond the cutter-width opening.`)
         } else warnings.push(`${f.name}: cutter-width hole has rounded ends/corners; corner overcuts are disabled.`)
         const metric = pathMetric(path)
@@ -299,66 +325,71 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
           previous = depth
           if (pointHole && depth !== material.depth) emit('G00 Z0.5')
         }
+        emit(`(Finishing pass: full depth ${n(material.depth)} mm / cutter-width spring pass)`)
+        if (metric.length > 1e-6) for (const entry of metric.between(0, metric.length)) linear(entry.point, material.depth, cutFeed)
+        else emit(`G01 Z-${n(material.depth)} F600`)
         emit('G00 Z20')
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path, tabs: [], depthMm: material.depth, firstLine, lastLine: lines.length })
         continue
       }
       const profile = profiles.get(f.id)!
       const { onLine, centers } = profile
-      let path = profile.path, intervals = profile.intervals
       if (onLine) emit('(Shared release: tool centre follows source contour; no compensation)')
-      if (centers.length) {
-        overcuts.push({ feature: f, centers })
-        emit(`(Automatic corner overcuts: ${centers.length})`)
-        warnings.push(`${f.name}: ${centers.length} dogbone corner overcuts extend beyond the DXF outline.`)
-      }
+      reportRelief(f, centers)
       warnings.push(...profile.warnings)
-      let metric = pathMetric(path)
-      // Rotate the path and tab distances together; winding and physical tab locations stay unchanged.
-      const start = entry.start ?? 0
-      if (start) {
-        const originalLength = metric.length
-        intervals = intervals.map(([a, b]) => [(a - start + originalLength) % originalLength, (b - start + originalLength) % originalLength] as [number, number]).sort((a, b) => a[0] - b[0])
-        path = rotatePath(path, start); metric = pathMetric(path)
-      }
-      const follow = (from: number, to: number, zFrom: number, zTo: number, feed: number) => {
-        for (const entry of metric.between(from, to)) linear(entry.point, zFrom + (zTo - zFrom) * (entry.s - from) / (to - from), feed)
-      }
-      const ramp = (position: number, from: number, to: number, available: number) => {
-        if (to <= from + 1e-7) return
-        available = Math.min(available - 0.05, metric.length - position - 0.05)
-        if (available < 0.1) throw new Error('No tab-free ramp space remains.')
-        let depth = from, cycles = 0
-        while (depth < to - 1e-7) {
-          if (++cycles > 1000) throw new Error('Ramp requires too many reversals. Reduce tabs or simplify geometry.')
-          const length = Math.min(available, (to - depth) / (2 * slope))
-          const next = Math.min(to, depth + 2 * length * slope), halfway = (depth + next) / 2
-          follow(position, position + length, depth, halfway, rampSettings.rampFeed)
-          follow(position + length, position, halfway, next, rampSettings.rampFeed)
-          depth = next
+      const cutProfile = (path: Point[], intervals: Array<[number, number]>, start: number, depths: number[], finishing: boolean) => {
+        let metric = pathMetric(path)
+        // Rotate the path and tab distances together; winding and physical tab locations stay unchanged.
+        if (start) {
+          const originalLength = metric.length
+          intervals = intervals.map(([a, b]) => [(a - start + originalLength) % originalLength, (b - start + originalLength) % originalLength] as [number, number]).sort((a, b) => a[0] - b[0])
+          path = rotatePath(path, start); metric = pathMetric(path)
         }
-      }
-      approach(path[0])
-      let previousDepth = 0
-      for (const depth of material.passes) {
-        emit(`(Pass depth ${n(depth)} mm)`)
-        ramp(0, previousDepth, depth, intervals[0]?.[0] ?? metric.length)
-        let position = 0
-        for (let i = 0; i < intervals.length; i++) {
-          const [a, b] = intervals[i]
-          follow(position, a, depth, depth, cutFeed)
-          const tabDepth = Math.min(depth, material.depth - camPreset.tabHeight)
-          emit(`(Tab ${i + 1})`, `G01 Z-${n(tabDepth)} F600`)
-          follow(a, b, tabDepth, tabDepth, cutFeed)
-          ramp(b, tabDepth, depth, (intervals[i + 1]?.[0] ?? metric.length) - b)
-          position = b
+        const follow = (from: number, to: number, zFrom: number, zTo: number, feed: number) => {
+          for (const entry of metric.between(from, to)) linear(entry.point, zFrom + (zTo - zFrom) * (entry.s - from) / (to - from), feed)
         }
-        follow(position, metric.length, depth, depth, cutFeed)
-        previousDepth = depth
+        const ramp = (position: number, from: number, to: number, available: number) => {
+          if (to <= from + 1e-7) return
+          available = Math.min(available - 0.05, metric.length - position - 0.05)
+          if (available < 0.1) throw new Error('No tab-free ramp space remains.')
+          let depth = from, cycles = 0
+          while (depth < to - 1e-7) {
+            if (++cycles > 1000) throw new Error('Ramp requires too many reversals. Reduce tabs or simplify geometry.')
+            const length = Math.min(available, (to - depth) / (2 * slope))
+            const next = Math.min(to, depth + 2 * length * slope), halfway = (depth + next) / 2
+            follow(position, position + length, depth, halfway, rampSettings.rampFeed)
+            follow(position + length, position, halfway, next, rampSettings.rampFeed)
+            depth = next
+          }
+        }
+        approach(path[0])
+        let previousDepth = 0
+        for (const depth of depths) {
+          if (!finishing) emit(`(Pass depth ${n(depth)} mm)`)
+          ramp(0, previousDepth, depth, intervals[0]?.[0] ?? metric.length)
+          let position = 0
+          for (let i = 0; i < intervals.length; i++) {
+            const [a, b] = intervals[i]
+            follow(position, a, depth, depth, cutFeed)
+            const tabDepth = Math.min(depth, material.depth - camPreset.tabHeight)
+            emit(`(Tab ${i + 1})`, `G01 Z-${n(tabDepth)} F600`)
+            follow(a, b, tabDepth, tabDepth, cutFeed)
+            ramp(b, tabDepth, depth, (intervals[i + 1]?.[0] ?? metric.length) - b)
+            position = b
+          }
+          follow(position, metric.length, depth, depth, cutFeed)
+          previousDepth = depth
+        }
+        emit('G00 Z20')
+        return { path, intervals, metric }
       }
-      emit('G00 Z20')
+      if (!onLine) emit(`(Roughing: leave ${n(finishingAllowanceMm)} mm on walls)`)
+      cutProfile(profile.roughPath, profile.roughIntervals, entry.start ?? 0, material.passes, false)
+      const finishEntry = profileEntry(profile.path, profile.intervals, f.circle ? 0 : toolRadius, material.depth / (2 * Math.tan(camPreset.rampDegrees * Math.PI / 180)))(entry.point, true)
+      emit(onLine ? `(Finishing pass: full depth ${n(material.depth)} mm / centreline spring pass)` : `(Finishing pass: ${n(finishingAllowanceMm)} mm allowance / full depth ${n(material.depth)} mm)`)
+      const { path, intervals, metric } = cutProfile(profile.path, profile.intervals, finishEntry.start ?? 0, [material.depth], true)
       operations.push({ featureId: f.id, name: f.name, kind: f.kind, path, tabs: intervals.map(([a, b]) => ({ start: metric.at(a), end: metric.at(b), points: [metric.at(a), ...metric.between(a, b).map(entry => entry.point)] })), depthMm: material.depth, firstLine, lastLine: lines.length })
-      contours.push({ feature: f, path })
+      contours.push({ feature: f, path: profile.roughPath })
     } catch (error) { errors.push(`${f.name} (${f.layer}): ${(error as Error).message}`) }
   }
   const outer = contours.filter(c => c.feature.kind === 'outside')
@@ -371,7 +402,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   for (const { feature, centers } of overcuts) for (const other of active.filter(f => f.id !== feature.id && f.closed)) {
     const enclosing = Math.abs(intersectionArea(feature.points, other.points) - Math.abs(area(feature.points))) < 0.05
     for (const center of centers) {
-      const footprint = arcPoints(center, toolRadius, 0, Math.PI * 2).slice(0, -1)
+      const footprint = arcPoints(center, toolRadius * cornerReliefScale, 0, Math.PI * 2).slice(0, -1)
       const overlap = intersectionArea(footprint, openingOutlines.get(other.id) ?? other.points)
       if (enclosing ? Math.abs(area(footprint)) - overlap > 0.05 : overlap > 0.05) {
         errors.push(`${feature.name}: corner overcut ${enclosing ? 'breaks through' : 'intersects'} ${other.name}. Disable corner overcuts or change the geometry.`)

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { readDxf } from '../src/cam/dxf'
 import { generateCam, materialPreset } from '../src/cam/generate'
+import { finishingAllowanceMm } from '../src/cam/finishing'
 import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/types'
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
@@ -73,6 +74,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
       thicknessMm: input.thicknessMm, drawingUnits: (input.units === 'auto' ? drawing.units : input.units) === 'inches' ? 'inches' : 'mm',
       cutterDiameterMm: camPreset.diameter, spindleRpm: spindleRpm(programs), clearanceMm: camPreset.clearance,
       cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2, drillPeckRetractMm: 0.5,
+      finishingAllowanceMm, fullDepthFinishing: true,
       rampDegrees: ramp.rampDegrees, rampFeedMmPerMinute: ramp.rampFeed, cutFeedMmPerMinute: cutFeedPreset(materialVariants.primaryProfile),
       reachCheck: false, screwMarking: false,
     },

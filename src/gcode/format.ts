@@ -2,9 +2,9 @@ import type { GCodeWord } from './types'
 
 const wordOrder = ['G', 'M', 'X', 'Y', 'Z', 'I', 'J', 'K', 'F', 'S']
 
-export function formatNumber(value: number): string {
+export function formatNumber(value: number, precision = 4): string {
   if (!Number.isFinite(value)) throw new Error(`Cannot format non-finite number: ${value}`)
-  return value.toFixed(4).replace(/\.?0+$/, '')
+  return value.toFixed(precision).replace(/\.?0+$/, '')
 }
 
 export function formatWord(letter: string, value: number): string {
@@ -12,7 +12,8 @@ export function formatWord(letter: string, value: number): string {
   if ((normalizedLetter === 'G' || normalizedLetter === 'M') && Number.isInteger(value)) {
     return `${normalizedLetter}${value.toString().padStart(2, '0')}`
   }
-  return `${normalizedLetter}${formatNumber(value)}`
+  // Preserve fine CAM ramp depths when nesting/rotating the generated program.
+  return `${normalizedLetter}${formatNumber(value, normalizedLetter === 'Z' ? 6 : 4)}`
 }
 
 export function wordsToLine(words: GCodeWord[], comment?: string): string {
