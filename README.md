@@ -69,6 +69,10 @@ overwrite the last complete browser backup; sheet autosaves still go to the clou
 
 The Pages deployment applies the schema files listed above before publishing the frontend, using the `SUPABASE_DB_URL` repository secret. A failed schema migration blocks publication.
 
+Startup loads item metadata separately from images. Current images load in serial
+batches of five; historical images load only when opened. Project exports fetch
+deferred images, and incomplete browser backups never replace complete backups.
+
 ## Item Documents
 
 Open a catalogue item and use **Documents** to upload pre-generated PDF user instructions or packing lists (20 MB and 200 pages per file). Documents are shared with MFA-authenticated catalogue users; only the uploader can remove a document.

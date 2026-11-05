@@ -56,6 +56,9 @@ describe('account-local projects', () => {
     const before = localStorage.getItem('sheet-builder-project:alice')
     expect(saveProject({ ...original, parts: [], componentIndex: original.parts.map(summarizePart) }, 'alice')).toBe(false)
     expect(localStorage.getItem('sheet-builder-project:alice')).toBe(before)
+    expect(saveProject({ ...original, items: original.items?.map(item => ({ ...item, imageDeferred: true })) }, 'alice')).toBe(false)
+    expect(localStorage.getItem('sheet-builder-project:alice')).toBe(before)
+    expect(() => copyProjectToAccount({ ...original, items: original.items?.map(item => ({ ...item, imageDeferred: true })) }, 'bob')).toThrow('incomplete')
   })
 
   it('keeps browser backups separate and ignores the old shared cache', () => {

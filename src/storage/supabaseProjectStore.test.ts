@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { newWorkspace } from '../jobs/production'
 import type { Sheet } from '../models/Sheet'
-import { loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteMaterials, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
+import { loadRemoteItemImage, loadRemoteItemComponents, loadRemoteProject, saveRemoteComponent, saveRemoteCutSide, saveRemoteMaterials, saveRemoteItemImage, saveRemoteProject, saveRemoteSheetHistory } from './supabaseProjectStore'
 import { natural, hex } from '../test/materialFixtures'
 import { testParts } from '../test/jobFixtures'
 import { testImage } from '../test/imageFixture'
 import { materialProfiles, materialVariantsSchema } from '../cam/materialProfiles'
 
-const mock = vi.hoisted(() => ({ userId: 'alice', conflict: false, error: null as null | { message: string }, project: null as unknown, history: [] as unknown[], failOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; columns?: string; filters: [string, string][]; included?: [string, string[]]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
+const mock = vi.hoisted(() => ({ userId: 'alice', conflict: false, error: null as null | { message: string }, project: null as unknown, history: [] as unknown[], failOffset: undefined as number | undefined, failImageOffset: undefined as number | undefined, rows: [] as unknown[], components: [] as unknown[], queries: [] as { table: string; columns?: string; filters: [string, string][]; included?: [string, string[]]; write?: unknown; options?: unknown; range?: [number, number] }[] }))
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: {
@@ -29,6 +29,7 @@ vi.mock('./supabaseClient', () => ({
     from: (table: string) => {
       const query = { table, columns: undefined as string | undefined, filters: [] as [string, string][], included: undefined as [string, string[]] | undefined, write: undefined as unknown, options: undefined as unknown, range: undefined as [number, number] | undefined }
       mock.queries.push(query)
+      let single = false
       const builder = {
         select: (columns: string) => { query.columns = columns; return builder },
         eq: (key: string, value: string) => { query.filters.push([key, value]); return builder },
@@ -36,15 +37,16 @@ vi.mock('./supabaseClient', () => ({
         order: () => builder,
         range: (from: number, to: number) => { query.range = [from, to]; return builder },
         maybeSingle: () => builder,
-        single: () => builder,
+        single: () => { single = true; return builder },
         update: (value: unknown) => { query.write = value; return builder },
         upsert: (value: unknown, options?: unknown) => { query.write = value; query.options = options; return builder },
         then: (resolve: (value: unknown) => unknown) => {
-          const rows = table === 'marketplace_items' ? mock.rows : table === 'sheet_history' ? mock.history : table === 'cnc_components' ? mock.components.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value) && (!query.included || query.included[1].includes((row as Record<string, string>)[query.included[0]]))) : []
-          const data = query.write ? mock.conflict ? [] : (Array.isArray(query.write) ? query.write : [query.write]) : query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
+          const rows = table === 'marketplace_items' ? mock.rows.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value) && (!query.included || query.included[1].includes((row as Record<string, string>)[query.included[0]]))) : table === 'sheet_history' ? mock.history : table === 'cnc_components' ? mock.components.filter(row => query.filters.every(([key, value]) => (row as Record<string, unknown>)[key] === value) && (!query.included || query.included[1].includes((row as Record<string, string>)[query.included[0]]))) : []
+          let data = query.write ? mock.conflict ? [] : (Array.isArray(query.write) ? query.write : [query.write]) : query.range ? rows?.slice(query.range[0], query.range[1] + 1) : rows
+          if (!query.write && table === 'marketplace_items' && query.columns && query.columns !== '*') data = data.map(row => Object.fromEntries(query.columns!.split(',').map(key => [key, (row as Record<string, unknown>)[key]])))
           if (query.write && Array.isArray(query.write) && table === 'marketplace_items' && !mock.conflict && !mock.error) mock.rows = [...mock.rows, ...query.write]
-          const error = table === 'cnc_components' && query.range?.[0] === mock.failOffset && mock.failOffset !== undefined ? { message: 'Response too large' } : mock.error
-          return Promise.resolve({ data: table === 'sheet_projects' && !query.write ? mock.project : data, error }).then(resolve)
+          const error = query.columns === 'id,image' && query.range?.[0] === mock.failImageOffset && mock.failImageOffset !== undefined ? { message: 'canceling statement due to statement timeout' } : table === 'cnc_components' && query.range?.[0] === mock.failOffset && mock.failOffset !== undefined ? { message: 'Response too large' } : mock.error
+          return Promise.resolve({ data: table === 'sheet_projects' && !query.write ? mock.project : single ? data?.[0] : data, error }).then(resolve)
         },
       }
       return builder
@@ -55,7 +57,7 @@ vi.mock('./supabaseClient', () => ({
 const sheet: Sheet = { name: '', width: 100, height: 100, spacing: 10, borderSpacing: 10, instances: [], gcodeSettings: { startGcode: '', spindleStartGcode: '', endGcode: '', safeZ: 5 } }
 
 describe('cloud account boundaries', () => {
-  beforeEach(async () => { localStorage.clear(); mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.project = null; mock.history = []; mock.failOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
+  beforeEach(async () => { localStorage.clear(); mock.queries = []; mock.userId = 'alice'; mock.conflict = false; mock.error = null; mock.rows = []; mock.components = []; mock.project = null; mock.history = []; mock.failOffset = undefined; mock.failImageOffset = undefined; await loadRemoteProject('alice'); mock.queries = [] })
 
   it('loads cutting sides in the lightweight index and full programs and uses a conflict-checked versioned save', async () => {
     mock.rows = [{ id: 'faces', owner_id: 'bob', name: 'Faces', sku: 'FACES' }]
@@ -114,7 +116,7 @@ describe('cloud account boundaries', () => {
     expect(new Set(result?.componentIndex?.map(part => part.id)).size).toBe(1078)
     expect(result?.componentIndex?.at(-1)).not.toHaveProperty('gcode')
     const pages = mock.queries.filter(query => query.range)
-    expect(pages.every(query => query.range![1] - query.range![0] === 24)).toBe(true)
+    expect(pages.every(query => query.range![1] - query.range![0] === (query.table === 'marketplace_items' ? query.columns === 'id,image' ? 4 : 249 : 24))).toBe(true)
     expect(pages.every(query => !query.filters.some(([key]) => key === 'owner_id'))).toBe(true)
     expect(pages.filter(query => query.table === 'cnc_components').every(query => query.included?.[0] === 'item_id' && query.included[1].length <= 40)).toBe(true)
     expect(pages.filter(query => query.table === 'cnc_components').every(query => !query.columns?.split(',').some(field => ['*', 'gcode', 'dxf', 'material_variants'].includes(field)))).toBe(true)
@@ -221,6 +223,34 @@ describe('cloud account boundaries', () => {
     const writes = mock.queries.filter(query => query.table === 'cnc_components').map(query => query.write)
     expect(writes).toEqual([[expect.not.objectContaining({ material_variants: expect.anything() }), expect.objectContaining({ material_variants: materialVariants })]])
     expect(mock.queries.filter(query => query.table === 'cnc_components')).toHaveLength(1)
+  })
+
+  it('defers historical images while keeping metadata, and fetches an image with account checks', async () => {
+    mock.rows = [
+      { id: 'old', owner_id: 'alice', name: 'Old', sku: 'OLD', image: testImage, version_family_id: 'family', version_default: false, version_status: 'published' },
+      { id: 'current', owner_id: 'alice', name: 'Current', sku: 'NEW', image: testImage, version_family_id: 'family', version_default: true, version_status: 'published' },
+    ]
+    const loaded = await loadRemoteProject('alice')
+    expect(loaded?.items[0]).toMatchObject({ id: 'old', imageDeferred: true })
+    expect(loaded?.items[0].image).toBeUndefined()
+    expect(loaded?.items[1].image).toEqual(testImage)
+    const metadataQueries = mock.queries.filter(query => query.table === 'marketplace_items' && !query.included)
+    expect(metadataQueries.every(query => !query.columns?.split(',').some(column => column === '*' || column === 'image'))).toBe(true)
+    expect(mock.queries.filter(query => query.columns === 'id,image').every(query => query.included?.[1].join() === 'current')).toBe(true)
+    expect(await loadRemoteItemImage('old', 'alice')).toEqual(testImage)
+    mock.userId = 'bob'
+    await expect(loadRemoteItemImage('old', 'alice')).rejects.toThrow('account changed')
+  })
+
+  it('bounds image batches and rejects a failed later batch without returning a partial catalogue', async () => {
+    mock.rows = Array.from({ length: 11 }, (_, index) => ({ id: `item-${index}`, owner_id: 'alice', name: 'Item', sku: `I${index}`, image: testImage }))
+    mock.failImageOffset = 5
+    await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load item images: canceling statement due to statement timeout')
+    expect(mock.queries.filter(query => query.columns === 'id,image').map(query => query.range)).toEqual([[0, 4], [5, 9]])
+    mock.failImageOffset = undefined
+    const loaded = await loadRemoteProject('alice')
+    expect(loaded?.items).toHaveLength(11)
+    expect(loaded?.items.every(item => item.image === testImage && !item.imageDeferred)).toBe(true)
   })
 
   it('loads validated shared images and rejects stale sessions and failed saves', async () => {

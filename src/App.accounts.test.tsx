@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { testImage } from './test/imageFixture'
 import { testParts } from './test/jobFixtures'
 import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
@@ -12,7 +13,7 @@ vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loadi
 const mock = vi.hoisted(() => ({
   userId: 'alice',
   authChanged: undefined as undefined | ((event: string, session: unknown) => void),
-  load: vi.fn(), loadItem: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
+  load: vi.fn(), loadItem: vi.fn(), loadImage: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
   programs: vi.fn(), savePrograms: vi.fn(),
   download: vi.fn(),
 }))
@@ -36,6 +37,7 @@ vi.mock('./storage/supabaseClient', () => ({
 vi.mock('./storage/supabaseProjectStore', () => ({
   canUseSupabase: () => true,
   loadRemoteProject: (...args: unknown[]) => mock.load(...args),
+  loadRemoteItemImage: (...args: unknown[]) => mock.loadImage(...args),
   loadRemoteItemComponents: (...args: unknown[]) => mock.loadItem(...args),
   saveRemoteProject: (...args: unknown[]) => mock.save(...args),
   deleteRemoteComponent: vi.fn(), deleteRemoteSheetHistory: vi.fn(), saveRemoteSheetHistory: vi.fn(async () => ({ ok: true })),
@@ -340,6 +342,24 @@ describe('account switching', () => {
     await screen.findByText("1 components from alice's private item added to the sheet.")
     expect(mock.loadItem).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({ instances: expect.arrayContaining([expect.objectContaining(remote.sheet!.instances[0]), expect.objectContaining({ partId: components[0].id })]) }))
+  })
+
+  it('includes deferred historical images in backups and blocks export when an image fails', async () => {
+    const { remote, components } = lazyLibrary()
+    remote.items[1] = { ...remote.items[1], imageDeferred: true, version: { familyId: 'old-family', number: 1, status: 'published', isDefault: false } }
+    mock.load.mockResolvedValue(remote)
+    mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
+    mock.loadImage.mockResolvedValue(testImage).mockRejectedValueOnce(new Error('Historical image unavailable'))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Project' }))
+    await screen.findByText('Project export failed: Historical image unavailable')
+    expect(mock.download).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Export Project' }))
+    await waitFor(() => expect(mock.download).toHaveBeenCalledOnce())
+    expect(mock.loadImage).toHaveBeenLastCalledWith('alice-second', 'alice')
+    const exported = JSON.parse(mock.download.mock.calls[0][1])
+    expect(exported.items[1].image).toEqual(testImage)
+    expect(exported.items[1]).not.toHaveProperty('imageDeferred')
   })
 
   it('does not download an incomplete project when an unopened item fails', async () => {

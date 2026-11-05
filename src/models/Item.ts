@@ -14,6 +14,8 @@ export interface MarketplaceItem {
   updatedAt: string
   packing?: PackingSettings
   image?: ItemImage | null
+  /** Historical image omitted from startup; fetch before a full backup. */
+  imageDeferred?: boolean
   version?: {
     familyId: string
     number: number

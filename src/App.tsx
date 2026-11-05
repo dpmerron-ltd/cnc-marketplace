@@ -58,6 +58,7 @@ import {
   deleteRemoteSheetHistory,
   loadRemoteProject,
   loadRemoteItemComponents,
+  loadRemoteItemImage,
   saveRemoteComponent,
   saveRemoteCutSide,
   saveRemoteMaterials,
@@ -1353,9 +1354,15 @@ function App() {
         await ensureItemComponents(item.id)
       }
       if (componentEpoch.current !== epoch || accountRef.current !== userId) throw new Error('Your account or catalogue changed. Export cancelled.')
+      const exportItems: MarketplaceItem[] = []
+      for (const item of items) {
+        const { imageDeferred, ...completeItem } = item
+        exportItems.push(imageDeferred ? { ...completeItem, image: await loadRemoteItemImage(item.id, userId!) } : completeItem)
+      }
+      if (componentEpoch.current !== epoch || accountRef.current !== userId) throw new Error('Your account or catalogue changed. Export cancelled.')
       const latest = orderSheetInputs.current
       if (latest.items !== initial.items || latest.sheet !== initial.sheet) throw new Error('Your sheet or items changed while loading. Export again to include those changes.')
-      downloadText('sheet-builder-project.json', JSON.stringify({ ...buildProject(), parts: latest.parts, componentIndex: undefined }, null, 2), 'application/json')
+      downloadText('sheet-builder-project.json', JSON.stringify({ ...buildProject(), items: exportItems, parts: latest.parts, componentIndex: undefined }, null, 2), 'application/json')
       setStatus('Exported complete project.')
     } catch (error) { if (componentEpoch.current === epoch) setStatus(`Project export failed: ${errorMessage(error)}`) }
     finally { if (componentEpoch.current === epoch) setExportingProject(false) }

@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2
 import type { MarketplaceItem } from '../models/Item'
 import { catalogueItems, editableItem, itemFamily, versionLabel } from '../models/itemVersions'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
+import { HistoricalItemImage } from './HistoricalItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
 import { ItemDocuments } from './ItemDocuments'
 import type { ComponentSummary, Part } from '../models/Part'
@@ -132,7 +133,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
       {componentsReady && onSaveMaterials && <MaterialEditor key={selectedItem.id} item={selectedItem} parts={selectedParts} readOnly={!editable} onSave={(stock, overrides) => onSaveMaterials(selectedItem, stock, overrides)} />}
-      {editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
+      {editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.imageDeferred && currentUserId ? <HistoricalItemImage key={`${currentUserId}:${selectedItem.id}`} itemId={selectedItem.id} userId={currentUserId} name={selectedItem.name} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
       {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${itemFamily(selectedItem)}`} userId={currentUserId} item={selectedItem} readOnly={!editable} />}
       {componentsReady && selectedParts.length > 0 && <PackingPanel readOnly={!editable} pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>

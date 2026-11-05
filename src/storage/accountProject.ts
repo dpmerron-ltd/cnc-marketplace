@@ -31,7 +31,7 @@ export function privateProject(project: Project, userId: string): Project {
 
 // Explicit file imports create independent copies, never overwrite another owner's IDs.
 export function copyProjectToAccount(project: Project, userId: string): Project {
-  if (project.componentIndex?.some(component => !project.parts.some(part => part.id === component.id))) throw new Error('This project is incomplete. Export it again after loading its components.')
+  if (project.items?.some(item => item.imageDeferred) || project.componentIndex?.some(component => !project.parts.some(part => part.id === component.id))) throw new Error('This project is incomplete. Export it again after loading its components.')
   const itemIds = new Map((project.items ?? []).map((item) => [item.id, crypto.randomUUID()]))
   const partIds = new Map(project.parts.map((part) => [part.id, crypto.randomUUID()]))
   const copySheet = (sheet: Sheet): Sheet => {
