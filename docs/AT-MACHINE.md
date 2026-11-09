@@ -14,6 +14,25 @@ Add orders or individual components to the selected tab. **Re-plan waiting sheet
 
 Re-planning never runs automatically. It does not move parts on sheets marked **Cutting** or **Cut**, and those sheets are never used for new placements. Changed waiting layouts require a fresh export. Marking a sheet cut does not remove its parts from the record or return them to the uncut pool.
 
+## Find sheets for an order
+
+On **Orders**, choose **View cutting sheets** beside an order. The same view opens
+from **View sheets** in the **Cutting Jobs** order progress table. It lists that
+order's sheets across your saved jobs, with the job name, physical sheet number,
+stock, cutting preset, part count and waiting/cutting/cut status. Waiting sheets
+appear first; use **Show cut sheets** to include completed sheets.
+
+**Open sheet** selects that exact physical sheet in its job. **Cutting file** is
+available when the saved export still matches the current layout. Changed waiting
+sheets say **needs export**. Shared sheets show how many parts belong to the order
+and how many other parts will be cut with them. Parts awaiting allocation are
+listed separately with a link to their job; they are not counted as cut sheets.
+
+The view follows order references when parts move during re-planning and includes
+retained cut records from removed jobs. It shows parts linked to the order in the
+signed-in account's cutting workspace; it does not infer fulfilment or include
+another account's private cutting plans.
+
 ## Export and progress
 
 - **Export Sheets** creates a separate file for each occupied waiting sheet. Cut and cutting sheets are excluded, preserving physical sheet numbers even when the first remaining sheet is Sheet 2 or later.

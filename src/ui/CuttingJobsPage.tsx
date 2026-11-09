@@ -4,18 +4,23 @@ import type { ComponentSummary } from '../models/Part'
 import { materialProfiles } from '../cam/materialProfiles'
 import { cutSideLabel, sheetCutSide } from '../models/cutSide'
 import { orderProgress, sheetIndices, sheetNeedsExport, type ProductionJob, type SheetStage } from '../jobs/production'
+import { OrderCuttingSheetsDialog } from './OrderCuttingSheetsDialog'
+import type { CuttingOrder } from '../orders/cuttingSheets'
 import './CuttingJobsPage.css'
 
 export function CuttingJobsPage({ jobs, components, onOpen, onNew, onRemove, onStage, onLabels, onReplan }: {
-  jobs: ProductionJob[]; components: ComponentSummary[]; onOpen: (id: string) => void; onNew: () => void; onRemove: (id: string) => void
+  jobs: ProductionJob[]; components: ComponentSummary[]; onOpen: (id: string, index?: number) => void; onNew: () => void; onRemove: (id: string) => void
   onStage: (id: string, index: number, stage: SheetStage) => Promise<void>
   onLabels: (id: string, index: number) => Promise<void>; onReplan: () => Promise<void>
 }) {
+  const [cuttingOrder, setCuttingOrder] = useState<CuttingOrder>()
+  const progress = orderProgress(jobs)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [showCut, setShowCut] = useState(false)
   async function act(action: () => Promise<void>) { if (busy) return; setBusy(true); setError(''); try { await action() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
   return <main className="cutting-jobs"><div className="cutting-jobs-heading"><div><h2>Cutting Jobs</h2><p>Plan orders, fill waiting sheets and track each sheet through cutting.</p></div><div className="button-row"><button type="button" disabled={busy} onClick={onNew}>New job</button><button type="button" disabled={busy} onClick={() => void act(onReplan)}>{busy ? 'Working…' : 'Re-plan waiting sheets'}</button><a href="#machine/history">Previous exports</a></div></div>
     <p>Re-planning combines compatible waiting jobs by material and thickness. Sheets cutting or already cut stay fixed. Review and export changed layouts before cutting.</p>
-    {orderProgress(jobs).length > 0 && <table aria-label="Order progress"><thead><tr><th>Order</th><th>Awaiting allocation</th><th>Waiting</th><th>Cutting</th><th>Cut</th></tr></thead><tbody>{orderProgress(jobs).map((order, index) => <tr key={index}><td>{order.name}</td><td>{order.pending}</td><td>{order.waiting}</td><td>{order.cutting}</td><td>{order.cut}</td></tr>)}</tbody></table>}
+    {progress.length > 0 && <div className="cutting-order-progress"><table aria-label="Order progress"><caption>Parts by order</caption><thead><tr><th>Order</th><th>Awaiting allocation</th><th>Waiting</th><th>Cutting</th><th>Cut</th><th>Sheets</th></tr></thead><tbody>{progress.map(order => <tr key={order.key}><td>{order.name}</td><td>{order.pending}</td><td>{order.waiting}</td><td>{order.cutting}</td><td>{order.cut}</td><td><button type="button" disabled={busy} aria-label={`View cutting sheets for ${order.name}`} onClick={() => setCuttingOrder({ key: order.key, name: order.name })}>View sheets</button></td></tr>)}</tbody></table></div>}
+    {cuttingOrder && <OrderCuttingSheetsDialog key={cuttingOrder.key} order={cuttingOrder} jobs={jobs} onOpen={onOpen} onClose={() => setCuttingOrder(undefined)} />}
     <label><input type="checkbox" checked={showCut} onChange={e => setShowCut(e.target.checked)} /> Show cut sheets</label>
     {error && <p role="alert">{error}</p>}
     {jobs.filter(job => !job.archived).map(job => {

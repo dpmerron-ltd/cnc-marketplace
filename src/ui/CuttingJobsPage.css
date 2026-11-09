@@ -7,3 +7,9 @@
 .production-tabs [aria-selected="true"] { background: #163f66; color: #fff; }
 
 .workspace-save-status { padding: .5rem 1rem; background: #eef4f8; color: #244762; font-size: .875rem; }
+
+.cutting-order-progress { overflow-x: auto; margin: 20px 0; border: 1px solid #ccd3dc; border-radius: 8px; background: #fff; }
+.cutting-order-progress table { border-collapse: collapse; width: 100%; }
+.cutting-order-progress caption { text-align: left; padding: 12px 16px; font-weight: 600; }
+.cutting-order-progress th, .cutting-order-progress td { text-align: left; padding: 10px 16px; border-top: 1px solid #e2e7ec; white-space: nowrap; }
+.cutting-order-progress th { background: #edf3f7; font-size: 13px; }

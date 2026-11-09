@@ -110,6 +110,20 @@ function placedLibrary() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(() => { cleanup(); window.history.replaceState({}, '', '/') })
+  it('opens the exact physical sheet from an order in Cutting Jobs', async () => {
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true })
+    const remote: RemoteProjectState = cutSideLibrary()
+    remote.sheet!.instances[0] = { ...remote.sheet!.instances[0], sheetIndex: 2, orderName: '#1001', orderKey: 'shop/gid://shopify/Order/123' }
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cutting Jobs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View cutting sheets for #1001' }))
+    expect(screen.getByRole('dialog', { name: 'Cutting sheets for #1001' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open sheet' }))
+    expect(await screen.findByRole('button', { name: 'Sheet 3' })).toHaveClass('active-sheet-tab')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('removes an empty job tab and returns to the other saved job', async () => {
     mock.load.mockResolvedValue(cutSideLibrary())
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)

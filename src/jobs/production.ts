@@ -132,5 +132,5 @@ export function orderProgress(jobs: ProductionJob[]) {
     progress[pending ? 'pending' : job.sheets[instance.sheetIndex]?.stage ?? 'waiting']++
     orders.set(key, progress)
   }
-  return [...orders.values()]
+  return [...orders.entries()].map(([key, progress]) => ({ key, ...progress }))
 }

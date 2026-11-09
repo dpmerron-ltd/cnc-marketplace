@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { newProductionJob } from '../jobs/production'
+import { addition, materialSheet } from '../test/materialFixtures'
 import { OrdersPage } from './OrdersPage'
 import { jobApiRequest } from '../storage/jobsApi'
 
@@ -17,6 +19,20 @@ beforeEach(() => { request.mockReset().mockImplementation(async (path, owner) =>
 }) })
 afterEach(cleanup)
 describe('Shopify orders page', () => {
+  it('opens an order’s cutting sheets directly from the order list', async () => {
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true })
+    const job = newProductionJob(materialSheet()), onOpenSheet = vi.fn()
+    job.sheet.instances = [{ ...addition('panel'), orderKey: `test.myshopify.com/${order.id}`, sheetIndex: 1 }]
+    render(<OrdersPage userId="alice" cuttingJobs={[job]} onOpenSheet={onOpenSheet} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'View cutting sheets for #1001' }))
+    expect(screen.getByRole('dialog', { name: 'Cutting sheets for #1001' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sheet 2' })).toBeInTheDocument()
+    expect(request.mock.calls.some(([path]) => path === '/shopify/orders/123')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Open sheet' }))
+    expect(onOpenSheet).toHaveBeenCalledWith(job.id, 1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('lets the admin assign a fixed fee in pence, then unassign without retaining the fee', async () => {
     const base = request.getMockImplementation()!
     const assignee = { order_id: '123', assignee_id: 'bob', assignee_email: 'bob@example.com', payment_pence: 4567, currency: 'GBP', version: 1, updated_at: '2026-09-21' }

@@ -25,7 +25,7 @@ describe('add Shopify order to sheet', () => {
     const allocated = allocateMaterials(mixed, materialSheet(), prepared.additions, 0, true)
     const job = newProductionJob(allocated)
     job.sheets[0] = { stage: 'cut' }
-    expect(orderProgress([job])).toEqual([{ name: order.name, pending: 2, waiting: 0, cutting: 0, cut: 2 }])
+    expect(orderProgress([job])).toEqual([{ key: `test.myshopify.com/${order.id}`, name: order.name, pending: 2, waiting: 0, cutting: 0, cut: 2 }])
     const second = newProductionJob({ ...materialSheet(), instances: [{ ...addition('panel'), orderKey: prepared.key, orderName: order.name }] })
     expect(orderProgress([job, second])[0]).toMatchObject({ pending: 2, cut: 2, waiting: 1 })
   })

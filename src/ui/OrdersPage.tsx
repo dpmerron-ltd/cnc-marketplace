@@ -5,11 +5,15 @@ import type { ShopifyConnection, ShopifyOrder, ShopifyOrderDetail, ShopifyOrders
 import { OrderSheetDialog, type OrderSheetProps } from './OrderSheetDialog'
 import { cuttingPayment, OrderAssignmentForm } from './OrderAssignmentForm'
 import { OrderDocumentsDialog } from './OrderDocumentsDialog'
+import { OrderCuttingSheetsDialog } from './OrderCuttingSheetsDialog'
+import type { ProductionJob } from '../jobs/production'
+import type { CuttingOrder } from '../orders/cuttingSheets'
 import './OrdersPage.css'
 
 const orderId = (order: ShopifyOrder) => order.id.split('/').at(-1)!
 
-export function OrdersPage({ userId, sheetTarget }: { userId: string; sheetTarget?: OrderSheetProps }) {
+export function OrdersPage({ userId, sheetTarget, cuttingJobs, onOpenSheet }: { userId: string; sheetTarget?: OrderSheetProps; cuttingJobs?: ProductionJob[]; onOpenSheet?: (jobId: string, index?: number) => void }) {
+  const [cuttingOrder, setCuttingOrder] = useState<CuttingOrder>()
   const [addingOrder, setAddingOrder] = useState('')
   const [printingOrder, setPrintingOrder] = useState('')
   const [connection, setConnection] = useState<ShopifyConnection>()
@@ -83,12 +87,12 @@ export function OrdersPage({ userId, sheetTarget }: { userId: string; sheetTarge
       </form>
       <div className="orders-summary" role="status">{loading ? 'Loading orders...' : data ? `${data.orders.length} orders / Updated ${new Date(data.fetchedAt).toLocaleTimeString()}` : ''}</div>
       {!loading && data && <>
-        <div className="queue-table-scroll"><table className="queue-table orders-table"><thead><tr><th>Order</th><th>Items ordered</th>{connection?.isOrderAdmin && <th>Assigned to</th>}<th>Cutting payment</th>{sheetTarget && <th>Actions</th>}</tr></thead><tbody>{data.orders.map(order => <tr key={order.id} className={orderId(order) === selected ? 'selected-job' : ''}>
+        <div className="queue-table-scroll"><table className="queue-table orders-table"><thead><tr><th>Order</th><th>Items ordered</th>{connection?.isOrderAdmin && <th>Assigned to</th>}<th>Cutting payment</th>{(sheetTarget || cuttingJobs) && <th>Actions</th>}</tr></thead><tbody>{data.orders.map(order => <tr key={order.id} className={orderId(order) === selected ? 'selected-job' : ''}>
           <td><button type="button" onClick={() => { closeDetail(); setSelected(orderId(order)); setDetailRetry(v => v + 1) }}>{order.name}</button></td>
           <td><ul className="orders-item-list">{order.lineItems.nodes.map(line => <li key={line.id}><strong>{line.quantity} x</strong> {line.title}{line.variantTitle && line.variantTitle !== 'Default Title' ? ` / ${line.variantTitle}` : ''}{line.sku && <span className="queue-order">{line.sku}</span>}{line.currentQuantity !== line.quantity && <span className="queue-order">Current quantity: {line.currentQuantity}</span>}</li>)}</ul>{order.lineItems.pageInfo.hasNextPage && <button type="button" onClick={() => { closeDetail(); setSelected(orderId(order)); setDetailRetry(v => v + 1) }}>All items</button>}</td>
           {connection?.isOrderAdmin && <td className="order-assignee">{order.assignment?.assignee_email ?? (order.assignment?.assignee_id ? 'Assigned user' : 'Unassigned')}<button type="button" className="order-assign-button" aria-label={`Assign ${order.name}`} onClick={() => { closeDetail(); setSelected(orderId(order)); setDetailRetry(v => v + 1) }}>Assign</button></td>}
           <td><span className="order-payment-label">Cutting payment: </span>{cuttingPayment(order.assignment)}</td>
-          {sheetTarget && <td><div className="order-action-buttons"><button type="button" className="icon-text-button order-add-button" aria-label={`Add ${order.name} to sheet`} onClick={() => setAddingOrder(orderId(order))}><Layers size={16} /> Add to sheet</button><button type="button" className="icon-text-button" aria-label={`Print documents for ${order.name}`} onClick={() => setPrintingOrder(orderId(order))}><Printer size={16} /> Print documents</button></div></td>}
+          {(sheetTarget || cuttingJobs) && <td><div className="order-action-buttons">{cuttingJobs && onOpenSheet && <button type="button" className="icon-text-button" aria-label={`View cutting sheets for ${order.name}`} onClick={() => setCuttingOrder({ key: `${data.shop}/${order.id}`, name: order.name })}><Layers size={16} /> View cutting sheets</button>}{sheetTarget && <><button type="button" className="icon-text-button order-add-button" aria-label={`Add ${order.name} to sheet`} onClick={() => setAddingOrder(orderId(order))}><Layers size={16} /> Add to sheet</button><button type="button" className="icon-text-button" aria-label={`Print documents for ${order.name}`} onClick={() => setPrintingOrder(orderId(order))}><Printer size={16} /> Print documents</button></>}</div></td>}
         </tr>)}</tbody></table></div>
         {!data.orders.length && <p>{connection?.isOrderAdmin ? "No matching orders within the Shopify app's accessible history." : 'No assigned orders found.'}</p>}
         <div className="label-pagination"><button type="button" className="icon-button" title="Previous orders" aria-label="Previous orders" disabled={!cursors.length} onClick={() => { closeDetail(); setCursors(c => c.slice(0, -1)) }}><ChevronLeft size={18} /></button><span>Page {cursors.length + 1}</span><button type="button" className="icon-button" title="Next orders" aria-label="Next orders" disabled={!data.pageInfo.hasNextPage || !data.pageInfo.endCursor} onClick={() => { closeDetail(); setCursors(c => [...c, data.pageInfo.endCursor!]) }}><ChevronRight size={18} /></button></div>
@@ -111,6 +115,7 @@ export function OrdersPage({ userId, sheetTarget }: { userId: string; sheetTarge
         </>}
       </section>}
     </>}
+    {cuttingOrder && cuttingJobs && onOpenSheet && <OrderCuttingSheetsDialog key={cuttingOrder.key} order={cuttingOrder} jobs={cuttingJobs} onOpen={onOpenSheet} onClose={() => setCuttingOrder(undefined)} />}
     {addingOrder && sheetTarget && <OrderSheetDialog key={`${userId}:${addingOrder}`} {...sheetTarget} userId={userId} orderId={addingOrder} onClose={() => setAddingOrder('')} />}
     {printingOrder && sheetTarget && <OrderDocumentsDialog key={`${userId}:${printingOrder}`} userId={userId} orderId={printingOrder} items={sheetTarget.items} onClose={() => setPrintingOrder('')} />}
   </main>
