@@ -22,6 +22,12 @@ describe('G-code simulator', () => {
     expect(simulation.estimatedSeconds).toBeCloseTo(5.1)
   })
 
+  it('does not slow rapids to the preceding plunge feed or change the modal cutting feed', () => {
+    const simulation = simulateGCode('G21\nG90\nG01 Z-10 F600\nG00 Z20\nG00 X300\nG01 X310\nM30')
+    expect(simulation.moves.map(move => move.feedMmPerMinute)).toEqual([600, 3000, 3000, 600])
+    expect(simulation.estimatedSeconds).toBeCloseTo(8.6)
+  })
+
   it('uses arc length for helical moves', () => {
     const simulation = simulateGCode('G21\nG90\nG00 X0 Y0\nG01 Z0 F600\nG02 X10 Y0 Z-1 I5 J0 F600\nM30')
     const arc = simulation.moves.find((move) => move.type === 'arc-cw')

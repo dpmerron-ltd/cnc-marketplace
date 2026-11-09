@@ -168,7 +168,8 @@ export function simulateGCode(source: string): GCodeSimulation {
 
       if (type === 'rapid' && end.z < -0.0001) warnings.push(`line ${line.lineNumber + 1}: rapid move is below Z0.`)
       for (const point of points) bounds = includePoint(bounds, point)
-      const feed = type === 'rapid' && feedMmPerMinute <= 0 ? defaultRapidFeedMmPerMinute : feedMmPerMinute
+      // G00 uses machine rapid speed, independently of the modal cutting feed.
+      const feed = type === 'rapid' ? defaultRapidFeedMmPerMinute : feedMmPerMinute
       moves.push({
         type,
         lineNumber: line.lineNumber + 1,
