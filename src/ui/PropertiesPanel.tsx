@@ -6,6 +6,7 @@ import { instanceBounds } from '../gcode/transform'
 import { cutSideLabel } from '../models/cutSide'
 
 interface PropertiesPanelProps {
+  ignorePatternSides?: boolean
   part?: Part
   instance?: PartInstance
   onUpdate: (patch: Partial<PartInstance>) => void
@@ -13,7 +14,7 @@ interface PropertiesPanelProps {
   onDelete: () => void
 }
 
-export function PropertiesPanel({ part, instance, onUpdate, onDuplicate, onDelete }: PropertiesPanelProps) {
+export function PropertiesPanel({ ignorePatternSides, part, instance, onUpdate, onDuplicate, onDelete }: PropertiesPanelProps) {
   const bounds = part && instance ? instanceBounds(part, instance) : undefined
   return (
     <aside className="panel properties">
@@ -23,7 +24,7 @@ export function PropertiesPanel({ part, instance, onUpdate, onDuplicate, onDelet
       ) : (
         <div className="property-grid">
           <strong>{partNumberText(instance.partNumber!)}: {part.name}</strong>
-          <span>Cutting face: {cutSideLabel(part.cutSide)}</span>
+          <span>Cutting face: {ignorePatternSides === true ? 'Either side up (pattern sides ignored)' : cutSideLabel(part.cutSide)}</span>
           <label>
             Sheet
             <input type="number" min={1} value={instance.sheetIndex + 1} onChange={(event) => onUpdate({ sheetIndex: Math.max(0, Number(event.target.value) - 1) })} />

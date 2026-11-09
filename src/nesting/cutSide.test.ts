@@ -35,6 +35,42 @@ describe('component cutting faces', () => {
     expect(input.instances.every(instance => instance.sheetIndex === 0)).toBe(true)
   })
 
+  it('ignores faces for nesting, exports, labels and snapshots without changing catalogue parts', async () => {
+    const original = structuredClone(parts)
+    const input = { ...sheet(), ignorePatternSides: true }
+    const nested = { ...input, instances: autoNest(parts, input) }
+    expect(nested.instances.map(i => i.sheetIndex)).toEqual([0, 0])
+    expect(sheetCutSide(parts, nested, 0)).toBe('either')
+    expect(validateSheet(parts, nested).filter(i => i.level === 'error')).toEqual([])
+    const combined = exportCombinedGCode(parts, nested)
+    expect(combined.errors).toEqual([])
+    expect(combined.gcode).toContain('(Load material: Either side)')
+    expect(combined.gcode).not.toContain('Pattern side up')
+    expect(combined.gcode).not.toContain('Non-pattern side up')
+    const files = exportPhysicalSheetGCodes(parts, nested)
+    expect(files).toHaveLength(1)
+    expect(files[0].errors).toEqual([])
+    expect(buildPartLabels(parts, [testItem], nested).map(l => l.cutSide)).toEqual(['either', 'either'])
+    const snapshot = await buildExportSnapshot({ mode: 'sheets', parts, sheet: nested, files: files.map(file => ({ filename: 'sheet.nc', gcode: file.gcode, simulation: { estimatedSeconds: 1 } })), summary: { exportWarnings: [] } })
+    expect(snapshot.sheets[0].cutSide).toBe('either')
+    expect(snapshot.map.parts.map(p => p.cutSide)).toEqual(['either', 'either'])
+    expect(parts).toEqual(original)
+    const restored = { ...nested, ignorePatternSides: false }
+    expect(exportCombinedGCode(parts, restored).errors.some(e => e.includes('mixes'))).toBe(true)
+    expect(autoNest(parts, restored).map(i => i.sheetIndex)).toEqual([0, 1])
+    expect(snapshot.sheets[0].cutSide).toBe('either')
+  })
+
+  it('allows conflicting locked faces and item additions only when the sheet override is enabled', () => {
+    const input = { ...sheet(), ignorePatternSides: true }
+    input.instances.forEach(i => { i.locked = true })
+    expect(autoNest(parts, input)).toEqual(input.instances)
+    const existing = { ...sheet([parts[0]]), ignorePatternSides: true }
+    const added = addItemToSheet(testItem, parts, existing, 'operator', 0)
+    expect(added.instances.map(i => i.sheetIndex)).toEqual([0, 0, 0])
+    expect(added.ignorePatternSides).toBe(true)
+  })
+
   it('retains the old nesting behaviour for legacy parts without a face requirement', () => {
     expect(autoNest(testParts, sheet(testParts)).map(instance => instance.sheetIndex)).toEqual([0, 0])
     expect(sheetCutSide(testParts, sheet(testParts), 0)).toBe('either')

@@ -143,7 +143,7 @@ function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: num
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   parts = selection.parts
-  const lockedErrors = cutSideErrors(parts, { instances: sheet.instances.filter(instance => instance.locked) })
+  const lockedErrors = cutSideErrors(parts, { ...sheet, instances: sheet.instances.filter(instance => instance.locked) })
   if (lockedErrors.length) throw new Error(lockedErrors.join(' '))
   if (parts.some(part => sheet.instances.some(instance => instance.partId === part.id) && part.cutSide !== undefined && !cutSides.includes(part.cutSide))) throw new Error('Unknown component cutting side. Set a valid cutting side before nesting.')
   const instances = sheet.instances.map(instance => ({ ...instance }))
@@ -196,7 +196,7 @@ function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: num
     const lastSheet = Math.max(0, ...placed.map(p => p.sheetIndex)) + 1
     for (let sheetIndex = 0; !best && sheetIndex <= lastSheet; sheetIndex++) {
       const onSheet = placed.filter(p => p.sheetIndex === sheetIndex)
-      if (onSheet.some(other => !compatibleCutSides(other.cutSide, part.cutSide))) continue
+      if (sheet.ignorePatternSides !== true && onSheet.some(other => !compatibleCutSides(other.cutSide, part.cutSide))) continue
       const previousFailure = failedFits.get(part)?.get(sheetIndex)
       const failedOrientations = previousFailure?.revision === onSheet.length ? previousFailure.orientations : new Set<Point[]>()
       const occupiedTop = Math.max(0, ...onSheet.map(p => p.bounds.maxY))

@@ -6,6 +6,10 @@ The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable m
 
 Each account configures its own start, spindle-start and end programs under **Profile > CNC Program Settings**. Settings are stored in an owner-isolated, MFA-protected table and apply to new browser/API generation. Dan's existing programs are retained only for his account; other users must save their own settings before exporting. Queued job files remain immutable snapshots. See [program settings and validation](docs/API.md#account-program-settings).
 
+## Ignore pattern sides
+
+In the Sheet toolbar, tick **Ignore pattern sides** to allow either face up throughout the current sheet project. Existing placements stay in place; use **Auto-nest** to combine parts that were previously separated by face. The setting is saved with the sheet and applies to manual additions, item/order nesting, validation, NC, labels and export snapshots. Catalogue component settings and existing exports are unchanged. Untick it to restore face restrictions; mixed layouts must be re-nested before export. The toggle is disabled once a physical sheet in that job has started or been cut, preserving its recorded settings.
+
 ## Run
 
 The **Items** page is a shared grid library for all signed-in users with item photos (or toolpath thumbnails), name/SKU/component search, sorting, and empty-item filtering. New and existing items support image upload, replacement and removal. Open an item to edit its details, upload or remove components, and add individual components or **Add all to sheet**. Adding a complete item nests one of each component without moving existing placements, with overflow on additional sheets. The **Sheet** page keeps a compact item selector; sheet machining and export controls stay out of the item library. The [API](docs/API.md#items-and-images) can create items with an image and retrieve, replace or remove shared item images.

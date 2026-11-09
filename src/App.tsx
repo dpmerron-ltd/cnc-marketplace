@@ -43,7 +43,7 @@ import { mergeVersionEdit, subscribeCatalogueChanges } from './storage/catalogue
 import { itemImageSchema, type ItemImage } from './models/ItemImage'
 import type { ComponentSummary, Part } from './models/Part'
 import { summarizePart } from './models/Part'
-import { cutSideLabel, sheetCutSide, compatibleCutSides, type CutSide } from './models/cutSide'
+import { cutSideLabel, sheetCutSide, compatibleCutSides, effectiveCutSide, type CutSide } from './models/cutSide'
 import type { PartInstance } from './models/PartInstance'
 import type { Project, SheetHistoryEntry } from './models/Project'
 import type { GCodePreset, Sheet } from './models/Sheet'
@@ -1114,14 +1114,14 @@ function App() {
     }
     const currentIsClosed = planningSheet.unavailableSheetIndices.includes(currentSheetIndex)
     const side = sheetCutSide(catalogueComponents, sheet, currentSheetIndex)
-    if (part && (currentIsClosed || side === 'mixed' || !compatibleCutSides(side, part.cutSide))) {
+    if (part && (currentIsClosed || side === 'mixed' || !compatibleCutSides(side, effectiveCutSide(part, sheet)))) {
       const target = Array.from({ length: sheetCount + 1 }, (_, index) => index).find(index => {
         const face = sheetCutSide(catalogueComponents, sheet, index)
-        return !planningSheet.unavailableSheetIndices.includes(index) && face !== 'mixed' && compatibleCutSides(face, part.cutSide)
+        return !planningSheet.unavailableSheetIndices.includes(index) && face !== 'mixed' && compatibleCutSides(face, effectiveCutSide(part, sheet))
       })!
       setSheet(current => numberSheetParts({ ...current, instances: [...current.instances, newInstance(partId, x, y, target)] }))
       setActiveSheetIndex(target)
-      setStatus(`Added ${part.name} to Sheet ${target + 1}: ${cutSideLabel(part.cutSide)}.`)
+      setStatus(`Added ${part.name} to Sheet ${target + 1}: ${cutSideLabel(effectiveCutSide(part, sheet))}.`)
       return
     }
     setSheet((current) => numberSheetParts({
@@ -1691,6 +1691,14 @@ function App() {
             Border
             <input type="number" value={sheet.borderSpacing} onChange={(event) => setSheet({ ...sheet, borderSpacing: Number(event.target.value) })} />
           </label>
+          <label className="screw-mark-control" title="Allow either face up across this sheet project without changing catalogue components">
+            <input type="checkbox" checked={sheet.ignorePatternSides === true} disabled={planningSheet.unavailableSheetIndices.length > 0} onChange={event => {
+              setSheet({ ...sheet, ignorePatternSides: event.target.checked })
+              setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+              setStatus(event.target.checked ? 'Pattern sides ignored for this sheet project. Auto-nest to combine compatible parts.' : 'Pattern sides respected again. Auto-nest to separate conflicting faces before export.')
+            }} />
+            Ignore pattern sides
+          </label>
           <label className="screw-mark-control" title="6 mm cutter; recessed screw heads">
             <input type="checkbox" checked={sheet.screwMarkingEnabled === true} onChange={(event) => setSheet({ ...sheet, screwMarkingEnabled: event.target.checked })} />
             Screw marks
@@ -1799,7 +1807,7 @@ function App() {
                 <Trash2 size={16} /> Delete All Parts
               </button>
             </div>
-            <p className="sheet-cut-side" role="status">Sheet {currentSheetIndex + 1} · <strong>{cutSideLabel(sheetCutSide(sheetParts, sheet, currentSheetIndex))}</strong></p>
+            <p className="sheet-cut-side" role="status">Sheet {currentSheetIndex + 1} · <strong>{sheet.ignorePatternSides === true ? 'Pattern sides ignored · Either side up' : cutSideLabel(sheetCutSide(sheetParts, sheet, currentSheetIndex))}</strong></p>
             <SheetEditor
               parts={sheetParts}
               sheet={sheet}
@@ -1812,6 +1820,7 @@ function App() {
           </main>
           <div className="side-stack">
             <PropertiesPanel
+              ignorePatternSides={sheet.ignorePatternSides}
               part={planningSheet.unavailableSheetIndices.includes(currentSheetIndex) ? undefined : selectedInstancePart}
               instance={planningSheet.unavailableSheetIndices.includes(currentSheetIndex) ? undefined : selectedInstance}
               onUpdate={(patch) => selectedInstanceId && updateInstance(selectedInstanceId, patch)}

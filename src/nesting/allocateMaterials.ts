@@ -1,7 +1,7 @@
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
-import { compatibleCutSides, sheetCutSide } from '../models/cutSide'
+import { compatibleCutSides, effectiveCutSide, sheetCutSide } from '../models/cutSide'
 import { materialProfiles } from '../cam/materialProfiles'
 import { selectMaterialParts } from '../gcode/materialSelection'
 import { autoNest, partFitsSheet } from './nestingEngine'
@@ -21,7 +21,7 @@ export function allocateMaterials(parts: Part[], sheet: Sheet, additions: PartIn
       if (closed.has(index)) return false
       const setup = sheetMaterial(next, index), face = sheetCutSide(parts, next, index)
       if (selectMaterialParts([part], { ...setup, instances: [{ partId: part.id }] }).errors.length) return false
-      return (!required || stockKey(required) === stockKey(setup.stockMaterial)) && (!original || materialSetupKey(original) === materialSetupKey(setup)) && face !== 'mixed' && compatibleCutSides(face, part.cutSide)
+      return (!required || stockKey(required) === stockKey(setup.stockMaterial)) && (!original || materialSetupKey(original) === materialSetupKey(setup)) && face !== 'mixed' && compatibleCutSides(face, effectiveCutSide(part, next))
     }
     const indices = [...new Set([startIndex, ...next.instances.map(i => i.sheetIndex), ...Object.keys(next.sheetMaterials ?? {}).map(Number)])]
     let index = (matchingOnly ? [startIndex] : indices).find(compatible)

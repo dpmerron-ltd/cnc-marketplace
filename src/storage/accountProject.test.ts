@@ -39,6 +39,15 @@ describe('account-local projects', () => {
     expect(copy.sheet.orderImports![0].instanceIds).toEqual([copy.sheet.pendingParts![0].id])
   })
 
+  it('persists the sheet override without modifying component defaults', () => {
+    const project = fixture()
+    project.sheet.ignorePatternSides = true
+    project.parts[0].cutSide = 'pattern'
+    expect(saveProject(project, 'alice')).toBe(true)
+    expect(loadProject('alice')?.sheet.ignorePatternSides).toBe(true)
+    expect(loadProject('alice')?.parts[0].cutSide).toBe('pattern')
+  })
+
   it('retains unloaded owned placements and history but preserves shared index references', () => {
     const original = fixture()
     const project = { ...original, parts: [], componentIndex: original.parts.map(summarizePart), sheetHistory: [{ id: 'history', name: '', savedAt: '', sheet: original.sheet, itemCount: 2, componentCount: 2, placedCount: 2 }] }

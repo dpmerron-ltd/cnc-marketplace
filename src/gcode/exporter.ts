@@ -14,7 +14,7 @@ import type { Point } from '../models/geometry'
 import { numberSheetParts, partNumberText } from '../labels/partLabels'
 import { selectMaterialParts } from './materialSelection'
 import { materialProfiles } from '../cam/materialProfiles'
-import { cutSideErrors, cutSideLabel, sheetCutSide } from '../models/cutSide'
+import { cutSideErrors, cutSideLabel, sheetCutSide, effectiveCutSide } from '../models/cutSide'
 
 function commentText(value: string): string {
   return value.replace(/[\r\n()]/g, ' ')
@@ -180,7 +180,7 @@ function transformedInstanceLines(
     output.push(`(Physical sheet: ${instance.sheetIndex + 1})`)
     output.push(`(Position: X${formatNumber(instance.x)} Y${formatNumber(instance.y)})`)
     output.push(`(Rotation: ${instance.rotation})`)
-    output.push(`(Cutting face: ${cutSideLabel(part.cutSide)})`)
+    output.push(`(Cutting face: ${cutSideLabel(effectiveCutSide(part, sheet))})`)
     output.push(`G00 Z${formatNumber(sheet.gcodeSettings.safeZ)}`)
     output.push(`G00 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`)
     const sourceInitialFeed = part.parsed.startLines.flatMap(line => line.words).filter(word => word.letter === 'F').at(-1)?.value

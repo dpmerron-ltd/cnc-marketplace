@@ -29,6 +29,27 @@ describe('export saves a machine snapshot before downloading', () => {
     } })
   })
   afterEach(cleanup)
+  it('lets the operator override pattern faces for the sheet and restores the restriction when unticked', async () => {
+    const remote = await mock.load()
+    remote.parts = remote.parts.map((part: typeof testParts[number], i: number) => ({ ...part, cutSide: i ? 'non-pattern' : 'pattern' }))
+    remote.sheet.instances.push({ ...remote.sheet.instances[0], id: 'second', partId: testParts[1].id, x: 150 })
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+    const toggle = await screen.findByRole('checkbox', { name: 'Ignore pattern sides' })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+    expect(toggle).toBeChecked()
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Combined' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export G-code' }))
+    await waitFor(() => expect(mock.download).toHaveBeenCalledTimes(1))
+    expect(mock.download.mock.calls[0][1]).toContain('(Load material: Either side)')
+    expect(mock.saveRun.mock.calls[0][2].sheets[0].cutSide).toBe('either')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore pattern sides' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore pattern sides' })).not.toBeChecked()
+    expect(screen.getAllByText(/mixes pattern-side-up and non-pattern-side-up/).length).toBeGreaterThan(0)
+  })
+
   it('preserves a machine link through sign-in and does not require the catalogue to load', async () => {
     const id = '00000000-0000-4000-8000-000000000001'
     window.history.replaceState({}, '', `#machine/${id}`)

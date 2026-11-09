@@ -30,6 +30,16 @@ describe('material allocation and machining', () => {
     expect(buildPartLabels(parts, [testItem], sheet).map(l => l.material)).toEqual(['12 mm Plywood · Natural', '12 mm Plywood · Black hex', '12 mm Plywood · Black hex', '18 mm Plywood · Natural'])
     expect(sheetGCodeFilename('job-sheet-2', parts, sheet, sheet.instances[1].sheetIndex)).toBe('job-sheet-2-12-mm-plywood-black-hex-pattern-side-up.nc')
   })
+  it('ignores pattern faces while retaining stock thickness and finish separation', () => {
+    const parts = [{ ...materialPart('front', hex), cutSide: 'pattern' as const },
+      { ...materialPart('back', hex), cutSide: 'non-pattern' as const }, materialPart('natural')]
+    const sheet = allocateMaterials(parts, { ...materialSheet(), ignorePatternSides: true }, parts.map(p => addition(p.id)))
+    expect(sheet.instances[0].sheetIndex).toBe(sheet.instances[1].sheetIndex)
+    expect(sheet.instances[2].sheetIndex).not.toBe(sheet.instances[0].sheetIndex)
+    expect(stockErrors(parts, sheet)).toEqual([])
+    expect(exportPhysicalSheetGCodes(parts, sheet).flatMap(f => f.errors)).toEqual([])
+    expect(buildPartLabels(parts, [testItem], sheet).every(l => l.cutSide === 'either')).toBe(true)
+  })
   it('keeps deferred parts exactly once and later allocates them without moving existing cuts', () => {
     const parts = [materialPart('natural'), materialPart('hex', hex)]
     const additions = parts.map(p => addition(p.id))

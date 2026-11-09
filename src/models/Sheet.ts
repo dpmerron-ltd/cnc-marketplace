@@ -33,6 +33,8 @@ export interface Sheet {
   spacing: number
   borderSpacing: number
   instances: PartInstance[]
+  // Sheet-local override; catalogue cutting faces remain unchanged.
+  ignorePatternSides?: boolean
   screwMarkingEnabled?: boolean
   // null records an explicitly disabled override; absent values use the app default.
   safeZOverrideMm?: number | null

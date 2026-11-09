@@ -7,7 +7,7 @@ import { numberSheetParts, partNumberText } from '../labels/partLabels'
 import { simulateGCode, type SimulatedMove } from '../gcode/simulator'
 import { instanceBounds, transformLocalPoint } from '../gcode/transform'
 import { selectMaterialParts } from '../gcode/materialSelection'
-import { sheetCutSide, type CutSide, type SheetCutSide } from '../models/cutSide'
+import { effectiveCutSide, sheetCutSide, type CutSide, type SheetCutSide } from '../models/cutSide'
 
 export interface TabLocation {
   points: Point[]
@@ -143,7 +143,7 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
       const source = cache.get(cacheKey)!
       const transform = (point: Point) => transformLocalPoint(part, instance, point)
       return {
-        orderKey: instance.orderKey ?? sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))?.key, partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: part.cutSide ?? 'either',
+        orderKey: instance.orderKey ?? sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))?.key, partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: effectiveCutSide(part, sheet),
         paths: source.paths.map(path => path.map(transform)),
         tabs: source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: source.warnings,
       }
