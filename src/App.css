@@ -1052,7 +1052,9 @@ textarea {
 .material-editor { border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px; margin: 18px 0; }
 .material-editor fieldset { margin: 12px 0; border: 1px solid #cbd5e1; }
 .material-editor summary { cursor: pointer; padding: 12px 0; }
-.material-allocation { background: white; color: #1e293b; width: min(1000px, 94vw); max-height: 90vh; overflow: auto; padding: 24px; border-radius: 12px; }
+.material-allocation { background: white; color: #1e293b; width: min(1000px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; padding: 24px; border-radius: 12px; }
+.material-allocation:not([open]) { display: none; }
+.material-allocation::backdrop { background: rgba(15, 23, 31, 0.44); backdrop-filter: blur(4px); }
 .material-allocation > label { display: block; margin: 12px 0; }
 .material-allocation table { width: 100%; border-collapse: collapse; margin: 16px 0; }
 .material-allocation th, .material-allocation td { padding: 10px; border-bottom: 1px solid #cbd5e1; text-align: left; }

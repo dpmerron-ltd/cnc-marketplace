@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { testImage } from './test/imageFixture'
@@ -7,6 +7,7 @@ import type { RemoteProjectState } from './storage/supabaseProjectStore'
 import { defaultProgramSettings } from './gcode/programSettings'
 import { summarizePart, type Part } from './models/Part'
 import { loadProject } from './storage/projectStorage'
+import { hex, materialPart, materialSheet } from './test/materialFixtures'
 vi.mock('./ui/ItemDocuments', () => ({ ItemDocuments: () => <section aria-label="Item documents" /> }))
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
 
@@ -15,8 +16,9 @@ const mock = vi.hoisted(() => ({
   authChanged: undefined as undefined | ((event: string, session: unknown) => void),
   load: vi.fn(), loadItem: vi.fn(), loadImage: vi.fn(), save: vi.fn<(...args: unknown[]) => Promise<{ ok: boolean }>>(async () => ({ ok: true })),
   programs: vi.fn(), savePrograms: vi.fn(),
-  download: vi.fn(),
+  download: vi.fn(), request: vi.fn(),
 }))
+vi.mock('./storage/jobsApi', () => ({ jobApiRequest: (...args: unknown[]) => mock.request(...args) }))
 vi.mock('./storage/supabaseClient', () => ({
   supabaseUrl: 'https://test.supabase.co',
   supabase: {
@@ -110,6 +112,48 @@ function placedLibrary() {
 describe('account switching', () => {
   beforeEach(() => { localStorage.clear(); mock.userId = 'alice'; mock.load.mockReset(); mock.loadItem.mockReset().mockResolvedValue([]); mock.save.mockClear(); mock.download.mockReset(); mock.programs.mockReset().mockResolvedValue(defaultProgramSettings); mock.savePrograms.mockReset().mockImplementation(async (_owner, value) => value) })
   afterEach(() => { cleanup(); window.history.replaceState({}, '', '/') })
+  it.each(['Cancel', 'Escape'])('can cancel order allocation with %s, retry, and save every order part once', async cancel => {
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true })
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false })
+    const remote = library('alice')
+    remote.parts = [materialPart('Natural panel'), materialPart('Hex panel', hex)].map(part => ({ ...part, ownerId: 'alice', itemId: 'alice-item' }))
+    remote.sheet = materialSheet()
+    mock.load.mockResolvedValue(remote)
+    const pageInfo = { hasNextPage: false, endCursor: null }
+    const order = { id: 'gid://shopify/Order/7', name: '#1007', lineItems: { nodes: [{ id: 'line', title: 'Cabinet', sku: 'SKU', currentQuantity: 2, quantity: 2, unfulfilledQuantity: 2 }], pageInfo } }
+    mock.request.mockImplementation(async path => ({ json: async () => path === '/shopify/connection'
+      ? { connected: true, isOrderAdmin: false, shop: 'test.myshopify.com' }
+      : path === '/shopify/orders/7' ? { shop: 'test.myshopify.com', order }
+      : { shop: 'test.myshopify.com', orders: [order], pageInfo } }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Orders' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add #1007 to sheet' }))
+    const add = await screen.findByRole('button', { name: 'Add components' })
+    await waitFor(() => expect(add).toBeEnabled())
+    fireEvent.click(add)
+    const allocation = await screen.findByRole('dialog', { name: 'Allocate item materials' })
+    expect(allocation).toHaveAttribute('open')
+    expect(within(allocation).getByText('4 parts allocated · 0 awaiting allocation · 4 total')).toBeInTheDocument()
+    if (cancel === 'Cancel') fireEvent.click(within(allocation).getByRole('button', { name: 'Cancel' }))
+    else fireEvent(allocation, new Event('cancel', { cancelable: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Allocate item materials' })).not.toBeInTheDocument())
+    expect(screen.getByRole('dialog', { name: 'Add #1007 to sheet' })).toHaveAttribute('open')
+    await waitFor(() => expect(add).toBeEnabled())
+    expect(mock.save.mock.calls.every(call => !(call[2] as { instances: unknown[] }).instances.length)).toBe(true)
+    fireEvent.click(add)
+    const retry = await screen.findByRole('dialog', { name: 'Allocate item materials' })
+    fireEvent.click(within(retry).getByRole('button', { name: 'Add parts' }))
+    await screen.findByText('Added 4 parts for #1007. Review allocated sheets and any parts awaiting material.')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(mock.save.mock.calls.at(-1)?.[2]).toMatchObject({
+      instances: expect.arrayContaining([expect.objectContaining({ orderName: '#1007', orderKey: 'test.myshopify.com/gid://shopify/Order/7' })]),
+      orderImports: [{ key: 'test.myshopify.com/gid://shopify/Order/7', name: '#1007', instanceIds: expect.any(Array) }],
+    }))
+    const saved = mock.save.mock.calls.at(-1)![2] as typeof remote.sheet
+    expect(saved.instances).toHaveLength(4)
+    expect(saved.orderImports![0].instanceIds).toHaveLength(4)
+    expect(new Set(saved.instances.map(part => part.sheetIndex)).size).toBe(2)
+  })
   it('opens the exact physical sheet from an order in Cutting Jobs', async () => {
     HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true })
     const remote: RemoteProjectState = cutSideLibrary()

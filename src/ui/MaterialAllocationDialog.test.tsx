@@ -1,13 +1,38 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MaterialAllocationDialog } from './MaterialAllocationDialog'
 import { MaterialEditor } from './MaterialEditor'
 import { addition, hex, materialPart, materialSheet, natural } from '../test/materialFixtures'
 import { testItem } from '../test/jobFixtures'
 
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true })
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false })
+})
 afterEach(cleanup)
 
 describe('material planning controls', () => {
+  it('opens above an existing modal and leaves that modal open when cancelled', () => {
+    const parent = document.createElement('dialog')
+    document.body.append(parent)
+    parent.showModal()
+    const onApply = vi.fn(), onCancel = vi.fn(), part = materialPart('panel')
+    const view = render(<MaterialAllocationDialog name="Order #1007" parts={[part]} sheet={materialSheet()} additions={[addition(part.id)]} startIndex={0} onApply={onApply} onCancel={onCancel} />)
+    const allocation = screen.getByRole('dialog', { name: 'Allocate item materials' })
+    expect(allocation).toBeInstanceOf(HTMLDialogElement)
+    expect(HTMLDialogElement.prototype.showModal).toHaveBeenLastCalledWith()
+    expect(allocation).toHaveAttribute('open')
+    expect(screen.getByRole('radio', { name: /Allocate every part/ })).toHaveFocus()
+    const event = new Event('cancel', { cancelable: true })
+    fireEvent(allocation, event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(onCancel).toHaveBeenCalledOnce()
+    expect(onApply).not.toHaveBeenCalled()
+    view.unmount()
+    expect(allocation).not.toHaveAttribute('open')
+    expect(parent.open).toBe(true)
+    parent.remove()
+  })
   it('previews the full item or just matching parts and commits only on Add parts', () => {
     const parts = [materialPart('panel'), materialPart('hex', hex)], onApply = vi.fn(), onCancel = vi.fn()
     render(<MaterialAllocationDialog name="Cabinet" parts={parts} sheet={materialSheet()} additions={parts.map(p => addition(p.id))} startIndex={0} onApply={onApply} onCancel={onCancel} />)
