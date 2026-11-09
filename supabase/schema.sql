@@ -400,6 +400,46 @@ drop trigger if exists guard_machine_export on public.cnc_machine_runs;
 create trigger guard_machine_export before insert or update on public.cnc_machine_runs
   for each row execute function public.guard_machine_export();
 
+-- PostgREST applies this timeout to the RPC transaction before decoding its body.
+-- Keep the normal eight-second role limit for all unrelated requests.
+create or replace function public.save_cnc_machine_run(p_id uuid, p_snapshot jsonb)
+returns uuid language plpgsql security invoker
+set search_path = '' set statement_timeout = '60s' as $$
+declare
+  account uuid := auth.uid();
+  saved jsonb;
+begin
+  if account is null or coalesce(auth.jwt()->>'aal', '') <> 'aal2' then
+    raise exception 'Verified sign-in required' using errcode = '42501';
+  end if;
+  if p_id is null or (p_snapshot->>'version' = '1'
+      and jsonb_typeof(p_snapshot->'files') = 'array'
+      and jsonb_typeof(p_snapshot->'map'->'parts') = 'array') is not true then
+    raise exception 'Invalid export snapshot' using errcode = '22023';
+  end if;
+  -- Retries never rewrite the snapshot or reset a cutting status.
+  select snapshot into saved from public.cnc_machine_runs where id = p_id and owner_id = account;
+  if found then
+    if saved is distinct from p_snapshot then
+      raise exception 'This export ID already contains different files. Reopen export.' using errcode = '23505';
+    end if;
+    return p_id;
+  end if;
+  insert into public.cnc_machine_runs(id,owner_id,name,order_number,material,thickness,sheet_count,part_count,snapshot)
+  values (p_id,account,p_snapshot->'map'->>'name',p_snapshot->'map'->>'order',
+    p_snapshot->>'material',p_snapshot->>'thickness',(p_snapshot->'map'->>'sheetCount')::integer,
+    jsonb_array_length(p_snapshot->'map'->'parts'),p_snapshot)
+  on conflict (id) do nothing;
+  select snapshot into saved from public.cnc_machine_runs where id = p_id and owner_id = account;
+  if not found then raise exception 'Export could not be saved to this account' using errcode = '42501'; end if;
+  if saved is distinct from p_snapshot then
+    raise exception 'This export ID already contains different files. Reopen export.' using errcode = '23505';
+  end if;
+  return p_id;
+end $$;
+revoke all on function public.save_cnc_machine_run(uuid,jsonb) from public, anon;
+grant execute on function public.save_cnc_machine_run(uuid,jsonb) to authenticated;
+
 -- Replacement requests refer to the exact part in an immutable machine export.
 create table if not exists public.cnc_machine_recuts (
   id uuid primary key default gen_random_uuid(),

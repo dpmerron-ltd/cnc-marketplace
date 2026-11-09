@@ -6,6 +6,10 @@ The app treats individual `.nc`, `.tap`, `.gcode`, or `.cnc` files as reusable m
 
 Each account configures its own start, spindle-start and end programs under **Profile > CNC Program Settings**. Settings are stored in an owner-isolated, MFA-protected table and apply to new browser/API generation. Dan's existing programs are retained only for his account; other users must save their own settings before exporting. Queued job files remain immutable snapshots. See [program settings and validation](docs/API.md#account-program-settings).
 
+## Large export saves
+
+Machine exports use `save_cnc_machine_run` to store the immutable snapshot and return only its ID. This authenticated, MFA-protected RPC has a bounded 60-second transaction timeout for large multi-sheet payloads; unrelated API requests retain the normal timeout. Retries use the same ID and exact snapshot, never overwrite a saved program or reset its status. A reused ID with different content is rejected. Apply `supabase/schema.sql` before deploying this client.
+
 ## Ignore pattern sides
 
 In the Sheet toolbar, tick **Ignore pattern sides** to allow either face up throughout the current sheet project. Existing placements stay in place; use **Auto-nest** to combine parts that were previously separated by face. The setting is saved with the sheet and applies to manual additions, item/order nesting, validation, NC, labels and export snapshots. Catalogue component settings and existing exports are unchanged. Untick it to restore face restrictions; mixed layouts must be re-nested before export. The toggle is disabled once a physical sheet in that job has started or been cut, preserving its recorded settings.

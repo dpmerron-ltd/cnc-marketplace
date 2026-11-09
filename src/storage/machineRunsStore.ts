@@ -11,15 +11,11 @@ async function clientFor(ownerId: string) {
 
 export async function saveMachineRun(id: string, ownerId: string, snapshot: ExportSnapshot): Promise<void> {
   const client = await clientFor(ownerId)
-  const { error } = await client.from('cnc_machine_runs').upsert({
-    id, owner_id: ownerId, name: snapshot.map.name, order_number: snapshot.map.order,
-    material: snapshot.material, thickness: snapshot.thickness,
-    sheet_count: snapshot.map.sheetCount, part_count: snapshot.map.parts.length, snapshot,
-  }, { onConflict: 'id', ignoreDuplicates: true })
-  if (error) throw new Error(error.message)
-  // A retry after a lost response keeps the same ID and cannot overwrite an export.
-  const { data, error: readError } = await client.from('cnc_machine_runs').select('id').eq('owner_id', ownerId).eq('id', id).single()
-  if (readError || data?.id !== id) throw new Error(readError?.message ?? 'The exported sheet was not saved.')
+  // Send the large immutable snapshot once through a bounded export-only RPC.
+  // Its transaction timeout includes PostgREST body decoding; the normal table
+  // endpoint uses the authenticated role's eight-second limit.
+  const { data, error } = await client.rpc('save_cnc_machine_run', { p_id: id, p_snapshot: snapshot })
+  if (error || data !== id) throw new Error(error?.message ?? 'The exported sheet was not saved.')
 }
 
 export async function listMachineRuns(ownerId: string, offset: number, status: string, signal: AbortSignal): Promise<MachineRunSummary[]> {
