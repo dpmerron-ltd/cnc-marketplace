@@ -27,7 +27,7 @@ describe('material allocation and machining', () => {
     expect(stockErrors(parts, sheet)).toEqual([])
     expect(sheetMaterial(sheet, sheet.instances[1].sheetIndex).stockMaterial).toEqual(hex)
     expect(sheetMaterial(sheet, sheet.instances[3].sheetIndex).materialProfile).toBe('18')
-    expect(buildPartLabels(parts, [testItem], sheet).map(l => l.material)).toEqual(['12 mm Plywood · Natural', '12 mm Plywood · Black hex', '12 mm Plywood · Black hex', '18 mm Plywood · Natural'])
+    expect(buildPartLabels(parts, [testItem], sheet).map(l => l.material)).toEqual(['12 mm Plywood · Natural', '12 mm Plywood · Black Hex', '12 mm Plywood · Black Hex', '18 mm Plywood · Natural'])
     expect(sheetGCodeFilename('job-sheet-2', parts, sheet, sheet.instances[1].sheetIndex)).toBe('job-sheet-2-12-mm-plywood-black-hex-pattern-side-up.nc')
   })
   it('ignores pattern faces while retaining stock thickness and finish separation', () => {

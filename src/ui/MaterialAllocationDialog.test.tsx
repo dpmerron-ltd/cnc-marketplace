@@ -12,7 +12,7 @@ describe('material planning controls', () => {
     const parts = [materialPart('panel'), materialPart('hex', hex)], onApply = vi.fn(), onCancel = vi.fn()
     render(<MaterialAllocationDialog name="Cabinet" parts={parts} sheet={materialSheet()} additions={parts.map(p => addition(p.id))} startIndex={0} onApply={onApply} onCancel={onCancel} />)
     expect(screen.getByText('2 parts allocated · 0 awaiting allocation · 2 total')).toBeInTheDocument()
-    expect(screen.getByText('12 mm Plywood · Black hex')).toBeInTheDocument()
+    expect(screen.getByText('12 mm Plywood · Black Hex')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: /Add matching parts/ }))
     expect(screen.getByText('1 parts allocated · 1 awaiting allocation · 2 total')).toBeInTheDocument()
     expect(onApply).not.toHaveBeenCalled()

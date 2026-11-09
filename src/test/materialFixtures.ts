@@ -6,7 +6,7 @@ import type { StockMaterial } from '../models/stockMaterial'
 import { testParts } from './jobFixtures'
 
 export const natural: StockMaterial = { thicknessMm: 12, type: 'Plywood', finish: 'Natural' }
-export const hex: StockMaterial = { ...natural, finish: 'Black hex' }
+export const hex: StockMaterial = { ...natural, finish: 'Black Hex' }
 export function materialPart(id: string, stock = natural): Part {
   const part = testParts[0]
   const profiles = Object.fromEntries(materialProfiles.map(profile => [profile.id, {

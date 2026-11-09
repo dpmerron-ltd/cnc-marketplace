@@ -10,6 +10,26 @@ returns boolean language sql immutable set search_path = '' as $$
    and jsonb_typeof(value->'finish')='string' and length(btrim(value->>'finish')) between 1 and 80
    and value - array['thicknessMm','type','finish']='{}'::jsonb)
 $$;
+-- Canonicalise new stock writes, without rewriting published history.
+create or replace function public.canonical_stock_material(value jsonb)
+returns jsonb language sql immutable set search_path = '' as $$
+ select case when lower(regexp_replace(btrim(value->>'finish'), '[[:space:]-]+', ' ', 'g')) in ('black hex','black hex phenolic')
+   then jsonb_set(value, '{finish}', '"Black Hex"'::jsonb) else value end
+$$;
+create or replace function public.canonicalise_stock_write()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if TG_TABLE_NAME = 'marketplace_items' then
+    new.default_material := public.canonical_stock_material(new.default_material);
+  else
+    new.stock_material := public.canonical_stock_material(new.stock_material);
+  end if;
+  return new;
+end $$;
+drop trigger if exists canonicalise_stock_write on public.marketplace_items;
+create trigger canonicalise_stock_write before insert or update of default_material on public.marketplace_items for each row execute function public.canonicalise_stock_write();
+drop trigger if exists canonicalise_stock_write on public.cnc_components;
+create trigger canonicalise_stock_write before insert or update of stock_material on public.cnc_components for each row execute function public.canonicalise_stock_write();
 alter table public.marketplace_items drop constraint if exists valid_default_material;
 alter table public.marketplace_items add constraint valid_default_material check(public.valid_stock_material(default_material));
 alter table public.cnc_components drop constraint if exists valid_component_material;

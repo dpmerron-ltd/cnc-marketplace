@@ -4,19 +4,25 @@ import type { Sheet } from './Sheet'
 import type { PartInstance } from './PartInstance'
 import type { MaterialProfileId } from '../cam/materialProfiles'
 
+/** Historical finish labels refer to the same stock, irrespective of CAM preset. */
+export function canonicalStockFinish(value: string): string {
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, ' ')
+  return key === 'black hex' || key === 'black hex phenolic' ? 'Black Hex' : value.trim()
+}
+
 export const stockMaterialSchema = z.strictObject({
   thicknessMm: z.number().finite().positive().max(100),
   type: z.string().trim().min(1).max(80),
-  finish: z.string().trim().min(1).max(80),
+  finish: z.string().trim().min(1).max(80).transform(canonicalStockFinish),
 })
 export type StockMaterial = z.infer<typeof stockMaterialSchema>
 export interface SheetMaterial { stockMaterial?: StockMaterial; materialProfile?: MaterialProfileId; material?: string }
 const normal = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ')
 export function stockKey(stock?: StockMaterial): string {
-  return stock ? JSON.stringify([stock.thicknessMm, normal(stock.type), normal(stock.finish)]) : ''
+  return stock ? JSON.stringify([stock.thicknessMm, normal(stock.type), normal(canonicalStockFinish(stock.finish))]) : ''
 }
 export function stockLabel(stock?: StockMaterial): string {
-  return stock ? `${stock.thicknessMm} mm ${stock.type} · ${stock.finish}` : 'Stock not specified'
+  return stock ? `${stock.thicknessMm} mm ${stock.type} · ${canonicalStockFinish(stock.finish)}` : 'Stock not specified'
 }
 export function requiredMaterial(part: Pick<Part, 'stockMaterial' | 'defaultStockMaterial'>): StockMaterial | undefined {
   return part.stockMaterial ?? part.defaultStockMaterial
@@ -34,7 +40,7 @@ export function physicalSheet(sheet: Sheet, index: number): Sheet {
   return { ...sheet, ...sheetMaterial(sheet, index), sheetMaterials: undefined, instances: sheet.instances.filter(i => i.sheetIndex === index) }
 }
 export function setSheetMaterial(sheet: Sheet, index: number, setup: SheetMaterial): Sheet {
-  if (setup.stockMaterial) stockMaterialSchema.parse(setup.stockMaterial)
+  if (setup.stockMaterial) setup = { ...setup, stockMaterial: stockMaterialSchema.parse(setup.stockMaterial) }
   return { ...sheet, sheetMaterials: { ...sheet.sheetMaterials, [index]: setup }, instances: sheet.instances.map(i => ({ ...i, materialSetup: i.sheetIndex === index ? setup : i.materialSetup ?? sheetMaterial(sheet, i.sheetIndex) })) }
 }
 export function snapshotMaterials(sheet: Sheet): PartInstance[] {

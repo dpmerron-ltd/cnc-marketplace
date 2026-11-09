@@ -7,7 +7,7 @@ import { boundsPolygon, expandedFootprint, footprintScale, footprintsOverlap, fr
 import { convexSum } from './convexSum'
 import { selectMaterialParts } from '../gcode/materialSelection'
 import { compatibleCutSides, cutSideErrors, cutSides, type CutSide } from '../models/cutSide'
-import { hasSheetMaterials, materialSetupKey, snapshotMaterials, stockErrors } from '../models/stockMaterial'
+import { stockMaterialSchema, hasSheetMaterials, materialSetupKey, snapshotMaterials, stockErrors } from '../models/stockMaterial'
 
 interface PlacedShape { sheetIndex: number; cutSide?: CutSide; bounds: Bounds; points: Point[]; localPoints: Point[]; origin: Point }
 type NoFit = (obstacle: PlacedShape, candidate: Point[]) => ClipperLib.Path
@@ -120,7 +120,8 @@ function nestMaterials(parts: Part[], sheet: Sheet, onProgress?: (completed: num
       claimed.add(index)
       return index
     })
-    const setup = group[0].materialSetup!
+    const originalSetup = group[0].materialSetup!
+    const setup = originalSetup.stockMaterial ? { ...originalSetup, stockMaterial: stockMaterialSchema.parse(originalSetup.stockMaterial) } : originalSetup
     const local = { ...sheet, ...setup, sheetMaterials: undefined, unavailableSheetIndices: undefined,
       instances: group.map(({ materialSetup: _setup, ...i }) => ({ ...i, sheetIndex: originalIndices.indexOf(i.sheetIndex) })) }
     const errors = stockErrors(parts, local)

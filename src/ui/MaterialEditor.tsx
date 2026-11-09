@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import type { MarketplaceItem } from '../models/Item'
 import type { Part } from '../models/Part'
-import { stockMaterialSchema, stockLabel, type StockMaterial } from '../models/stockMaterial'
+import { canonicalStockFinish, stockMaterialSchema, stockLabel, type StockMaterial } from '../models/stockMaterial'
 
 const blank: StockMaterial = { thicknessMm: 12, type: 'Plywood', finish: 'Natural' }
 export function StockFields({ value, onChange, label, disabled = false }: { value: StockMaterial; onChange: (value: StockMaterial) => void; label: string; disabled?: boolean }) {
   return <div className="stock-fields">
     <label>Stock thickness (mm)<input aria-label={`${label} stock thickness`} type="number" min="0.1" max="100" step="0.1" disabled={disabled} value={value.thicknessMm || ''} onChange={e => onChange({ ...value, thicknessMm: Number(e.target.value) })} /></label>
     <label>Material type<input aria-label={`${label} material type`} disabled={disabled} value={value.type} onChange={e => onChange({ ...value, type: e.target.value })} placeholder="Plywood" /></label>
-    <label>Finish<input aria-label={`${label} finish`} disabled={disabled} value={value.finish} onChange={e => onChange({ ...value, finish: e.target.value })} placeholder="Natural / Black hex" /></label>
+    <label>Finish<input aria-label={`${label} finish`} disabled={disabled} value={value.finish} onChange={e => onChange({ ...value, finish: e.target.value })} onBlur={() => onChange({ ...value, finish: canonicalStockFinish(value.finish) })} placeholder="Natural / Black Hex" /></label>
   </div>
 }
 export function MaterialEditor({ item, parts, readOnly, onSave }: { item: MarketplaceItem; parts: Part[]; readOnly: boolean; onSave: (stock: StockMaterial | undefined, overrides: Record<string, StockMaterial | null>) => Promise<void> }) {

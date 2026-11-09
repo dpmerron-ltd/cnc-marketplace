@@ -7,7 +7,14 @@ insert into public.marketplace_items(id,owner_id,sku,name,default_material) valu
 insert into public.cnc_components(id,owner_id,item_id,sku,name,original_filename,gcode,width,height,bounding_box,original_bounds,metadata,component_family_id,cut_side,stock_material) values
 ('stock-front','00000000-0000-4000-8000-000000000009','94000000-0000-4000-8000-000000000001','FRONT','Front','front.nc','ORIGINAL FRONT',50,50,'{}','{}','{}','stock-front','pattern','{"thicknessMm":12,"type":"Plywood","finish":"Black hex"}'),
 ('stock-back','00000000-0000-4000-8000-000000000009','94000000-0000-4000-8000-000000000001','BACK','Back','back.nc','ORIGINAL BACK',50,50,'{}','{}','{}','stock-back','non-pattern',null);
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000009',true);
+do $$ begin
+  if public.canonical_stock_material('{"thicknessMm":12,"type":"Plywood","finish":" Black HEX phenolic "}') ->> 'finish' <> 'Black Hex' then raise exception 'Legacy finish not canonical'; end if;
+  if public.canonical_stock_material('{"thicknessMm":12,"type":"Plywood","finish":"Natural"}') ->> 'finish' <> 'Natural' then raise exception 'Natural stock changed'; end if;
+  if (select stock_material->>'finish' from public.cnc_components where id='stock-front') <> 'Black Hex' then raise exception 'Insert did not canonicalise finish'; end if;
+  update public.marketplace_items set default_material='{"thicknessMm":12,"type":"Plywood","finish":"black-hex phenolic"}' where id='94000000-0000-4000-8000-000000000001';
+  if (select default_material->>'finish' from public.marketplace_items where id='94000000-0000-4000-8000-000000000001') <> 'Black Hex' then raise exception 'Update did not canonicalise finish'; end if;
+end $$;
+select set_config('request.jwt.claim.sub' ,'00000000-0000-4000-8000-000000000009',true);
 select set_config('request.jwt.claim.aal','aal2',true);
 select id from public.publish_item_version('00000000-0000-4000-8000-000000000009','94000000-0000-4000-8000-000000000001',null);
 create function pg_temp.expect_material_error(command text, pattern text) returns void language plpgsql as $$
@@ -26,7 +33,7 @@ do $$ declare result jsonb; next_id uuid; original_id uuid := '94000000-0000-400
   if result->'current'->'default_material'->>'thicknessMm'<>'18' then raise exception 'Default stock missing'; end if;
   if not exists(select 1 from public.cnc_components where item_id=next_id and component_family_id='stock-front' and stock_material is null and gcode='ORIGINAL FRONT' and cut_side='pattern') then raise exception 'Override clearing damaged program or face'; end if;
   if not exists(select 1 from jsonb_array_elements(result->'components') c where c->>'component_family_id'='stock-back' and c->'stock_material'->>'finish'='White') then raise exception 'Response lost material override'; end if;
-  if (select default_material->>'thicknessMm' from public.marketplace_items where id=original_id)<>'12' or (select stock_material->>'finish' from public.cnc_components where id='stock-front')<>'Black hex' then raise exception 'Historical requirements changed'; end if;
+  if (select default_material->>'thicknessMm' from public.marketplace_items where id=original_id)<>'12' or (select stock_material->>'finish' from public.cnc_components where id='stock-front')<>'Black Hex' then raise exception 'Historical requirements changed'; end if;
   result := public.update_item_version(auth.uid(),next_id,'image','{"image":null}');
   if result->'current'->'default_material'->>'thicknessMm'<>'18' then raise exception 'Unrelated update lost stock'; end if;
 end $$;

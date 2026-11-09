@@ -97,3 +97,18 @@ describe('autoNest', () => {
     expect(autoNest(parts, sheet)).toEqual(expected.map(instance => ({ ...instance, locked: false })))
   })
 })
+
+it('nests legacy Black Hex labels together and preserves closed sheet data', () => {
+  const stock = { thicknessMm: 12, type: 'Plywood', finish: 'Black Hex' }
+  const oldStock = { ...stock, finish: 'Black hex phenolic' }
+  const parts = [{ ...makePart('hex'), stockMaterial: stock }]
+  const instances = [
+    { ...makeInstance('closed', 'hex'), materialSetup: { stockMaterial: oldStock } },
+    { ...makeInstance('old', 'hex'), sheetIndex: 1, materialSetup: { stockMaterial: oldStock } },
+    { ...makeInstance('new', 'hex'), sheetIndex: 2, materialSetup: { stockMaterial: stock } },
+  ]
+  const nested = autoNest(parts, { ...makeSheet(instances), unavailableSheetIndices: [0] })
+  expect(nested[0]).toEqual(instances[0])
+  expect(nested[1].sheetIndex).toBe(nested[2].sheetIndex)
+  expect(nested[1].materialSetup?.stockMaterial?.finish).toBe('Black Hex')
+})

@@ -504,7 +504,7 @@ export async function deleteRemoteGCodePreset(presetId: string): Promise<void> {
 }
 
 export async function saveRemoteMaterials(item: MarketplaceItem, defaultMaterial: StockMaterial | undefined, overrides: Record<string, StockMaterial | null>, userId: string): Promise<void> {
-  if (defaultMaterial) stockMaterialSchema.parse(defaultMaterial)
-  Object.values(overrides).forEach(value => { if (value) stockMaterialSchema.parse(value) })
+  if (defaultMaterial) defaultMaterial = stockMaterialSchema.parse(defaultMaterial)
+  overrides = Object.fromEntries(Object.entries(overrides).map(([id, value]) => [id, value ? stockMaterialSchema.parse(value) : null]))
   await updateRemoteItem(userId, item.id, 'materials', { expectedVersionId: item.id, defaultMaterial: defaultMaterial ?? null, components: overrides })
 }
