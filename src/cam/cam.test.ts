@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readDxf } from './dxf'
+import { materialProfiles } from './materialProfiles'
 import { generateCam, materialPreset } from './generate'
 import { area, contains, distance, offset } from './geometry'
 import type { CamDrawing, CamFeature, CamSettings } from './types'
@@ -470,4 +471,22 @@ describe('CNC generation', () => {
     expect(parsed.bodyLines.map(l => l.raw)).toContain('M00')
     expect(parsed.endLines.map(l => l.raw)).toEqual(['M05', 'M30'])
   })
+})
+
+it('preserves explicit DXF drill depths across every cutting preset', () => {
+  const drawing = readDxf(dxf([rectangle(), circle(20, 20, 3.175, 'DRILL_D6_35_DEPTH2')]))
+  expect(drawing.features[1]).toMatchObject({ kind: 'drill', depthMm: 2 })
+  for (const profile of materialProfiles) {
+    const result = generateCam(drawing, { ...settings, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile })
+    expect(result.errors).toEqual([])
+    expect(result.operations.find(op => op.kind === 'drill')?.depthMm).toBe(2)
+    expect(result.operations.find(op => op.kind === 'outside')?.depthMm).toBeGreaterThan(6)
+  }
+  const invalid = readDxf(dxf([rectangle(), circle(20, 20, 3.175, 'DRILL_DEPTH0')]))
+  expect(generateCam(invalid, settings).errors.join()).toContain('blind drill depth')
+})
+
+it('uses the preset drill depth when the source has no explicit depth', () => {
+  const drawing = readDxf(dxf([circle(20, 20, 3.175, 'DRILL')]))
+  expect(generateCam(drawing, { ...settings, thickness: 12 }).operations[0].depthMm).toBe(4.5)
 })

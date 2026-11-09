@@ -123,6 +123,12 @@ export function readDxf(source: string, selectedUnits: 'auto' | 'mm' | 'inches' 
     }
   }
   for (const f of features) {
+    if (f.kind === 'drill' && /^DRILL(?:[_ -]|$)/.test(f.layer.toUpperCase())) {
+      const depth = f.layer.toUpperCase().match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)
+      if (depth) f.depthMm = Number(depth[1])
+    }
+  }
+  for (const f of features) {
     if (!f.circle || Math.abs(f.circle.radius * 2 * unitFactor - 35) > 0.02) continue
     const doors = features.filter(other => other !== f && other.closed && !other.circle && other.kind === 'inside' && Math.abs(intersectionArea(other.points, f.points) - Math.abs(area(f.points))) * unitFactor ** 2 < 0.01)
     if (!doors.length) continue
