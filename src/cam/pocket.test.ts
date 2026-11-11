@@ -30,14 +30,14 @@ describe('Non-circular pocket clearing', () => {
       for (let i = 0; i <= count; i++) {
         const t = i / count, p = { x: move.start.x + (move.end.x - move.start.x) * t, y: move.start.y + (move.end.y - move.start.y) * t }
         expect(contains(boundary, p)).toBe(true)
-        expect(boundaryDistance(p, boundary)).toBeGreaterThanOrEqual(3.175 - 0.025)
+        expect(boundaryDistance(p, boundary)).toBeGreaterThanOrEqual(3 - 0.025)
       }
     }
     const floor = moves.filter(m => m.start.z === -4 && m.end.z === -4)
     for (let x = 0.7; x < 100; x += 3) for (let y = 0.7; y < 70; y += 3) {
       const p = { x: x + job.shift.x, y: y + job.shift.y }
-      if (!contains(boundary, p) || boundaryDistance(p, boundary) < 3.175) continue
-      expect(Math.min(...floor.map(m => segmentDistance(p, m.start, m.end)))).toBeLessThanOrEqual(3.175 + 0.025)
+      if (!contains(boundary, p) || boundaryDistance(p, boundary) < 3) continue
+      expect(Math.min(...floor.map(m => segmentDistance(p, m.start, m.end)))).toBeLessThanOrEqual(3 + 0.025)
     }
     expect(job.operations[0].tabs).toEqual([])
     expect(job.gcode).not.toMatch(/reach check/i)
@@ -94,10 +94,10 @@ describe('Non-circular pocket clearing', () => {
   })
 
   it('retains both disconnected cutter regions and bounds geometry work', () => {
-    const paths = pocketPaths(split, 3.175, 2.54)
+    const paths = pocketPaths(split, 3, 2.4)
     expect(paths.some(p => p.every(v => v.x < 40))).toBe(true)
     expect(paths.some(p => p.every(v => v.x > 60))).toBe(true)
-    expect(() => pocketPaths(rectangle, 3.175, 0.001)).toThrow('limit')
+    expect(() => pocketPaths(rectangle, 3, 0.001)).toThrow('limit')
   })
   it('requires an explicit blind depth and never converts a 12 mm depth to a through-hole', () => {
     expect(generateCam(drawing(rectangle), settings).gcode).toBe('')

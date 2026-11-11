@@ -47,13 +47,14 @@ describe('DXF review queue', () => {
   it.each([3, 12])('automatically removes tabs for %s mm holes and keeps outer outlines protected', async width => {
     const slot = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'CUT_INNER', 90, 4, 70, 1, 10, 0, 20, 0, 10, 100, 20, 0, 10, 100, 20, 3, 10, 0, 20, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={vi.fn()} />)
+    expect(screen.getByText('Cutter').nextElementSibling).toHaveTextContent('6 mm')
     upload([file('slot.dxf', async () => slot.replaceAll('\n20\n3\n', `\n20\n${width}\n`))]); await generated()
     const tabs = screen.getByRole('spinbutton', { name: /Tabs for/ })
     expect(tabs).toHaveValue(0)
     expect(tabs).toHaveAttribute('max', '0')
     expect(tabs).toBeDisabled()
     if (width === 3) {
-      expect(screen.getByText('6.35 mm cutter-width hole')).toBeInTheDocument()
+      expect(screen.getByText('6 mm cutter-width hole')).toBeInTheDocument()
       expect(screen.getByText(/widened from 3 mm/)).toBeInTheDocument()
     }
     expect(screen.queryByText(/no holding tabs/)).not.toBeInTheDocument()

@@ -1,5 +1,7 @@
 # DXF G-code Generator
 
+**Tooling confirmed by Dan on 2026-11-11: use a 6 mm diameter cutter (3 mm radius) for every operation and every material profile.** Saved NC and exported jobs retain their original compensated coordinates; regenerate from source geometry and review the resulting toolpaths before using the corrected tooling specification.
+
 ## Material Variants
 
 Each generation produces every supported material profile from the same DXF and operation choices, including the 13 mm and 14 mm four-pass profiles. The Generate thickness control selects the preview and standalone NC download. Saving adds one logical catalogue component with all material variants rather than duplicate components.
@@ -14,7 +16,7 @@ Open **Generate** while signed in. Upload an ASCII DXF, select 6 mm, 12 mm, 13 m
 
 The 13 mm and 14 mm presets use four equal passes to 13.4 mm and 14.4 mm
 respectively, 2 mm drills, 50 mm/s cutting and 10 mm/s ramps at up to 5 degrees,
-with a 6.35 mm cutter and Z20 clearance. Both are available on the sheet selector
+with a 6 mm cutter and Z20 clearance. Both are available on the sheet selector
 for regenerated components.
 Automatic 35 mm hinge pockets remain restricted to the existing 15/18 mm presets.
 
@@ -40,7 +42,7 @@ Select **12 mm (1 pass, ramp 20 mm/s at 5 deg)** for the standard 12 mm one-pass
 
 Select **18 mm (9 mm holes, ramp 20 mm/s at 5 deg)** for the same ramp settings with the existing 18 mm / 9 mm holes profile. Contours cut to 18.4 mm in two 9.2 mm passes. Drills peck to 2, 4, 6, 8 and 9 mm at F600, retracting to Z0.5 between pecks and Z20 before lateral travel. Hinge pockets remain 12 mm deep; cutting feed, tabs, cutter and account programs are unchanged. This is a separate variant (`18-9mm-ramp20-5deg`), not a change to the existing 18 mm profiles.
 
-**Cutter-width rectangular holes:** closed rectangular/square inside cuts whose narrowest side is at most the configured 6.35 mm cutter automatically have zero tabs, regardless of length or rotation. Undersized holes are widened about their centre to fit the cutter (both dimensions for a square smaller than the cutter), with a review notice. Longer slots use a centreline toolpath and the selected profile's ramp settings; point-sized holes use 2 mm pecks with Z0.5 retracts. Both cut through to the selected material's final depth, not the blind drilling depth. Existing material pass boundaries, Z20 clearance and optional dogbone corner relief are preserved. Widening or corner relief that intersects other geometry or breaks through an enclosing outline blocks export. Positive tab overrides are automatically ignored for these holes.
+**Cutter-width rectangular holes:** closed rectangular/square inside cuts whose narrowest side is at most the configured 6 mm cutter automatically have zero tabs, regardless of length or rotation. Undersized holes are widened about their centre to fit the cutter (both dimensions for a square smaller than the cutter), with a review notice. Longer slots use a centreline toolpath and the selected profile's ramp settings; point-sized holes use 2 mm pecks with Z0.5 retracts. Both cut through to the selected material's final depth, not the blind drilling depth. Existing material pass boundaries, Z20 clearance and optional dogbone corner relief are preserved. Widening or corner relief that intersects other geometry or breaks through an enclosing outline blocks export. Positive tab overrides are automatically ignored for these holes.
 
 Select **12 mm (2 passes)** for two 6.1 mm contour passes. This option carries forward through a DXF batch and adds `-2pass` to the generated filename. Drilling remains 4.5 mm deep, with the same pecks, Z20 clearance, ramps and tabs. Explicit blind pockets deeper than 6.1 mm use an initial 6.1 mm pass followed by their assigned depth. The original **12 mm (1 pass)** option remains available. The API equivalent is `thicknessMm: 12, profilePasses: 2`.
 
@@ -51,20 +53,20 @@ Select **12 mm (2 passes)** for two 6.1 mm contour passes. This option carries f
 | Blind drilling depth | 9.2 mm | 9.2 mm | 4.5 mm |
 | Drilling pecks | 2, 4, 6, 8, 9.2 mm | 2, 4, 6, 8, 9.2 mm | 2, 4, 4.5 mm |
 | Hinge pocket depth | 12 mm | 12 mm | Not allowed |
-| Cutter diameter | 6.35 mm | 6.35 mm | 6.35 mm |
+| Cutter diameter | 6 mm | 6 mm | 6 mm |
 | Spindle | Account profile | Account profile | Account profile |
 | Clearance above material | 20 mm | 20 mm | 20 mm |
 | Contour feed | 3,000 mm/min | 3,000 mm/min | 3,000 mm/min |
 | Ramp / drilling feed | 600 mm/min | 600 mm/min | 600 mm/min |
 | Ramp angle | 3 degrees | 3 degrees | 3 degrees |
 
-The feed and ramp preset is based on the existing Estlcam-style examples. Their 9.2 mm descent over an out-and-back 87.7733 mm path gives a 3-degree ramp. Tab sections span 16.35 mm of cutter-centre travel, leaving a nominal 10 mm tab after accounting for the cutter. Their tab height is 6 mm above the final cut depth, leaving approximately 5.6 mm of material in 18 mm stock or 5.8 mm in 12 mm stock. This is a new program generated from DXF geometry, not a byte-for-byte reproduction of the original CAM postprocessor.
+The feed and ramp preset is based on the existing Estlcam-style examples. Their 9.2 mm descent over an out-and-back 87.7733 mm path gives a 3-degree ramp. With the 6 mm cutter, tab sections span 16 mm of cutter-centre travel, leaving a nominal 10 mm tab. The tab height is 6 mm above the final cut depth, leaving approximately 5.6 mm of material in 18 mm stock or 5.8 mm in 12 mm stock. This is a new program generated from DXF geometry, not a byte-for-byte reproduction of the original CAM postprocessor.
 
-Finishing profiles offset outside the drawing by 3.175 mm. Door/internal finishing contours offset inside by 3.175 mm. Roughing reserves another 0.3 mm on the retained-material side. Internal openings whose narrowest full-outline width is at most 12 mm never have tabs, even with a positive override or a door label. Rectangular slots, including those with local corner reliefs, use straight-wall spacing up to 12.2 mm, allowing 0.2 mm fit clearance on a nominal 12 mm mortise. The relief outline and toolpath geometry are not changed by this measurement. Width is measured in millimetres before compensation, independent of rotation; circles retain a strict 12 mm diameter threshold. Other inside openings default to four tabs. If none fit an ordinary internal cutout, tabs are automatically removed with a waste-movement review warning. Non-door inside cuts also accept an explicit zero-tab override. Larger doors and outside profiles retain mandatory holding tabs and block export when none fit. Outside profiles use their existing 12 mm X/Y threshold. Blind pockets and drills have no tabs. Tabs are kept clear of every entry and re-entry ramp. When a clear span is short, the same 3-degree descent uses additional out-and-back cycles. Below-surface tab lifts use feed moves, not rapids.
+Finishing profiles offset outside the drawing by 3 mm. Door/internal finishing contours offset inside by 3 mm. Roughing reserves another 0.3 mm on the retained-material side. Internal openings whose narrowest full-outline width is at most 12 mm never have tabs, even with a positive override or a door label. Rectangular slots, including those with local corner reliefs, use straight-wall spacing up to 12.2 mm, allowing 0.2 mm fit clearance on a nominal 12 mm mortise. The relief outline and toolpath geometry are not changed by this measurement. Width is measured in millimetres before compensation, independent of rotation; circles retain a strict 12 mm diameter threshold. Other inside openings default to four tabs. If none fit an ordinary internal cutout, tabs are automatically removed with a waste-movement review warning. Non-door inside cuts also accept an explicit zero-tab override. Larger doors and outside profiles retain mandatory holding tabs and block export when none fit. Outside profiles use their existing 12 mm X/Y threshold. Blind pockets and drills have no tabs. Tabs are kept clear of every entry and re-entry ramp. When a clear span is short, the same 3-degree descent uses additional out-and-back cycles. Below-surface tab lifts use feed moves, not rapids.
 
 The generator uses blue solid outside profiles, gold dashed inside cuts, purple drill targets and charcoal dotted pocket paths. Tabs have yellow centres with dark outlines. The sidebar and legend repeat the same patterns/symbols, and errors use icons and text instead of red/green states. This is the default for every account; no colour-vision setting is required. Appearance changes do not alter G-code.
 
-Drill operations are cutter-sized plunges at the selected material's fixed blind depth. Drill circles define hole centres only: their nominal DXF diameter is ignored and each hole uses the configured 6.35 mm cutter diameter without a diameter warning or approval. Drill-layer depth hints do not override the material drilling preset.
+Drill operations are cutter-sized plunges at the selected material's fixed blind depth. Drill circles define hole centres only: their nominal DXF diameter is ignored and each hole uses the configured 6 mm cutter diameter without a diameter warning or approval. Drill-layer depth hints do not override the material drilling preset.
 
 Hinge detection uses geometry: a 35 mm circle (0.02 mm diameter tolerance) fully contained by a non-circular inside/door contour is a hinge pocket. The enclosing contour is treated as a door with holding tabs, including drawings on layer `0`. Hinge pockets default to 12 mm blind depth in 15 mm or 18 mm stock and are blocked in 12 mm stock, even if their depth is overridden. Pockets use a maximum initial pass of 7.7 mm in 15 mm stock or 9.2 mm in 18 mm stock, followed by their assigned final depth. Other internal openings default to through-cuts with tabs determined by the 12 mm size rule, including non-hinge geometry on `POCKET`/`HINGE` layers. Layer depth hints alone do not decide which geometry is a hinge.
 

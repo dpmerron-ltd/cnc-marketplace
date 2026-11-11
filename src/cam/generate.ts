@@ -245,11 +245,11 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
           emit(`(Finishing pass: ${n(finishingAllowanceMm)} mm allowance / full depth ${n(depth)} mm)`)
           for (const path of finish) cutLoop(path, 0, depth)
           operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [...paths, ...finish].flat(), tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
-          warnings.push(`${f.name}: internal corners and narrow recesses are limited by the 6.35 mm cutter; verify the pocket preview.`)
+          warnings.push(`${f.name}: internal corners and narrow recesses are limited by the ${camPreset.diameter} mm cutter; verify the pocket preview.`)
           continue
         }
         const finishRadius = f.circle.radius - toolRadius, radius = finishRadius - finishingAllowanceMm, center = f.circle.center
-        if (radius < 0.1) throw new Error('Pocket is too small for the 6.35 mm cutter and 0.3 mm finishing allowance; use a smaller cutter or cutter-size drilling where appropriate.')
+        if (radius < 0.1) throw new Error(`Pocket is too small for the ${camPreset.diameter} mm cutter and ${finishingAllowanceMm} mm finishing allowance; use cutter-size drilling where appropriate.`)
         const entryRadius = Math.min(toolRadius * 0.75, radius)
         const entry = { x: center.x + entryRadius, y: center.y }
         emit(`(Roughing: leave ${n(finishingAllowanceMm)} mm on walls)`)
@@ -418,7 +418,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter 6.35 mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F${cutFeed} / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
+  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter ${camPreset.diameter} mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F${cutFeed} / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
   const candidate = [...header, ...lines, 'G00 Z20', 'M05', ...programLines(programs.endGcode), ''].join('\n')
   const simulation = simulateGCode(candidate)

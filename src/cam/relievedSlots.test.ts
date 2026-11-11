@@ -25,7 +25,7 @@ describe('relieved 12 mm mortises', () => {
         const points = hole.points.map(p => ({ x: mirror * p.x * Math.cos(a) - p.y * Math.sin(a), y: mirror * p.x * Math.sin(a) + p.y * Math.cos(a) })).reverse()
         points.push(points[0])
         expect(minimumOpeningWidth(points)).toBeGreaterThan(14)
-        expect(relievedRectangleGeometry(points, 6.35)?.width).toBeCloseTo(12.2)
+        expect(relievedRectangleGeometry(points, 6)?.width).toBeCloseTo(12.2)
         expect(defaultTabCount({ ...hole, points })).toBe(0)
         expect(defaultTabCount({ ...hole, points, kind: 'outside' })).toBe(4)
         const larger = points.map(p => ({ x: p.x * 2, y: p.y * 2 }))
@@ -38,7 +38,7 @@ describe('relieved 12 mm mortises', () => {
     const hole = drawing.features.find(f => f.kind === 'inside')!
     const points = [...hole.points]
     points.splice(16, 0, { x: 250, y: 27 })
-    expect(relievedRectangleGeometry(points, 6.35)).toBeUndefined()
+    expect(relievedRectangleGeometry(points, 6)).toBeUndefined()
     expect(defaultTabCount({ ...hole, points })).toBe(4)
   })
   it('exports every slot tab-free across every material profile, retaining outer tabs and drills', async () => {

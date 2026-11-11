@@ -156,7 +156,7 @@ The account-scoped jobs API accepts item quantities, auto-nests their components
 
 See [API reference and deployment instructions](docs/API.md) for authentication, request examples, retry rules, limits, files, and queue transitions.
 
-The optional **18 mm (9 mm holes)** cutting profile uses the 6.35 mm cutter and
+The optional **18 mm (9 mm holes)** cutting profile uses the 6 mm cutter and
 exactly 9 mm-deep fixing holes, while retaining the normal 18 mm through cuts.
 See [API instructions](docs/API.md) for the `drillDepthMm: 9` selector.
 

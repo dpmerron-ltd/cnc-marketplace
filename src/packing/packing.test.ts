@@ -100,7 +100,7 @@ describe('flat-pack box estimates', () => {
     expect(packingPieces([noHint])[0]).toMatchObject({ thickness: 18, thicknessSource: 'assumed' })
     const entered = packingPieces([noHint], { components: { [part.id]: { widthMm: 800, heightMm: 400, thicknessMm: 15 } } })[0]
     expect(entered).toMatchObject({ width: 800, height: 400, thickness: 15, thicknessSource: 'entered', footprintSource: 'entered' })
-    expect(packingPieces([{ ...noHint, gcode: '(Material 12 mm / cutter 6.35 mm)\n' + part.gcode }])[0].thickness).toBe(12)
+    expect(packingPieces([{ ...noHint, gcode: '(Material 12 mm / cutter 6 mm)\n' + part.gcode }])[0].thickness).toBe(12)
   })
 })
 

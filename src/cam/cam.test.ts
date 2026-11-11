@@ -16,10 +16,20 @@ function dxf(entities: Array<Array<string | number>>, units = 4) {
 const rectangle = (x = 0, y = 0, width = 300, height = 200, layer = 'CUT_OUTER') => [0, 'LWPOLYLINE', 8, layer, 90, 4, 70, 1, 10, x, 20, y, 10, x + width, 20, y, 10, x + width, 20, y + height, 10, x, 20, y + height]
 const circle = (x: number, y: number, radius: number, layer = 'DRILL') => [0, 'CIRCLE', 8, layer, 10, x, 20, y, 40, radius]
 const settings: CamSettings = { thickness: 18, units: 'auto', operations: {} }
-const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELEASE'), circle(20, 20, 3.175), circle(100, 100, 17.5, 'POCKET_D35_DEPTH12')])
+const source = () => dxf([rectangle(), rectangle(70, 60, 150, 90, 'CUT_DOOR_RELEASE'), circle(20, 20, 3), circle(100, 100, 17.5, 'POCKET_D35_DEPTH12')])
 const result = (thickness: CamSettings['thickness'] = 18) => generateCam(readDxf(source()), { ...settings, thickness, operations: thickness === 12 ? { f3: { kind: 'ignore' } } : {} })
 
 describe('DXF geometry', () => {
+  it.each([4, 1])('uses the 6 mm drill boundary for unlabelled circles in DXF units %s', units => {
+    const factor = units === 1 ? 25.4 : 1
+    const drawing = readDxf(dxf([
+      rectangle(0, 0, 100 / factor, 100 / factor, '0'),
+      circle(20 / factor, 20 / factor, 3 / factor, '0'),
+      circle(40 / factor, 40 / factor, 3.1 / factor, '0'),
+    ], units))
+    expect(drawing.errors).toEqual([])
+    expect(drawing.features.map(feature => feature.kind)).toEqual(['outside', 'drill', 'inside'])
+  })
   it('cuts 6 mm profiles and inside openings to 6.2 mm in one pass while retaining tabs and feeds', () => {
     const job = generateCam(readDxf(source()), { ...settings, thickness: 6, operations: { f3: { kind: 'ignore' } } })
     expect(job.errors).toEqual([])
@@ -69,19 +79,19 @@ describe('DXF geometry', () => {
   })
   it('offsets either winding and rejects collapsed or self-intersecting contours', () => {
     const points = readDxf(dxf([rectangle()])).features[0].points
-    expect(Math.abs(area(offset(points, -3.175)))).toBeCloseTo(Math.abs(area(offset([...points].reverse(), -3.175))), 2)
-    expect(() => offset([{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], -3.175)).toThrow()
-    expect(() => offset([{ x: 0, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 100, y: 0 }], 3.175)).toThrow()
+    expect(Math.abs(area(offset(points, -3)))).toBeCloseTo(Math.abs(area(offset([...points].reverse(), -3))), 2)
+    expect(() => offset([{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], -3)).toThrow()
+    expect(() => offset([{ x: 0, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 100, y: 0 }], 3)).toThrow()
   })
 })
 
 describe('CNC generation', () => {
   it.each([{ thickness: 6 }, { thickness: 12 }, { thickness: 12, profilePasses: 2 }, { thickness: 15 }, { thickness: 18 }] as const)('cuts cutter-width slots without tabs at the selected through-depths %j', preset => {
-    const job = generateCam(readDxf(dxf([rectangle(0, 0, 100, 6.35, 'CUT_INNER')])), { ...settings, ...preset })
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 100, 6, 'CUT_INNER')])), { ...settings, ...preset })
     expect(job.errors).toEqual([])
     expect(job.operations[0].tabs).toEqual([])
     expect(job.operations[0].depthMm).toBe(materialPreset(preset.thickness).depth)
-    expect(job.gcode).toContain('Cutter-width rectangular hole: 6.35 mm / no tabs')
+    expect(job.gcode).toContain('Cutter-width rectangular hole: 6 mm / no tabs')
     expect(job.gcode).not.toContain('(Tab ')
     expect(job.warnings.join()).not.toContain('no holding tabs')
     expect(job.simulation.errors).toEqual([])
@@ -99,13 +109,13 @@ describe('CNC generation', () => {
     const drawing = readDxf(dxf([rectangle(0, 0, 100, 3, 'CUT_INNER')]))
     const relieved = generateCam(drawing, settings)
     expect(relieved.errors).toEqual([])
-    expect(relieved.warnings.join()).toContain('widened from 3 mm to the 6.35 mm cutter')
+    expect(relieved.warnings.join()).toContain('widened from 3 mm to the 6 mm cutter')
     expect(relieved.gcode).toContain('Automatic corner overcuts: 4')
     const plain = generateCam(drawing, { ...settings, operations: { f0: { cornerOvercuts: false } } })
     expect(plain.errors).toEqual([])
     expect(plain.operations[0].path).toHaveLength(2)
     expect(plain.operations[0].path[0].y).toBeCloseTo(plain.shift.y + 1.5)
-    expect(plain.operations[0].path[1].x - plain.operations[0].path[0].x).toBeCloseTo(100 - 6.35)
+    expect(plain.operations[0].path[1].x - plain.operations[0].path[0].x).toBeCloseTo(100 - 6)
     expect(plain.gcode).not.toContain('Automatic corner overcuts')
     const explicitTabs = generateCam(drawing, { ...settings, operations: { f0: { tabs: 2 } } })
     expect(explicitTabs.errors).toEqual([])
@@ -134,7 +144,7 @@ describe('CNC generation', () => {
     expect(neighbours.errors.join()).toContain('cutter-width opening intersects')
   })
   it('applies the slot rule after converting inch geometry to millimetres', () => {
-    const job = generateCam(readDxf(dxf([rectangle(0, 0, 4, 0.25, 'CUT_INNER')], 1)), settings)
+    const job = generateCam(readDxf(dxf([rectangle(0, 0, 4, 6 / 25.4, 'CUT_INNER')], 1)), settings)
     expect(job.errors).toEqual([])
     expect(job.operations[0].tabs).toEqual([])
     expect(job.gcode).toContain('Cutter-width rectangular hole')
@@ -190,13 +200,13 @@ describe('CNC generation', () => {
       expect(move.start.z).toBe(20); expect(move.end.z).toBe(20)
     }
   })
-  it('compensates profiles outward and doors inward by the 3.175 mm radius', () => {
+  it('compensates profiles outward and doors inward by the 3 mm radius', () => {
     const job = generateCam(readDxf(source()), { ...settings, operations: { f1: { cornerOvercuts: false } } })
     for (const op of job.operations.filter(o => ['outside', 'inside'].includes(o.kind))) {
       const feature = job.drawing.features.find(f => f.id === op.featureId)!
       if (op.kind === 'outside') expect(feature.points.every(p => contains(op.path, p))).toBe(true)
       else expect(op.path.every(p => contains(feature.points, p))).toBe(true)
-      const expected = Math.min(...feature.points.map(p => p.x)) + (op.kind === 'outside' ? -3.175 : 3.175)
+      const expected = Math.min(...feature.points.map(p => p.x)) + (op.kind === 'outside' ? -3 : 3)
       expect(Math.min(...op.path.map(p => p.x))).toBeCloseTo(expected, 3)
     }
   })
@@ -211,7 +221,7 @@ describe('CNC generation', () => {
       }
       for (const tab of op.tabs) {
         const midpoint = { x: (tab.start.x + tab.end.x) / 2, y: (tab.start.y + tab.end.y) / 2 }
-        expect(distance(tab.start, tab.end)).toBeCloseTo(16.35, 2)
+        expect(distance(tab.start, tab.end)).toBeCloseTo(16, 2)
         for (const m of moves.filter(m => m.type !== 'rapid')) {
           const length = distance(m.start, m.end)
           if (length > 0.01 && Math.abs(distance(m.start, midpoint) + distance(midpoint, m.end) - length) < 0.001) {
@@ -222,7 +232,7 @@ describe('CNC generation', () => {
     }
   })
   it.each([12, 15, 18] as const)('drills at circle centres with the cutter regardless of DXF diameter in %s mm stock', thickness => {
-    for (const diameter of [4, 6, 6.35, 12]) {
+    for (const diameter of [4, 5, 6, 12]) {
       const drawing = readDxf(dxf([circle(30, 30, diameter / 2, 'BORE_D6_DEPTH10')]))
       const job = generateCam(drawing, { ...settings, thickness })
       expect(job.errors).toEqual([])
@@ -474,7 +484,7 @@ describe('CNC generation', () => {
 })
 
 it('preserves explicit DXF drill depths across every cutting preset', () => {
-  const drawing = readDxf(dxf([rectangle(), circle(20, 20, 3.175, 'DRILL_D6_35_DEPTH2')]))
+  const drawing = readDxf(dxf([rectangle(), circle(20, 20, 3, 'DRILL_D6_DEPTH2')]))
   expect(drawing.features[1]).toMatchObject({ kind: 'drill', depthMm: 2 })
   for (const profile of materialProfiles) {
     const result = generateCam(drawing, { ...settings, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile })
@@ -482,11 +492,11 @@ it('preserves explicit DXF drill depths across every cutting preset', () => {
     expect(result.operations.find(op => op.kind === 'drill')?.depthMm).toBe(2)
     expect(result.operations.find(op => op.kind === 'outside')?.depthMm).toBeGreaterThan(6)
   }
-  const invalid = readDxf(dxf([rectangle(), circle(20, 20, 3.175, 'DRILL_DEPTH0')]))
+  const invalid = readDxf(dxf([rectangle(), circle(20, 20, 3, 'DRILL_DEPTH0')]))
   expect(generateCam(invalid, settings).errors.join()).toContain('blind drill depth')
 })
 
 it('uses the preset drill depth when the source has no explicit depth', () => {
-  const drawing = readDxf(dxf([circle(20, 20, 3.175, 'DRILL')]))
+  const drawing = readDxf(dxf([circle(20, 20, 3, 'DRILL')]))
   expect(generateCam(drawing, { ...settings, thickness: 12 }).operations[0].depthMm).toBe(4.5)
 })

@@ -44,7 +44,7 @@ describe.each([
   })
 
   it('leaves drill depths, feeds and pecking unchanged', () => {
-    const drawing = drawingFor({ ...rectangle('drill'), circle: { center: { x: 50, y: 50 }, radius: 3.175 } })
+    const drawing = drawingFor({ ...rectangle('drill'), circle: { center: { x: 50, y: 50 }, radius: 3 } })
     const result = generateCam(drawing, settings)
     const original = generateCam(drawing, { ...settings, rampProfile: undefined })
     expect(result.errors).toEqual([])
@@ -99,7 +99,7 @@ it('keeps 18 mm hinge pockets at 12 mm and 9 mm drills in the new ramp profile',
   expect(result.errors).toEqual([])
   expect(result.operations[0].depthMm).toBe(12)
   expect(result.simulation.deepestCutMm).toBe(12)
-  const drill = generateCam(drawingFor({ ...rectangle('drill'), circle: { center: { x: 50, y: 50 }, radius: 3.175 } }), settings)
+  const drill = generateCam(drawingFor({ ...rectangle('drill'), circle: { center: { x: 50, y: 50 }, radius: 3 } }), settings)
   expect(drill.errors).toEqual([])
   for (const depth of [2, 4, 6, 8, 9]) expect(drill.gcode).toContain(`G01 Z-${depth} F600\nG00 Z${depth === 9 ? 20 : 0.5}`)
   expect(drill.gcode).not.toContain('Z-9.2')

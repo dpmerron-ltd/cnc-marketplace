@@ -18,7 +18,7 @@ import type { CamSettings } from './types'
 const rectangle = (x: number, y: number, w: number, h: number, layer = 'CUT_OUTER') => [0, 'LWPOLYLINE', 8, layer, 90, 4, 70, 1, 10, x, 20, y, 10, x + w, 20, y, 10, x + w, 20, y + h, 10, x, 20, y + h]
 const circle = (x: number, y: number, r: number, layer = 'DRILL') => [0, 'CIRCLE', 8, layer, 10, x, 20, y, 40, r]
 const dxf = (entities: (string | number)[][]) => [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', ...entities.flat(), 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
-export const variantDxf = dxf([rectangle(0, 0, 120, 100), circle(20, 20, 3.175)])
+export const variantDxf = dxf([rectangle(0, 0, 120, 100), circle(20, 20, 3)])
 const settings: CamSettings = { thickness: 18, units: 'auto', operations: { f0: { tabs: 2 } }, programs: defaultProgramSettings }
 const drawing = readDxf(variantDxf)
 const bundle = generateMaterialVariants(drawing, settings)
@@ -32,6 +32,10 @@ describe('material variants', () => {
     const variant = bundle.profiles[profile.id]!
     expect(variant.errors).toEqual([])
     expect(variant.gcode).toBe(expected.gcode)
+    expect(variant.gcode).toContain('/ cutter 6 mm /')
+    const outline = expected.drawing.features.find(feature => feature.kind === 'outside')!
+    const compensated = expected.operations.find(operation => operation.kind === 'outside')!
+    expect(Math.min(...compensated.path.map(point => point.x))).toBeCloseTo(Math.min(...outline.points.map(point => point.x)) - 3, 3)
     expect(expected.operations.find(operation => operation.kind === 'outside')?.tabs).toHaveLength(2)
     expect(expected.operations.find(operation => operation.kind === 'drill')?.depthMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).drill)
     expect(simulateGCode(variant.gcode).deepestCutMm).toBe(materialPreset(profile.thickness, profile.profilePasses, profile.drillDepthMm, profile.rampProfile).depth)

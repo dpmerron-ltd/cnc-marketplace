@@ -9,7 +9,7 @@ import { testItem } from '../test/jobFixtures'
 
 const id = '12-2pass-2mm-ramp20-5deg'
 const options = { thicknessMm: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: '20mm-s-5deg' } as const
-const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3.175, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
+const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
 
 it('generates 6/12.2 mm passes with breakthrough, 2 mm drills, F3000 cuts and 5 degree F1200 ramps', async () => {
   const result = await generateDxfNc({ dxf, ...options })

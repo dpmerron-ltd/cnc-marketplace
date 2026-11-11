@@ -76,11 +76,11 @@ describe('Default full-depth finishing', () => {
     expect(job.errors).toEqual([])
     const shifted = { x: center.x + job.shift.x, y: center.y + job.shift.y }
     const { rough, finish } = sections(job.gcode)
-    expect(Math.max(...rough.map(move => distance(move.end, shifted)))).toBeCloseTo(radius - 3.175 - 0.3, 3)
+    expect(Math.max(...rough.map(move => distance(move.end, shifted)))).toBeCloseTo(radius - 3 - 0.3, 3)
     const arcs = finish.filter(move => move.type === 'arc-cw')
     expect(arcs).toHaveLength(3)
     for (const move of arcs) {
-      expect(distance(move.end, shifted)).toBeCloseTo(radius - 3.175, 3)
+      expect(distance(move.end, shifted)).toBeCloseTo(radius - 3, 3)
       expect(move.start.z).toBe(-10); expect(move.end.z).toBe(-10)
     }
   })
@@ -105,7 +105,7 @@ describe('Default full-depth finishing', () => {
   })
 
   it.each(['slot', 'centreline'] as const)('adds a full-depth spring pass to a %s without shifting its dimensions', kind => {
-    const f = { ...feature('inside'), points: kind === 'slot' ? rectangle(100, 6.35) : rectangle(), toolCentreline: kind === 'centreline' }
+    const f = { ...feature('inside'), points: kind === 'slot' ? rectangle(100, 6) : rectangle(), toolCentreline: kind === 'centreline' }
     const job = generateCam(drawing(f), settings)
     expect(job.errors).toEqual([])
     expect(job.gcode).toContain(`(Finishing pass: full depth 18.4 mm / ${kind === 'slot' ? 'cutter-width' : 'centreline'} spring pass)`)
@@ -129,10 +129,16 @@ describe('Default full-depth finishing', () => {
     }
   })
 
-  it('blocks compensated geometry that cannot retain the allowance', () => {
-    const job = generateCam(drawing({ ...feature('inside'), points: rectangle(100, 6.7) }), settings)
-    expect(job.errors.length).toBeGreaterThan(0)
-    expect(job.gcode).toBe('')
+  it.each([6.5, 6.7])('checks the 6 mm cutter and finishing allowance in a %s mm slot', width => {
+    const job = generateCam(drawing({ ...feature('inside'), points: rectangle(100, width) }), settings)
+    if (width < 6.6) {
+      expect(job.errors.length).toBeGreaterThan(0)
+      expect(job.gcode).toBe('')
+    } else {
+      expect(job.errors).toEqual([])
+      expect(job.gcode).toContain('Finishing pass: 0.3 mm allowance')
+      expect(Math.max(...job.operations[0].path.map(point => point.y)) - Math.min(...job.operations[0].path.map(point => point.y))).toBeCloseTo(width - 6, 3)
+    }
   })
 
   it('preserves short pocket-ramp depths when sheet export formats the program', () => {
@@ -157,7 +163,7 @@ describe('Default full-depth finishing', () => {
   })
 
   it('enables finishing in API generation without any extra request setting', async () => {
-    const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 200, 20, 0, 10, 200, 20, 120, 10, 0, 20, 120, 0, 'CIRCLE', 8, 'DRILL', 10, 50, 20, 50, 40, 3.175, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
+    const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 200, 20, 0, 10, 200, 20, 120, 10, 0, 20, 120, 0, 'CIRCLE', 8, 'DRILL', 10, 50, 20, 50, 40, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
     const result = await generateDxfNc({ dxf, thicknessMm: 12, variantProfiles: ['12'] })
     expect(result.settings).toMatchObject({ finishingAllowanceMm: 0.3, fullDepthFinishing: true })
     expect(result.gcode).toContain('(Finishing pass: 0.3 mm allowance / full depth 12.2 mm)')

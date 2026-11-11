@@ -30,7 +30,7 @@ export function pocketPerimeters(points: Point[], radius: number): Point[][] {
   co.AddPath(path, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon)
   const result: ClipperLib.Paths = []
   co.Execute(result, -radius * scale)
-  if (!result.length) throw new Error('Pocket is too small for the 6.35 mm cutter.')
+  if (!result.length) throw new Error('Pocket is too small for the cutter and requested allowance.')
   return result.map(path => {
     const points = fromClipper(path)
     if (area(points) > 0) points.reverse()

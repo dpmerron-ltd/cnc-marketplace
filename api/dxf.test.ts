@@ -43,7 +43,7 @@ describe('DXF API generation', () => {
     expect(result.gcode).toBe(generateCam(readDxf(source), { thickness: thicknessMm, units: 'auto', operations: {} }).gcode)
     expect(result.operations.find(op => op.featureId === 'f1')).toMatchObject({ kind: 'inside', tabCount: 0, depthMm: thicknessMm === 18 ? 18.4 : thicknessMm === 15 ? 15.4 : 12.2 })
     expect(result.operations.find(op => op.featureId === 'f0')?.tabCount).toBe(4)
-    expect(result.warnings.join()).toContain('widened from 3 mm to the 6.35 mm cutter')
+    expect(result.warnings.join()).toContain('widened from 3 mm to the 6 mm cutter')
     expect(result.settings.drillDepthMm).toBe(thicknessMm === 12 ? 4.5 : 9.2)
     const overridden = await generateDxfNc({ dxf: source, thicknessMm, operations: { f1: { tabs: 2 } } })
     expect(overridden.operations.find(op => op.featureId === 'f1')?.tabCount).toBe(0)
@@ -54,7 +54,7 @@ describe('DXF API generation', () => {
     const normal = await generateDxfNc(input)
     const shallow = await generateDxfNc({ ...input, profilePasses, drillDepthMm: 2, variantProfiles: materialProfiles.map(profile => profile.id) })
     expect(shallow.settings).toEqual({ ...normal.settings, drillDepthMm: 2 })
-    expect(shallow.settings).toMatchObject({ passDepthsMm: [12.2], cutDepthMm: 12.2, drillDepthMm: 2, cutterDiameterMm: 6.35, clearanceMm: 20, cutFeedMmPerMinute: 3000, spindleRpm: 18000, rampDegrees: 3 })
+    expect(shallow.settings).toMatchObject({ passDepthsMm: [12.2], cutDepthMm: 12.2, drillDepthMm: 2, cutterDiameterMm: 6, clearanceMm: 20, cutFeedMmPerMinute: 3000, spindleRpm: 18000, rampDegrees: 3 })
     expect(shallow.filename).toBe('panel-12mm-2mm-holes.nc')
     expect(shallow.materialVariants.primaryProfile).toBe('12-2mm')
     expect(shallow.materialVariants.profiles['12-2mm']?.gcode).toBe(shallow.gcode)
@@ -109,7 +109,7 @@ describe('DXF API generation', () => {
     expect(result.reviewRequired).toBe(true)
     expect(result.sha256).toBe(await sha256(result.gcode))
     expect(result.bytes).toBe(new TextEncoder().encode(result.gcode).length)
-    expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, clearanceMm: 20, spindleRpm: 18000, drillPeckMm: 2, drillPeckRetractMm: 0.5, reachCheck: false, screwMarking: false })
+    expect(result.settings).toMatchObject({ cutterDiameterMm: 6, clearanceMm: 20, spindleRpm: 18000, drillPeckMm: 2, drillPeckRetractMm: 0.5, reachCheck: false, screwMarking: false })
     expect(result.operations.map(o => o.kind)).toEqual(['drill', 'outside'])
     expect(result.operations[1].tabCount).toBeLessThanOrEqual(4)
     expect(result.summary.deepestCutMm).toBe(thicknessMm === 18 ? 18.4 : thicknessMm === 15 ? 15.4 : 12.2)
@@ -194,7 +194,7 @@ describe('DXF API generation', () => {
 describe('18 mm profile with 9 mm holes', () => {
   it('keeps drilling at 9 mm with unchanged cutter, profiles, hinges and legacy variants', async () => {
     const result = await generateDxfNc({ dxf: drawing, thicknessMm: 18, drillDepthMm: 9, filename: 'panel.dxf' })
-    expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, drillDepthMm: 9, passDepthsMm: [9.2, 18.4], cutDepthMm: 18.4 })
+    expect(result.settings).toMatchObject({ cutterDiameterMm: 6, drillDepthMm: 9, passDepthsMm: [9.2, 18.4], cutDepthMm: 18.4 })
     expect(result.operations.find(op => op.kind === 'drill')?.depthMm).toBe(9)
     expect(result.gcode).toContain('G01 Z-9 F600\nG00 Z20')
     expect(result.filename).toBe('panel-18mm-9mm-holes.nc')
@@ -219,13 +219,14 @@ describe('18 mm profile with 9 mm holes', () => {
   })
 })
 
-it.each(['CUT_DOOR_SHARED_ON_LINE', 'RELEASE_TOOL_CENTRE_6_35'])('preserves explicit shared-release centreline on %s with holding tabs', async layer => {
+it.each(['CUT_DOOR_SHARED_ON_LINE', 'RELEASE_TOOL_CENTRE', 'RELEASE_TOOL_CENTRE_6', 'RELEASE_TOOL_CENTRE_5_5'])('preserves explicit shared-release centreline on %s with holding tabs', async layer => {
   const release = [0, 'LWPOLYLINE', 8, layer, 90, 4, 70, 1, 10, 50, 20, 50, 10, 150, 20, 50, 10, 150, 20, 150, 10, 50, 20, 150]
   const source = dxf([profile, release])
   const drawing = readDxf(source)
   expect(drawing.features[1]).toMatchObject({ kind: 'inside', door: true, toolCentreline: true })
   const result = generateCam(drawing, { thickness: 18, drillDepthMm: 9, units: 'mm', operations: {} })
   expect(result.errors).toEqual([])
+  expect(result.gcode).toContain('/ cutter 6 mm /')
   const operation = result.operations.find(op => op.featureId === 'f1')!
   const xs = operation.path.map(p => p.x), ys = operation.path.map(p => p.y)
   expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(100)

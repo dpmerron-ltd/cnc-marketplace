@@ -1,7 +1,7 @@
 import DxfParser from 'dxf-parser'
 import type { IEntity } from 'dxf-parser/dist/entities/geomtry'
 import type { Point } from '../models/geometry'
-import type { CamDrawing, CamFeature } from './types'
+import { camPreset, type CamDrawing, type CamFeature } from './types'
 import { arcPoints, area, contains, distance, intersectionArea } from './geometry'
 
 type Vertex = Point & { z?: number; bulge?: number; startWidth?: number; endWidth?: number }
@@ -111,12 +111,13 @@ export function readDxf(source: string, selectedUnits: 'auto' | 'mm' | 'inches' 
     if (f.kind === 'drill') continue
     if (!f.closed) { warnings.push(`${f.name} is open and needs to be closed or explicitly excluded.`); continue }
     const layer = f.layer.toUpperCase()
-    if (layer === 'CUT_DOOR_SHARED_ON_LINE' || layer === 'RELEASE_TOOL_CENTRE_6_35') { f.kind = 'inside'; f.door = true; f.toolCentreline = true }
+    // Dimension suffixes in old layer names do not select a different cutter.
+    if (layer === 'CUT_DOOR_SHARED_ON_LINE' || /^RELEASE_TOOL_CENTRE(?:_\d+(?:_\d+)?)?$/.test(layer)) { f.kind = 'inside'; f.door = true; f.toolCentreline = true }
     else if (/POCKET|HINGE/.test(layer)) { f.kind = 'inside'; f.depthMm = Number(layer.match(/DEPTH[_ -]?(\d+(?:\.\d+)?)/)?.[1]) || undefined }
     else if (f.circle && /DRILL|BORE/.test(layer)) f.kind = 'drill'
     else if (/DOOR|INNER|INSIDE/.test(layer)) f.kind = 'inside'
     else if (/OUTER|PROFILE|OUTSIDE/.test(layer)) f.kind = 'outside'
-    else if (f.circle && f.circle.radius * 2 * unitFactor <= 6.35 + 0.001) f.kind = 'drill'
+    else if (f.circle && f.circle.radius * 2 * unitFactor <= camPreset.diameter + 0.001) f.kind = 'drill'
     else {
       const nesting = features.filter(other => other !== f && other.closed && Math.abs(area(other.points)) > Math.abs(area(f.points)) && contains(other.points, f.points[0])).length
       f.kind = nesting % 2 ? 'inside' : 'outside'

@@ -53,7 +53,7 @@ describe('Profile entries', () => {
   const path = rectangle('panel', 0, 0, 400, 300).points
   const tabs: Array<[number, number]> = [[100, 120], [500, 520], [800, 820], [1200, 1220]]
   it('chooses a closer tab-free entry with forward ramp room and corner clearance', () => {
-    const choose = profileEntry(path, tabs, 3.175, 60), from = point(30, -10)
+    const choose = profileEntry(path, tabs, 3, 60), from = point(30, -10)
     const baseline = choose(from, false), entry = choose(from, true)
     expect(distance(from, entry.point)).toBeLessThan(distance(from, baseline.point))
     expect(entry.point.x).toBeCloseTo(30, 8)
@@ -63,7 +63,7 @@ describe('Profile entries', () => {
     expect(path).toEqual(rectangle('panel', 0, 0, 400, 300).points)
   })
   it('keeps every chosen start away from tabs, including the wrap-around gap', () => {
-    const choose = profileEntry(path, tabs, 3.175, 60), metric = pathMetric(path)
+    const choose = profileEntry(path, tabs, 3, 60), metric = pathMetric(path)
     for (const from of [point(0, 0), point(800, 800), point(-10, 40), point(110, -10)]) {
       const entry = choose(from, true), start = entry.start!
       expect(tabs.some(([a, b]) => start >= a && start <= b)).toBe(false)
@@ -75,7 +75,7 @@ describe('Profile entries', () => {
   it('uses the existing entry when no alternative straight span fits', () => {
     const choose = profileEntry(path, tabs, 1000, 60)
     expect(choose(point(0), true)).toEqual(choose(point(0), false))
-    expect(() => profileEntry([point(0)], [], 3.175, 60)).toThrow('too short')
+    expect(() => profileEntry([point(0)], [], 3, 60)).toThrow('too short')
   })
 })
 

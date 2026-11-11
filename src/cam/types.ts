@@ -48,7 +48,7 @@ export interface CamResult {
   warnings: string[]
   shift: Point
 }
-export const camPreset = { diameter: 6.35, spindle: 18000, clearance: 20, rampDegrees: 3, rampFeed: 600, cutFeed: 3000, tabWidth: 10, tabHeight: 6 } as const
+export const camPreset = { diameter: 6, spindle: 18000, clearance: 20, rampDegrees: 3, rampFeed: 600, cutFeed: 3000, tabWidth: 10, tabHeight: 6 } as const
 type TabFeature = Pick<CamFeature, 'kind' | 'layer' | 'door' | 'circle' | 'points' | 'closed'>
 export function cutterWidthOpening(feature: TabFeature, diameter: number = camPreset.diameter) {
   if (feature.kind !== 'inside' || !feature.closed || feature.circle) return undefined

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Maximize, Pause, Play, ZoomIn, ZoomOut } from 'lucide-react'
-import type { CamResult } from '../cam/types'
+import { camPreset, type CamResult } from '../cam/types'
 import type { Point } from '../models/geometry'
 import { operationColors, operationDashes, operationNames, tabColor, tabOutlineColor } from './camAppearance'
 import { CamOperationSwatch } from './CamOperationSwatch'
@@ -71,7 +71,7 @@ export function CamPreview({ result, selected, onSelect }: { result?: CamResult;
       const color = operationColors[kind]
       path(move.points, color, operation?.featureId === selected ? 3 : 1.75, false, operationDashes[kind])
       if (Math.hypot(move.end.x - move.start.x, move.end.y - move.start.y) < 0.001 && move.end.z < 0) {
-        const p = screen(move.end), radius = Math.max(kind === 'drill' ? 4.5 : 2, 3.175 * scale)
+        const p = screen(move.end), radius = Math.max(kind === 'drill' ? 4.5 : 2, (camPreset.diameter / 2) * scale)
         ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.stroke()
         if (kind === 'drill') {
           ctx.beginPath(); ctx.moveTo(p.x - radius * 0.6, p.y); ctx.lineTo(p.x + radius * 0.6, p.y)

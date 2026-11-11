@@ -13,10 +13,10 @@ describe('Automatic corner overcuts', () => {
     const job = generateCam(drawing([{ ...feature, kind }]), settings)
     expect(job.errors).toEqual([])
     expect(job.gcode).toContain('Automatic corner overcuts: 4')
-    const relief = cornerOvercuts(points, [offset(points, -3.175)], 3.175)
+    const relief = cornerOvercuts(points, [offset(points, -3)], 3)
     expect(relief.centers).toHaveLength(4)
     for (const [i, center] of relief.centers.entries()) {
-      expect(distance(center, points[i])).toBeCloseTo(3.175, 5)
+      expect(distance(center, points[i])).toBeCloseTo(3, 5)
       const translated = { x: center.x + job.shift.x, y: center.y + job.shift.y }
       expect(job.simulation.moves.some(m => distance(m.end, translated) < 0.001 && m.end.z === -(kind === 'pocket' ? 6 : 18.4))).toBe(true)
     }
@@ -29,7 +29,7 @@ describe('Automatic corner overcuts', () => {
     const disabled = generateCam(drawing(), { ...settings, operations: { p: { cornerOvercuts: false } } })
     expect(disabled.errors).toEqual([]); expect(disabled.gcode).not.toContain('Automatic corner overcuts')
     const circle = arcPoints({ x: 50, y: 50 }, 30, 0, Math.PI * 2).slice(0, -1)
-    expect(cornerOvercuts(circle, [offset(circle, -3.175)], 3.175).centers).toEqual([])
+    expect(cornerOvercuts(circle, [offset(circle, -3)], 3).centers).toEqual([])
     const outer = generateCam(drawing([{ ...feature, kind: 'outside' }]), settings)
     expect(outer.errors).toEqual([]); expect(outer.gcode).not.toContain('Automatic corner overcuts')
     expect(disabled.operations[0].path.every(p => contains(disabled.drawing.features[0].points, p))).toBe(true)

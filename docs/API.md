@@ -161,7 +161,7 @@ For 6 mm stock, use `"thicknessMm": 6` and omit `profilePasses`: profiles and in
 
 For **12 mm (1 pass, ramp 20 mm/s at 5 deg)**, use `thicknessMm: 12, rampProfile: "20mm-s-5deg"` and omit `profilePasses` or set it to `1`. The variant ID is `12-ramp20-5deg`. Ramps use F1200 (20 mm/s), up to 5 degrees; cut depth remains 12.2 mm, drills 4.5 mm at F600 with 2 mm pecks, contour feed F3000 and clearance Z20. The same `rampProfile` selector is supported inside a job's `sheet` object. This ramp option also supports **18 mm (9 mm holes, ramp 20 mm/s at 5 deg)**: use `thicknessMm: 18, drillDepthMm: 9, rampProfile: "20mm-s-5deg"` and omit `profilePasses`, both for DXF conversion and inside a job's `sheet`. Its variant ID is `18-9mm-ramp20-5deg`. It cuts to 18.4 mm in two 9.2 mm passes and drills to 9 mm with the existing 2 mm pecks, F600 drill feed and Z0.5 peck retract. All other ramp-profile combinations are rejected. Omit `rampProfile` to retain the original presets. New generation includes this variant unless restricted by `variantProfiles`; older components must be regenerated from DXF before selecting it on a sheet. Existing files and queued jobs are not rewritten.
 
-Internal openings with a narrowest full-outline width <= 12 mm always use zero tabs, regardless of length, rotation, door label or positive `tabs` override. Rectangles and rectangular mortises with local corner reliefs use their straight-wall spacing, allowing up to 12.2 mm for a nominal 12 mm slot with 0.2 mm fit clearance. This only changes tab selection, not drawing geometry or cutting depth. Circles keep the strict 12 mm diameter threshold. Non-fitting tabs are automatically removed from ordinary inside cutouts with a waste-movement review warning; larger doors and outside profiles remain protected. This exception takes precedence over the general tab defaults above and below. Rectangular/square holes narrower than the 6.35 mm cutter are also widened centrally to cutter size, with a review warning. They remain through-holes, not blind drills. Slots use centreline ramping; point-sized holes use 2 mm pecks. `cornerOvercuts` remains supported; widening/relief collisions still block export.
+Internal openings with a narrowest full-outline width <= 12 mm always use zero tabs, regardless of length, rotation, door label or positive `tabs` override. Rectangles and rectangular mortises with local corner reliefs use their straight-wall spacing, allowing up to 12.2 mm for a nominal 12 mm slot with 0.2 mm fit clearance. This only changes tab selection, not drawing geometry or cutting depth. Circles keep the strict 12 mm diameter threshold. Non-fitting tabs are automatically removed from ordinary inside cutouts with a waste-movement review warning; larger doors and outside profiles remain protected. This exception takes precedence over the general tab defaults above and below. Rectangular/square holes narrower than the 6 mm cutter are also widened centrally to cutter size, with a review warning. They remain through-holes, not blind drills. Slots use centreline ramping; point-sized holes use 2 mm pecks. `cornerOvercuts` remains supported; widening/relief collisions still block export.
 
 The successful `200` response includes:
 - `filename` (ending `.nc`), `contentType`, `bytes`, `sha256`, and `gcode`. The hash and byte count cover the exact UTF-8 `gcode` string. The example uses `jq -j` to avoid adding an extra newline.
@@ -172,7 +172,7 @@ The successful `200` response includes:
 - `operations`: machining order, depth, actual tab count and inclusive 1-based NC line ranges.
 - `drawingShiftMm` and `summary`: toolpath bounds (including clearance/travel), deepest cut and operation count.
 
-Presets match the site: 6.35 mm cutter, account-profile spindle speed (18,000 rpm for Dan's existing settings), Z20 clearance, ramps up to 3 degrees, F600 drilling/ramping and F3000 contour cutting. Drills use the cutter diameter regardless of nominal DXF circle diameter. In 15 mm and 18 mm stock, drills peck to 2, 4, 6, 8 and 9.2 mm; in 12 mm stock, to 2, 4 and 4.5 mm. Between pecks at the same hole they retract to Z0.5 (`settings.drillPeckRetractMm`); after the final peck they retract to Z20 before lateral travel. Sheet safe-Z overrides preserve these short same-hole peck retracts. Profiles cut to 18.4 mm in two 9.2 mm passes, 15.4 mm in two 7.7 mm passes, or 12.2 mm in one pass. Profiles offset outside; doors offset inside. Through-cut parts/holes larger than 12 mm in X or Y, plus recognized doors, default to four tabs. Tabs may be removed explicitly on non-door inside holes/cut-outs, but remain mandatory for recognized doors and large outside profiles. Other contours default to zero; drills and blind pockets never receive tabs. A 35 mm circle inside a non-circular inside/door contour is automatically a 12 mm-deep hinge pocket; these require 15 mm or 18 mm stock. Other internal openings default to through-cuts, regardless of a `POCKET` layer name. Explicit `kind: "pocket"` assignments support circular and non-circular blind pockets, including concave and split clearing regions, but not nested islands. Non-circular pockets and inside cuts have automatic dogbone corner relief unless disabled. See [CAM details and supported geometry](CAM.md).
+Presets match the site: 6 mm cutter, account-profile spindle speed (18,000 rpm for Dan's existing settings), Z20 clearance, ramps up to 3 degrees, F600 drilling/ramping and F3000 contour cutting. Drills use the cutter diameter regardless of nominal DXF circle diameter. In 15 mm and 18 mm stock, drills peck to 2, 4, 6, 8 and 9.2 mm; in 12 mm stock, to 2, 4 and 4.5 mm. Between pecks at the same hole they retract to Z0.5 (`settings.drillPeckRetractMm`); after the final peck they retract to Z20 before lateral travel. Sheet safe-Z overrides preserve these short same-hole peck retracts. Profiles cut to 18.4 mm in two 9.2 mm passes, 15.4 mm in two 7.7 mm passes, or 12.2 mm in one pass. Profiles offset outside; doors offset inside. Through-cut parts/holes larger than 12 mm in X or Y, plus recognized doors, default to four tabs. Tabs may be removed explicitly on non-door inside holes/cut-outs, but remain mandatory for recognized doors and large outside profiles. Other contours default to zero; drills and blind pockets never receive tabs. A 35 mm circle inside a non-circular inside/door contour is automatically a 12 mm-deep hinge pocket; these require 15 mm or 18 mm stock. Other internal openings default to through-cuts, regardless of a `POCKET` layer name. Explicit `kind: "pocket"` assignments support circular and non-circular blind pockets, including concave and split clearing regions, but not nested islands. Non-circular pockets and inside cuts have automatic dogbone corner relief unless disabled. See [CAM details and supported geometry](CAM.md).
 
 Component NC has **no reach check and no screw marking**; those belong to sheet export after placement. The response always requires operator review. This endpoint does not save a component, alter an item, create a queued job, generate PDFs/labels, or send anything to the machine. To use the result with the jobs API, upload its NC into a shared item through `/items/{id}/components` or the site first.
 
@@ -318,7 +318,7 @@ The bundled Noto Sans font is licensed under the SIL Open Font License in `api/a
 ### 18 mm stock with 9 mm fixing holes
 
 DXF conversion accepts `thicknessMm: 18, drillDepthMm: 9` to select the opt-in
-`18-9mm` profile. The 6.35 mm cutter, 9.2 / 18.4 mm through passes and separate
+`18-9mm` profile. The 6 mm cutter, 9.2 / 18.4 mm through passes and separate
 pocket depths are unchanged; only drilling stops at exactly 9 mm. Omitting
 `drillDepthMm` retains every existing preset. Other drilling depths or stock
 combinations are rejected. The same `sheet.drillDepthMm: 9` selector is available
@@ -328,8 +328,9 @@ New material bundles include `18-9mm`. Existing five-profile bundles remain vali
 and are not modified. Selecting the new profile for an old component without that
 program blocks export until the component is regenerated.
 
-DXF layers named exactly `CUT_DOOR_SHARED_ON_LINE` and
-`RELEASE_TOOL_CENTRE_6_35` are explicit shared-release tool centrelines. Inside
+DXF layers named `CUT_DOOR_SHARED_ON_LINE`, `RELEASE_TOOL_CENTRE` or
+`RELEASE_TOOL_CENTRE_6` are explicit shared-release tool centrelines. Older numeric
+suffixes are also accepted as layer names; they never select a different cutter. Inside
 operations on these layers follow the original contour without compensation or
 additional corner relief, with holding tabs retained. Ordinary inside and door
 boundaries retain their existing inward compensation.
@@ -406,7 +407,7 @@ For DXF conversion, or inside a job's `sheet` object, use:
 Profile ID: `12-3pass-2mm-feed60-ramp20-5deg`. Cumulative through-cut depths
 are 4, 8 and 12.2 mm (4 + 4 + 4.2 mm, including 0.2 mm breakthrough).
 Cutting feed is 60 mm/s (F3600); ramps use 20 mm/s (F1200) at up to 5 degrees.
-Drills are 2 mm deep at F600; cutter diameter 6.35 mm and clearance Z20 remain
+Drills are 2 mm deep at F600; cutter diameter 6 mm and clearance Z20 remain
 unchanged. Blind pockets use the same depth schedule capped at their assigned
 depth. Account spindle settings and existing tab rules are retained.
 
@@ -422,7 +423,7 @@ Use `{ "thicknessMm": 12, "profilePasses": 2, "drillDepthMm": 2 }` in DXF
 conversion or a job's `sheet` object. Omit `rampProfile` for this profile.
 Profile ID: `12-2pass-2mm-depth12p4`. Cuts reach 6.2 and 12.4 mm in two equal
 6.2 mm passes, using F3000 (50 mm/s) cutting and F600 (10 mm/s) ramps at up
-to 3 degrees. Drills are 2 mm deep. Cutter diameter remains 6.35 mm, clearance
+to 3 degrees. Drills are 2 mm deep. Cutter diameter remains 6 mm, clearance
 Z20, with existing tabs and account program settings retained.
 
 This is a separate profile; existing 12.2 mm profiles are unchanged. New DXF
@@ -443,7 +444,7 @@ Profile IDs are `13-4pass-2mm-ramp10-5deg` and
 13.4 mm; the 14 mm profile reaches 3.6, 7.2, 10.8 and 14.4 mm. Both use four
 equal passes and include 0.4 mm breakthrough. Cutting feed is
 50 mm/s (F3000); ramps are 10 mm/s (F600) at up to 5 degrees. Drills are
-2 mm deep at F600. The cutter remains 6.35 mm, clearance Z20, with account
+2 mm deep at F600. The cutter remains 6 mm, clearance Z20, with account
 program settings and existing tab rules retained. Blind pockets use the same
 pass schedule capped at their assigned depth. Automatic hinge pockets remain
 restricted to 15 mm and 18 mm stock.
@@ -460,7 +461,7 @@ Component creation and staged item-import components accept optional `cutSide`: 
 
 Job nesting separates pattern-side-up and non-pattern-side-up components onto different physical sheets. Either-side components can share either face. Job manifest cuts and sheets include `cutSide`; sheet plans, NC headers and labels include the corresponding face instruction. Source geometry and cutting depths are preserved. Existing job files and historical item versions retain their original settings.
 
-For shallow centre marks in 18 mm stock, set the mark layer to `{"kind":"drill","depthMm":2}`. Unspecified drill depths still use the selected material preset. Explicit depths are preserved across material variants; incompatible thicknesses are blocked. The cutter remains 6.35 mm: DXF circle diameter does not select another tool. `settings.drillDepthMm` reports the preset default; each entry in `operations` reports its actual depth.
+For shallow centre marks in 18 mm stock, set the mark layer to `{"kind":"drill","depthMm":2}`. Unspecified drill depths still use the selected material preset. Explicit depths are preserved across material variants; incompatible thicknesses are blocked. The cutter remains 6 mm: DXF circle diameter does not select another tool. `settings.drillDepthMm` reports the preset default; each entry in `operations` reports its actual depth.
 
 Physical NC artifacts append `-pattern-side-up` or `-non-pattern-side-up` when required, for example `sheet-1-pattern-side-up.nc`. Use the returned `files[].name` to download an artifact; unrestricted sheets retain `sheet-N.nc`.
 

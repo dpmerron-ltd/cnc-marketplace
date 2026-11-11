@@ -40,7 +40,7 @@ export function pocketPaths(points: Point[], radius: number, stepover: number): 
     const paths: ClipperLib.Paths = []
     co.Execute(paths, -(radius + level * stepover) * scale)
     if (!paths.length) {
-      if (!loops.length) throw new Error('Pocket is too small for the 6.35 mm cutter.')
+      if (!loops.length) throw new Error('Pocket is too small for the cutter and requested allowance.')
       return loops.reverse()
     }
     for (const polygon of paths) {

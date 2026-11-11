@@ -13,11 +13,11 @@ import type { CamSettings } from './types'
 
 const id = '14-4pass-2mm-ramp10-5deg'
 const options = { thicknessMm: 14, profilePasses: 4, drillDepthMm: 2, rampProfile: '10mm-s-5deg' } as const
-const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3.175, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
+const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
 
 it('generates four 3.6 mm passes, 2 mm drills, F3000 cuts and F600 ramps at up to 5 degrees', async () => {
   const result = await generateDxfNc({ dxf, ...options })
-  expect(result.settings).toMatchObject({ cutterDiameterMm: 6.35, thicknessMm: 14, passDepthsMm: [3.6, 7.2, 10.8, 14.4], cutDepthMm: 14.4, drillDepthMm: 2, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 600, rampDegrees: 5, clearanceMm: 20 })
+  expect(result.settings).toMatchObject({ cutterDiameterMm: 6, thicknessMm: 14, passDepthsMm: [3.6, 7.2, 10.8, 14.4], cutDepthMm: 14.4, drillDepthMm: 2, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 600, rampDegrees: 5, clearanceMm: 20 })
   expect(result.filename).toBe('component-14mm-4pass-2mm-holes-ramp10-5deg.nc')
   expect(result.materialVariants.primaryProfile).toBe(id)
   expect(result.gcode.match(/\(Pass depth [\d.]+ mm\)/g)).toEqual([3.6, 7.2, 10.8, 14.4].map(depth => `(Pass depth ${depth} mm)`))
