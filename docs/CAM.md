@@ -123,7 +123,10 @@ four passes to 12.4 mm. Machine feed/spindle overrides remain operator controls.
 Each paired part has one retained outer tab on each of its three unshared sides.
 Pairs and separate parts are packed in rectangular machining envelopes with at least
 10 mm of continuous waste web between cutter sweeps and a minimum 13 mm envelope
-border. The preview marks shared cuts in cyan and tabs in yellow; the printed tab
+border. The preview marks shared cuts with bold teal lines and numbered S1/S2 labels,
+with a legend identifying the two part numbers. Tabs appear in yellow.
+These markers stay visible above part fills and keep their screen width when
+the sheet is scaled; the printed tab
 map uses the same regenerated paths. Programmed distance/time savings are estimates
 before machine overrides. Review the actual stock, tabs and workholding before cutting.
 

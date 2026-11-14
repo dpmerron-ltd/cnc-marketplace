@@ -110,9 +110,14 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
       {sheet.nestingMethod === 'v2' && <div className="shared-nesting-summary" role="status">
         <strong>V2 shared-edge nesting</strong>
         <span>{shared.pairs.length} shared edge{shared.pairs.length === 1 ? '' : 's'} · {(shared.pairs.reduce((s, p) => s + p.cam.savedCutMm, 0) / 1000).toFixed(2)} m less programmed cutting · about {Math.round(shared.pairs.reduce((s, p) => s + p.cam.savedSeconds, 0))} seconds saved</span>
-        {!shared.pairs.length && <span>No shared pairs in this layout. V2 currently pairs complete rectangular outlines with matching edges and reproducible DXF machining. Shaped or notched outlines retain separate cuts.</span>}
-        <span>Pairs retain tabs on three sides. Cyan dashed lines show shared cuts; yellow bars show retained tabs. Unsupported parts keep separate cuts.</span>
+        {!shared.pairs.length && <span>No shared edges to highlight on this sheet. V2 currently pairs complete rectangular outlines with matching edges and reproducible DXF machining. Shaped or notched outlines retain separate cuts.</span>}
+        <span>Pairs retain tabs on three sides. Shared cuts have bold teal lines and numbered labels; yellow bars show retained tabs. Unsupported parts keep separate cuts.</span>
         <span>At least 10 mm of waste remains between machining envelopes; the border is {sharedBorder(sheet)} mm. Shared walls cut to size during depth passes, then receive one spring pass.</span>
+        <div className="shared-edge-legend" aria-label="Sheet edge legend">
+          <span><svg width="32" height="16" aria-hidden="true"><line x1="3" y1="8" x2="29" y2="8" stroke="#007d92" strokeWidth="5" strokeLinecap="round" /></svg>Shared cut</span>
+          <span><svg width="32" height="16" aria-hidden="true"><line x1="3" y1="8" x2="29" y2="8" stroke="#725400" strokeWidth="8" /><line x1="3" y1="8" x2="29" y2="8" stroke="#ffc928" strokeWidth="5" /></svg>Retained tab</span>
+          {shared.pairs.map((pair, index) => <span className="shared-edge-pair-key" key={pair.instance.id}>S{index + 1}: {pair.members.map(m => partNumberText(m.partNumber!)).join(' + ')}</span>)}
+        </div>
         {shared.errors.map(e => <span role="alert" key={e}>{e}</span>)}
       </div>}
       <svg
@@ -176,15 +181,6 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
             ),
           )}
           {pairSegments.map((segment, index) => segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? <polyline key={`pair-${index}`} points={arcPolylinePoints(segment)} className={`toolpath ${segment.type}`} /> : <line key={`pair-${index}`} x1={segment.start.x} y1={segment.start.y} x2={segment.end.x} y2={segment.end.y} className={`toolpath ${segment.type}`} />)}
-          <g aria-label="Shared edges and retained tabs" pointerEvents="none">
-            {shared.pairs.map(pair => {
-              const ends = pair.cam.shared.map(p => transformLocalPoint(pair.cam.part, pair.instance, p))
-              return <g key={pair.instance.id}>
-                <line x1={ends[0].x} y1={ends[0].y} x2={ends[1].x} y2={ends[1].y} stroke="#007d92" strokeWidth={3} strokeDasharray="8 4"><title>Shared edge — one cut per depth pass</title></line>
-                {pair.members.flatMap(m => worldPairTabs(pair, m)).map((tab, i) => <polyline key={i} points={tab.points.map(p => `${p.x},${p.y}`).join(' ')} stroke="#ffc928" strokeWidth={5} fill="none"><title>Retained tab to sheet</title></polyline>)}
-              </g>
-            })}
-          </g>
           {screwPlan.points.map((point, index) => (
             <g key={`${point.x},${point.y}`} className="screw-mark" pointerEvents="none">
               <title>{`Screw mark ${index + 1}: X${point.x} Y${point.y}, depth 2 mm`}</title>
@@ -219,6 +215,31 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
               </g>
             )
           })}
+          {/* Draw the shared-cut overlay last so part fills and selection outlines cannot hide it. */}
+          <g aria-label="Shared edges and retained tabs" pointerEvents="none">
+            {shared.pairs.map((pair, index) => {
+              const ends = pair.cam.shared.map(p => transformLocalPoint(pair.cam.part, pair.instance, p))
+              const labelFraction = Math.abs(ends[1].y - ends[0].y) > Math.abs(ends[1].x - ends[0].x) ? 0.22 : 0.5
+              const labelAnchor = { x: ends[0].x + (ends[1].x - ends[0].x) * labelFraction, y: ends[0].y + (ends[1].y - ends[0].y) * labelFraction }
+              const label = `S${index + 1} · Shared cut`
+              const members = pair.members.map(m => partNumberText(m.partNumber!)).join(' + ')
+              return <g key={pair.instance.id} aria-label={`${label}: ${members}`}>
+                <title>{`${label}: ${members} — one shared edge per depth pass`}</title>
+                <line x1={ends[0].x} y1={ends[0].y} x2={ends[1].x} y2={ends[1].y} stroke="white" strokeWidth={9} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                <line x1={ends[0].x} y1={ends[0].y} x2={ends[1].x} y2={ends[1].y} stroke="#007d92" strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                {ends.map((point, i) => <circle key={i} cx={point.x} cy={point.y} r={4 / scale} fill="#007d92" stroke="white" strokeWidth={2} vectorEffect="non-scaling-stroke" />)}
+                {pair.members.flatMap(m => worldPairTabs(pair, m)).map((tab, i) => <g key={i}>
+                  <title>Retained tab to sheet</title>
+                  <polyline points={tab.points.map(p => `${p.x},${p.y}`).join(' ')} stroke="#725400" strokeWidth={8} vectorEffect="non-scaling-stroke" fill="none" />
+                  <polyline points={tab.points.map(p => `${p.x},${p.y}`).join(' ')} stroke="#ffc928" strokeWidth={5} vectorEffect="non-scaling-stroke" fill="none" />
+                </g>)}
+                <g transform={`translate(${labelAnchor.x} ${labelAnchor.y}) scale(${1 / scale} ${-1 / scale})`}>
+                  <rect x={-61} y={-12} width={122} height={24} rx={6} fill="#006578" stroke="white" strokeWidth={2} />
+                  <text textAnchor="middle" dominantBaseline="central" fill="white" style={{ fontSize: 12, fontWeight: 700 }}>{label}</text>
+                </g>
+              </g>
+            })}
+          </g>
         </g>
       </svg>
     </main>
