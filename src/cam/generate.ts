@@ -51,6 +51,23 @@ function tabIntervals(path: Point[], count: number, circular: boolean): Array<[n
   return chosen.sort((a, b) => a - b).map(s => [s - width / 2, s + width / 2])
 }
 
+function anchoredTabs(path: Point[], anchors: Point[]): Array<[number, number]> {
+  if (anchors.length !== 6) throw new Error('Shared pairs require six outer holding tabs.')
+  const metric = pathMetric(path), half = (camPreset.tabWidth + camPreset.diameter) / 2
+  const intervals = anchors.map(anchor => {
+    const projections = path.map((a, i) => {
+      const b = path[(i + 1) % path.length], length = distance(a, b)
+      const t = Math.max(0, Math.min(1, ((anchor.x - a.x) * (b.x - a.x) + (anchor.y - a.y) * (b.y - a.y)) / length ** 2))
+      return { distance: Math.hypot(anchor.x - a.x - t * (b.x - a.x), anchor.y - a.y - t * (b.y - a.y)), s: metric.cumulative[i] + t * length, room: Math.min(t, 1 - t) * length }
+    }).sort((a, b) => a.distance - b.distance)
+    const best = projections[0]
+    if (!best || best.distance > toolRadius + 0.001 || best.room < half + camPreset.diameter) throw new Error('A shared-pair tab is too close to a corner.')
+    return [best.s - half, best.s + half] as [number, number]
+  }).sort((a, b) => a[0] - b[0])
+  if (intervals.some((v, i) => i && v[0] - intervals[i - 1][1] < camPreset.diameter)) throw new Error('Shared-pair tabs overlap.')
+  return intervals
+}
+
 function rotatePath(path: Point[], start: number): Point[] {
   const metric = pathMetric(path)
   const positions = [...metric.cumulative.slice(0, -1).filter(s => s > start + 1e-6), ...metric.cumulative.slice(0, -1).filter(s => s < start - 1e-6)]
@@ -67,11 +84,11 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
   }
   if ((area(path) > 0) !== (f.kind === 'outside')) path.reverse()
   const tabFree = tabFreeOpening(f), warnings: string[] = []
-  let requestedTabs = tabFree ? 0 : settings.operations[f.id]?.tabs ?? defaultTabCount(f)
-  if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > 4) throw new Error('Tab count must be an integer from 0 to 4.')
+  let requestedTabs = f.tabAnchors ? f.tabAnchors.length : tabFree ? 0 : settings.operations[f.id]?.tabs ?? defaultTabCount(f)
+  if (!Number.isInteger(requestedTabs) || requestedTabs < 0 || requestedTabs > (f.tabAnchors ? 6 : 4)) throw new Error('Tab count must be an integer from 0 to 4.')
   const tabsRequired = requiresHoldingTabs(f)
   if (tabsRequired && !requestedTabs) throw new Error('Doors and outside profiles larger than 12 mm in X or Y require holding tabs. Set a tab count from 1 to 4.')
-  const intervals = tabIntervals(path, requestedTabs, Boolean(f.circle))
+  const intervals = f.tabAnchors ? anchoredTabs(path, f.tabAnchors) : tabIntervals(path, requestedTabs, Boolean(f.circle))
   if (requestedTabs && !intervals.length) {
     if (tabsRequired) throw new Error('No segment can hold a 10 mm tab. This through-cut cannot be exported without holding tabs; revise the geometry.')
     warnings.push(`${f.name}: tabs automatically removed because no 10 mm tab fits; verify cutout waste cannot move into the cutter.`)
@@ -104,6 +121,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const shift = { x: 10 + toolRadius - (Number.isFinite(minX) ? minX : 0), y: 10 + toolRadius - (Number.isFinite(minY) ? minY : 0) }
   for (const f of features) {
     f.points = f.points.map(p => ({ x: p.x + shift.x, y: p.y + shift.y }))
+    if (f.tabAnchors) f.tabAnchors = f.tabAnchors.map(p => ({ x: p.x + shift.x, y: p.y + shift.y }))
     if (f.circle) f.circle.center = { x: f.circle.center.x + shift.x, y: f.circle.center.y + shift.y }
   }
   if (!active.length) errors.push('No operations are selected.')

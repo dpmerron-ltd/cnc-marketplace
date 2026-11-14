@@ -1,3 +1,4 @@
+import { planSharedCuts, worldPairPaths, worldPairTabs } from '../nesting/sharedCuts'
 import { physicalSheet } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
@@ -120,6 +121,8 @@ export function locatePartTabs(part: Part) {
 }
 
 export function buildTabMap(parts: Part[], input: Sheet): TabMap {
+  const shared = planSharedCuts(parts, input)
+  if (shared.errors.length) throw new Error(shared.errors.join(' '))
   const selected = new Map([...new Set(input.instances.map(i => i.sheetIndex))].map(index => {
     const selection = selectMaterialParts(parts, physicalSheet(input, index))
     if (selection.errors.length) throw new Error(selection.errors.join(' '))
@@ -138,14 +141,15 @@ export function buildTabMap(parts: Part[], input: Sheet): TabMap {
       if (!part) throw new Error('A placed component is missing. Reopen export after restoring or removing it.')
       const bounds = instanceBounds(part, instance)
       if (!isFiniteBounds(bounds)) throw new Error(`${part.name}: invalid machining bounds.`)
+      const pair = shared.pairs.find(p => p.members.some(m => m.id === instance.id))
       const cacheKey = `${instance.sheetIndex}/${part.id}`
       if (!cache.has(cacheKey)) cache.set(cacheKey, locatePartTabs(part))
       const source = cache.get(cacheKey)!
       const transform = (point: Point) => transformLocalPoint(part, instance, point)
       return {
         orderKey: instance.orderKey ?? sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))?.key, partId: part.id, itemId: part.itemId, number: partNumberText(instance.partNumber!), name: part.name, sheetIndex: instance.sheetIndex, bounds, rotation: instance.rotation, cutSide: effectiveCutSide(part, sheet),
-        paths: source.paths.map(path => path.map(transform)),
-        tabs: source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: source.warnings,
+        paths: pair ? worldPairPaths(pair, instance) : source.paths.map(path => path.map(transform)),
+        tabs: pair ? worldPairTabs(pair, instance).map(t => ({ ...t, operation: 'V2 retained tab', inferred: false })) : source.tabs.map(tab => ({ ...tab, points: tab.points.map(transform), center: transform(tab.center) })), warnings: pair ? ['V2: three outer sides remain tabbed to the sheet.'] : source.warnings,
       }
     }),
   }

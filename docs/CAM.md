@@ -97,3 +97,36 @@ Limits: 2 MB ASCII DXF; 1,000 input entities; 250 operations; 25,000 curve point
 ## Geometry Libraries
 
 DXF parsing uses [dxf-parser](https://github.com/gdsestimating/dxf-parser) (MIT). Tool-radius compensation and polygon intersections use [Clipper](https://github.com/junmer/clipper-lib) (Boost Software License). The existing G-code parser and simulator are reused for preview and validation.
+
+## Optional V2 shared-edge nesting
+
+On **Sheet**, select **Nesting method → V2 — shared edges**, then **Auto Nest**.
+V1 remains the default for existing and new sheets. Switching back to V1 requires
+Auto Nest again to separate any existing pairs. The choice is saved with the sheet.
+
+V2 pairs source rectangles with matching native vertical edge lengths and cutting
+presets; pairs may rotate through quarter turns. It regenerates machining from the
+saved DXF only when that source reproduces the component's selected NC. Unsupported
+outlines, missing source, unknown machining edits and incompatible cutting faces
+keep separate cuts. This first version does not share arbitrary curved or stepped
+edges or form multi-part chains.
+
+The finished edges are 6 mm apart, allowing the shared 6 mm cutter slot to preserve
+both finished dimensions. The shared slot is machined once per selected depth pass
+and receives one full-depth spring pass. It cuts to finished width during the depth
+passes; the remaining perimeter retains the usual roughing allowance and finishing
+pass. Internal machining runs before the shared slot and outer perimeter. The selected
+feeds, spindle program, ramp and depth preset remain in force, including quiet mode's
+four passes to 12.4 mm. Machine feed/spindle overrides remain operator controls.
+
+Each paired part has one retained outer tab on each of its three unshared sides.
+Pairs and separate parts are packed in rectangular machining envelopes with at least
+10 mm of continuous waste web between cutter sweeps and a minimum 22 mm envelope
+border. The preview marks shared cuts in cyan and tabs in yellow; the printed tab
+map uses the same regenerated paths. Programmed distance/time savings are estimates
+before machine overrides. Review the actual stock, tabs and workholding before cutting.
+
+Moving or rotating one member independently, deleting its partner, changing source
+machining, or obstructing the waste corridors blocks export until the layout is
+nested again. Locked pairs stay together. Completed/cutting production sheets retain
+their existing layout and prevent changing the method.

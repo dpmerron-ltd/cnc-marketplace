@@ -100,7 +100,7 @@ export function replanWorkspace(workspace: SheetWorkspace, parts: Part[]): Sheet
   for (const job of workspace.jobs) {
     if (job.archived || !waitingSheetIndices(job).length) continue
     const sheet = job.sheet
-    const key = JSON.stringify([sheet.width, sheet.height, sheet.spacing, sheet.borderSpacing, sheet.safeZOverrideMm, sheet.screwMarkingEnabled, sheet.gcodeSettings, hasSheetMaterials(sheet) ? 'configured' : [sheet.material, sheet.materialProfile]])
+    const key = JSON.stringify([sheet.nestingMethod, sheet.width, sheet.height, sheet.spacing, sheet.borderSpacing, sheet.safeZOverrideMm, sheet.screwMarkingEnabled, sheet.gcodeSettings, hasSheetMaterials(sheet) ? 'configured' : [sheet.material, sheet.materialProfile]])
     groups.set(key, [...(groups.get(key) ?? []), job])
   }
   const replacements = new Map<string, ProductionJob>()

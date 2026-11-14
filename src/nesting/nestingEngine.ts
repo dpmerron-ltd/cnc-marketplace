@@ -1,3 +1,4 @@
+import { nestShared } from './nestShared'
 import ClipperLib from 'clipper-lib'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
@@ -144,10 +145,11 @@ function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: num
   const selection = selectMaterialParts(parts, sheet)
   if (selection.errors.length) throw new Error(selection.errors.join(' '))
   parts = selection.parts
+  if (sheet.nestingMethod === 'v2') return nestShared(parts, sheet, (p, s) => nestAvailable(p, s, onProgress))
   const lockedErrors = cutSideErrors(parts, { ...sheet, instances: sheet.instances.filter(instance => instance.locked) })
   if (lockedErrors.length) throw new Error(lockedErrors.join(' '))
   if (parts.some(part => sheet.instances.some(instance => instance.partId === part.id) && part.cutSide !== undefined && !cutSides.includes(part.cutSide))) throw new Error('Unknown component cutting side. Set a valid cutting side before nesting.')
-  const instances = sheet.instances.map(instance => ({ ...instance }))
+  const instances = sheet.instances.map(instance => ({ ...instance, sharedEdgePartnerId: undefined }))
   const placed: PlacedShape[] = []
   const orientationCache = new Map<Part, ReturnType<typeof orientations>>()
   const noFitCache = new WeakMap<Point[], WeakMap<Point[], ClipperLib.Path>>()

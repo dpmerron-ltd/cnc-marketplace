@@ -1,3 +1,4 @@
+import { sharedBorder, sharedSpacing } from './nesting/sharedCuts'
 import { addItemToSheet } from './nesting/addItemToSheet'
 import { MaterialAllocationDialog } from './ui/MaterialAllocationDialog'
 import { StockFields } from './ui/MaterialEditor'
@@ -1714,6 +1715,17 @@ function App() {
         </div>
         <div className="toolbar-actions">
           {sheetLoadError && <button type="button" onClick={() => setComponentRetry(value => value + 1)}>Retry item components</button>}
+          <label>Nesting method
+            <select aria-label="Nesting method" value={sheet.nestingMethod ?? 'v1'} disabled={planningSheet.unavailableSheetIndices.length > 0} onChange={event => {
+              const nestingMethod = event.target.value as 'v1' | 'v2'
+              setSheet({ ...sheet, nestingMethod, ...(nestingMethod === 'v2' ? { spacing: sharedSpacing(sheet), borderSpacing: sharedBorder(sheet) } : {}) })
+              setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+              setStatus(nestingMethod === 'v2' ? 'V2 selected. Auto Nest to pair matching rectangular edges. Three outer sides stay tabbed; unsupported parts keep separate cuts.' : 'V1 selected. Auto Nest again to separate any shared pairs before export.')
+            }}>
+              <option value="v1">V1 — standard</option>
+              <option value="v2">V2 — shared edges</option>
+            </select>
+          </label>
           <AutoNestButton parts={parts} sheet={sheet} accountId={userId} onStatus={setStatus}
             onComplete={instances => {
               setSheet({ ...sheet, instances })

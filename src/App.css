@@ -1059,3 +1059,6 @@ textarea {
 .material-allocation table { width: 100%; border-collapse: collapse; margin: 16px 0; }
 .material-allocation th, .material-allocation td { padding: 10px; border-bottom: 1px solid #cbd5e1; text-align: left; }
 .pending-materials { margin: 12px; padding: 14px; border: 1px solid #d29d35; background: #fff8e8; border-radius: 8px; }
+
+.shared-nesting-summary { display: grid; gap: 5px; max-width: 850px; margin: 0 0 12px; padding: 12px 16px; background: #eef8fa; border: 1px solid #91bac2; border-radius: 8px; font-size: 13px; color: #183c43; }
+.shared-nesting-summary [role="alert"] { color: #9b2424; font-weight: 600; }

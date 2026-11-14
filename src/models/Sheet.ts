@@ -18,6 +18,8 @@ export interface GCodePreset {
 }
 
 export interface Sheet {
+  nestingMethod?: 'v1' | 'v2'
+
   pendingParts?: PartInstance[]
   stockMaterial?: StockMaterial
   sheetMaterials?: Record<number, SheetMaterial>

@@ -1,3 +1,4 @@
+import { planSharedCuts } from '../nesting/sharedCuts'
 import { physicalSheet, stockErrors } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
@@ -17,7 +18,8 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
   if (indices.length) sheet = physicalSheet(sheet, indices[0])
   const selection = selectMaterialParts(parts, sheet)
   parts = selection.parts
-  const issues: ValidationIssue[] = [...selection.errors, ...cutSideErrors(parts, sheet), ...stockErrors(parts, sheet)].map(message => ({ level: 'error', message }))
+  const shared = planSharedCuts(parts, sheet)
+  const issues: ValidationIssue[] = [...shared.errors, ...selection.errors, ...cutSideErrors(parts, sheet), ...stockErrors(parts, sheet)].map(message => ({ level: 'error', message }))
   if (sheet.width <= 0 || sheet.height <= 0) issues.push({ level: 'error', message: 'Sheet dimensions must be positive.' })
   if (sheet.borderSpacing < 0) issues.push({ level: 'error', message: 'Border spacing cannot be negative.' })
 
@@ -50,6 +52,7 @@ export function validateSheet(parts: Part[], sheet: Sheet): ValidationIssue[] {
       const second = placed[b]
       if (!first.bounds || !second.bounds || !first.part || !second.part) continue
       if (first.instance.sheetIndex !== second.instance.sheetIndex) continue
+      if (shared.pairs.some(p => p.members.some(m => m.id === first.instance.id) && p.members.some(m => m.id === second.instance.id))) continue
       if (footprintsOverlap(first.footprint!, second.footprint!, sheet.spacing)) issues.push({ level: 'error', message: `${first.part.name} and ${second.part.name} overlap or violate spacing.` })
     }
   }

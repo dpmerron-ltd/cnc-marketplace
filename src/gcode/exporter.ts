@@ -1,3 +1,4 @@
+import { planSharedCuts } from '../nesting/sharedCuts'
 import { physicalSheet, stockErrors, stockLabel } from '../models/stockMaterial'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
@@ -157,6 +158,26 @@ function transformedInstanceLines(
   instanceIds: string[],
   startingInstanceNumber = 0,
 ): { lines: string[]; errors: string[]; warnings: string[]; nextInstanceNumber: number } {
+  if (sheet.nestingMethod === 'v2' || sheet.instances.some(i => i.sharedEdgePartnerId)) {
+    const plan = planSharedCuts(parts, sheet)
+    if (plan.errors.length) return { lines: [], errors: plan.errors, warnings: [], nextInstanceNumber: startingInstanceNumber }
+    const syntheticParts = [...parts]
+    const instances: Sheet['instances'] = []
+    for (const instance of sheet.instances) {
+      const pair = plan.pairs.find(p => p.members.some(m => m.id === instance.id))
+      if (!pair) { instances.push(instance); continue }
+      if (instances.some(i => i.id === pair.instance.id)) continue
+      const id = `shared-export:${pair.instance.id}`
+      const members = pair.members.map(m => `${partNumberText(m.partNumber!)} ${parts.find(p => p.id === m.partId)!.name}`).join(' + ')
+      syntheticParts.push({ ...pair.cam.part, id, name: members, sku: pair.members.map(m => parts.find(p => p.id === m.partId)!.sku).join(' + ') })
+      instances.push({ ...pair.instance, partId: id, sharedEdgePartnerId: undefined })
+    }
+    const result = transformedInstanceLines(syntheticParts, { ...sheet, nestingMethod: 'v1', instances }, instances.map(i => i.id), startingInstanceNumber)
+    result.lines.unshift(`(V2 shared-edge nesting: ${plan.pairs.length} shared edges; three outer tabs per paired part)`)
+    result.warnings.push('V2: shared edges cut to size during depth passes with one spring pass. Other outer walls retain the finishing allowance. Verify the three-sided tab map and sheet workholding.')
+    result.nextInstanceNumber = startingInstanceNumber + instanceIds.length
+    return result
+  }
   const output: string[] = []
   const errors: string[] = []
   const warnings: string[] = []

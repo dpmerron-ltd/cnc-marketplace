@@ -6,6 +6,9 @@ import { minimumOpeningWidth, rectangleGeometry, relievedRectangleGeometry } fro
 
 export type OperationKind = 'outside' | 'inside' | 'drill' | 'pocket' | 'ignore' | 'unassigned'
 export interface CamFeature {
+  // Sheet CAM only: explicit tab centres in drawing coordinates.
+  tabAnchors?: Point[]
+
   id: string
   name: string
   layer: string

@@ -1,10 +1,11 @@
+import { planSharedCuts, worldPairTabs, sharedBorder } from '../nesting/sharedCuts'
 import { useMemo, useState } from 'react'
 import { partNumberText } from '../labels/partLabels'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
 import { footprintInterior, footprintsOverlap, instanceFootprint } from '../gcode/footprint'
-import { instanceBounds, transformPartProgram } from '../gcode/transform'
+import { instanceBounds, transformLocalPoint, transformPartProgram } from '../gcode/transform'
 import type { ToolpathSegment } from '../gcode/types'
 import { planScrewPositions } from '../gcode/screwPositions'
 
@@ -83,9 +84,12 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
     [parts, sheet.instances, sheetIndex],
   )
 
+  const shared = useMemo(() => planSharedCuts(parts, { ...sheet, instances: sheet.instances.filter(i => i.sheetIndex === sheetIndex) }), [parts, sheet, sheetIndex])
+  const pairSegments = useMemo(() => shared.pairs.flatMap(pair => transformPartProgram(pair.cam.part, pair.instance).segments), [shared])
   const collidingIds = new Set<string>()
   for (let a = 0; a < placed.length; a += 1) {
     for (let b = a + 1; b < placed.length; b += 1) {
+      if (shared.pairs.some(p => p.members.some(m => m.id === placed[a].instance.id) && p.members.some(m => m.id === placed[b].instance.id))) continue
       if (footprintsOverlap(placed[a].footprint, placed[b].footprint, sheet.spacing)) {
         collidingIds.add(placed[a].instance.id)
         collidingIds.add(placed[b].instance.id)
@@ -103,6 +107,13 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
 
   return (
     <main className="sheet-wrap">
+      {sheet.nestingMethod === 'v2' && <div className="shared-nesting-summary" role="status">
+        <strong>V2 shared-edge nesting</strong>
+        <span>{shared.pairs.length} shared edge{shared.pairs.length === 1 ? '' : 's'} · {(shared.pairs.reduce((s, p) => s + p.cam.savedCutMm, 0) / 1000).toFixed(2)} m less programmed cutting · about {Math.round(shared.pairs.reduce((s, p) => s + p.cam.savedSeconds, 0))} seconds saved</span>
+        <span>Pairs retain tabs on three sides. Cyan dashed lines show shared cuts; yellow bars show retained tabs. Unsupported parts keep separate cuts.</span>
+        <span>At least 10 mm of waste remains between machining envelopes; the border is {sharedBorder(sheet)} mm. Shared walls cut to size during depth passes, then receive one spring pass.</span>
+        {shared.errors.map(e => <span role="alert" key={e}>{e}</span>)}
+      </div>}
       <svg
         className="sheet"
         width={svgWidth}
@@ -143,7 +154,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
             <text transform={`translate(${Math.min(86, sheet.width * 0.12 + 8)} 5) scale(1 -1)`}>+X</text>
             <text transform={`translate(6 ${Math.min(86, sheet.height * 0.12 + 8)}) scale(1 -1)`}>+Y</text>
           </g>
-          {placed.map(({ transformed, instance }) =>
+          {placed.filter(p => !shared.pairedIds.has(p.instance.id)).map(({ transformed, instance }) =>
             transformed.segments.map((segment, index) =>
               index === 0 && segment.type === 'rapid' ? null : segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? (
                 <polyline
@@ -163,6 +174,16 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
               ),
             ),
           )}
+          {pairSegments.map((segment, index) => segment.type === 'arc-cw' || segment.type === 'arc-ccw' ? <polyline key={`pair-${index}`} points={arcPolylinePoints(segment)} className={`toolpath ${segment.type}`} /> : <line key={`pair-${index}`} x1={segment.start.x} y1={segment.start.y} x2={segment.end.x} y2={segment.end.y} className={`toolpath ${segment.type}`} />)}
+          <g aria-label="Shared edges and retained tabs" pointerEvents="none">
+            {shared.pairs.map(pair => {
+              const ends = pair.cam.shared.map(p => transformLocalPoint(pair.cam.part, pair.instance, p))
+              return <g key={pair.instance.id}>
+                <line x1={ends[0].x} y1={ends[0].y} x2={ends[1].x} y2={ends[1].y} stroke="#007d92" strokeWidth={3} strokeDasharray="8 4"><title>Shared edge — one cut per depth pass</title></line>
+                {pair.members.flatMap(m => worldPairTabs(pair, m)).map((tab, i) => <polyline key={i} points={tab.points.map(p => `${p.x},${p.y}`).join(' ')} stroke="#ffc928" strokeWidth={5} fill="none"><title>Retained tab to sheet</title></polyline>)}
+              </g>
+            })}
+          </g>
           {screwPlan.points.map((point, index) => (
             <g key={`${point.x},${point.y}`} className="screw-mark" pointerEvents="none">
               <title>{`Screw mark ${index + 1}: X${point.x} Y${point.y}, depth 2 mm`}</title>

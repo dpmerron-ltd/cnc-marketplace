@@ -2,6 +2,8 @@ import type { Rotation } from './geometry'
 import type { SheetMaterial } from './stockMaterial'
 
 export interface PartInstance {
+  sharedEdgePartnerId?: string
+
   orderKey?: string
   materialSetup?: SheetMaterial
   id: string

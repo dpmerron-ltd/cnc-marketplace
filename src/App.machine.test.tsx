@@ -29,6 +29,20 @@ describe('export saves a machine snapshot before downloading', () => {
     } })
   })
   afterEach(cleanup)
+  it('keeps V1 as the default and offers V2 with its retained-waste spacing', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+    const method = await screen.findByRole('combobox', { name: 'Nesting method' })
+    expect(method).toHaveValue('v1')
+    fireEvent.change(method, { target: { value: 'v2' } })
+    expect(method).toHaveValue('v2')
+    expect(await screen.findByText('V2 shared-edge nesting')).toBeInTheDocument()
+    expect(screen.getByText(/the border is 22 mm/)).toBeInTheDocument()
+    fireEvent.change(method, { target: { value: 'v1' } })
+    expect(method).toHaveValue('v1')
+    expect(screen.queryByText('V2 shared-edge nesting')).not.toBeInTheDocument()
+  })
+
   it('lets the operator override pattern faces for the sheet and restores the restriction when unticked', async () => {
     const remote = await mock.load()
     remote.parts = remote.parts.map((part: typeof testParts[number], i: number) => ({ ...part, cutSide: i ? 'non-pattern' : 'pattern' }))
