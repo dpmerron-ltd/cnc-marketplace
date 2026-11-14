@@ -82,7 +82,7 @@ describe('DXF review queue', () => {
     fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
     if (choice === '12-4pass-2mm-ramp20-5deg') {
       expect(screen.getByRole('option', { name: 'dan quiet mode 12mm' })).toBeInTheDocument()
-      expect(screen.getByText('3 + 3 + 3 + 3.2 mm')).toBeInTheDocument()
+      expect(screen.getByText('4 x 3.1 mm')).toBeInTheDocument()
       expect(screen.getByText('5 deg / 1200 mm/min')).toBeInTheDocument()
       expect(screen.getByText('3,000 mm/min')).toBeInTheDocument()
       expect(TestWorker.instances.at(-1)!.request.settings.profilePasses).toBe(4)
@@ -128,7 +128,7 @@ describe('DXF review queue', () => {
     expect(review()).not.toBeChecked()
     fireEvent.click(review())
     fireEvent.click(screen.getByRole('button', { name: 'Download G-code' }))
-    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${suffix}.nc`, expect.stringContaining(`Pass depth ${choice === '12-2pass-2mm-depth12p4' ? 12.4 : thickness === 13 || thickness === 14 ? thickness + 0.4 : thickness === 18 ? 18.4 : thickness === 15 ? 15.4 : thickness === 6 ? 6.2 : 12.2}`))
+    expect(downloadText).toHaveBeenCalledExactlyOnceWith(`second-${suffix}.nc`, expect.stringContaining(`Pass depth ${choice === '12-2pass-2mm-depth12p4' || choice === '12-4pass-2mm-ramp20-5deg' ? 12.4 : thickness === 13 || thickness === 14 ? thickness + 0.4 : thickness === 18 ? 18.4 : thickness === 15 ? 15.4 : thickness === 6 ? 6.2 : 12.2}`))
     if (choice === '12-2pass') expect(vi.mocked(downloadText).mock.calls[0][1]).toContain('Pass depth 6.1')
     expect(screen.getByText('File 2 of 2')).toBeInTheDocument()
     expect(screen.queryByText('Queue complete')).not.toBeInTheDocument()
