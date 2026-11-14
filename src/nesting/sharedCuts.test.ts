@@ -141,4 +141,15 @@ describe('V2 shared-edge nesting',()=>{
   expect(()=>autoNest(changed,sheet)).toThrow('locked shared pair')
  })
 
+ it('keeps separate cuts when an internal hole compromises the outer holding rim',()=>{
+  const original=rectanglePart('edge-hole',200,300,true)
+  const dxf=original.dxf!.replace('10\n40\n20\n40','10\n4\n20\n40')
+  const result=generateCam(readDxf(dxf,'mm'),{thickness:12,profilePasses:4,drillDepthMm:2,rampProfile:'20mm-s-5deg',units:'mm',operations:{},programs:defaultProgramSettings})
+  expect(result.errors).toEqual([])
+  const part=createPartFromGCode('edge-hole.nc',result.gcode,dxf)
+  const parts=[part,rectanglePart('second')],sheet=withProfile(parts,pairSheet(parts))
+  expect(sharedSource(part,sheet)).toBeUndefined()
+  expect(autoNest(parts,sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
+ })
+
 })

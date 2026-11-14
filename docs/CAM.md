@@ -108,7 +108,8 @@ V2 pairs source rectangles with matching native vertical edge lengths and cuttin
 presets; pairs may rotate through quarter turns. It regenerates machining from the
 saved DXF only when that source reproduces the component's selected NC. Unsupported
 outlines, missing source, unknown machining edits and incompatible cutting faces
-keep separate cuts. This first version does not share arbitrary curved or stepped
+keep separate cuts. Internal features must also leave an intact rim at the tab roots;
+cutouts too close to the outer edge keep separate cuts. This first version does not share arbitrary curved or stepped
 edges or form multi-part chains.
 
 The finished edges are 6 mm apart, allowing the shared 6 mm cutter slot to preserve

@@ -55,6 +55,20 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
       const next = points[(i + 1) % points.length]
       return !close(p.x, next.x) && !close(p.y, next.y)
     })) return
+    // Keep internal operations away from the future tab roots. This conservative
+    // intact rim also covers cutter-centreline features and corner relief.
+    for (const feature of features.filter(f => f.kind !== 'outside')) {
+      const inner = feature.circle ? {
+        minX: feature.circle.center.x - feature.circle.radius,
+        maxX: feature.circle.center.x + feature.circle.radius,
+        minY: feature.circle.center.y - feature.circle.radius,
+        maxY: feature.circle.center.y + feature.circle.radius,
+      } : polygonBounds(feature.points)
+      const rim = camPreset.diameter
+      if (![inner.minX, inner.maxX, inner.minY, inner.maxY].every(Number.isFinite) ||
+        inner.minX < bounds.minX + rim || inner.maxX > bounds.maxX - rim ||
+        inner.minY < bounds.minY + rim || inner.maxY > bounds.maxY - rim) return
+    }
     const reproduced = generateCam(drawing, settings)
     if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
     if (!close(part.width, width + pad * 2) || !close(part.height, height + pad * 2)) return
