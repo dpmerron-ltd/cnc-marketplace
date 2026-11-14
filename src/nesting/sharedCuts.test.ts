@@ -7,7 +7,7 @@ import { exportCombinedGCode, exportPhysicalSheetGCodes } from '../gcode/exporte
 import { validateSheet } from '../gcode/validator'
 import { simulateGCode } from '../gcode/simulator'
 import { autoNest } from './nestingEngine'
-import { generatePair, pairMemberInstances, planSharedCuts, sharedSource, worldPairTabs } from './sharedCuts'
+import { generatePair, pairMemberInstances, planSharedCuts, sharedSource, worldPairTabs, minimumSharedBorderMm, sharedBorder } from './sharedCuts'
 import { buildTabMap } from '../printing/tabMap'
 import { transformLocalPoint } from '../gcode/transform'
 import { camPreset } from '../cam/types'
@@ -150,6 +150,25 @@ describe('V2 shared-edge nesting',()=>{
   const parts=[part,rectanglePart('second')],sheet=withProfile(parts,pairSheet(parts))
   expect(sharedSource(part,sheet)).toBeUndefined()
   expect(autoNest(parts,sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
+ })
+
+ it('fits 1186.6 mm panels on 1220 mm stock with a 15 mm border and diagnoses an oversized border',()=>{
+  const parts=[rectanglePart('Left side',300,1180),rectanglePart('Right side',300,1180)]
+  // Unknown source remains individual machining, as with shaped rack panels.
+  const sheet={...pairSheet(parts),width:1220,height:1220,spacing:10,borderSpacing:22}
+  expect(()=>autoNest(parts,sheet)).toThrow('Set Border to 13 mm')
+  expect(sheet.instances.every(i=>i.x===22)).toBe(true)
+  expect(minimumSharedBorderMm-camPreset.diameter/2).toBe(10)
+  expect(sharedBorder({...sheet,borderSpacing:15})).toBe(15)
+  expect(sharedBorder({...sheet,borderSpacing:0})).toBe(13)
+  for(const borderSpacing of [13,15]){
+    const fixed={...sheet,borderSpacing}
+    fixed.instances=autoNest(parts,fixed)
+    expect(validateSheet(parts,fixed).filter(i=>i.level==='error')).toEqual([])
+    expect(Math.max(...fixed.instances.map(i=>i.sheetIndex))).toBe(0)
+    expect(exportCombinedGCode(parts,fixed).errors).toEqual([])
+  }
+  expect(()=>autoNest(parts,{...sheet,width:1000,height:1000})).toThrow('Use a larger sheet')
  })
 
 })

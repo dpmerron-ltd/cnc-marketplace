@@ -37,10 +37,23 @@ describe('export saves a machine snapshot before downloading', () => {
     fireEvent.change(method, { target: { value: 'v2' } })
     expect(method).toHaveValue('v2')
     expect(await screen.findByText('V2 shared-edge nesting')).toBeInTheDocument()
-    expect(screen.getByText(/the border is 22 mm/)).toBeInTheDocument()
+    expect(screen.getByText(/the border is 13 mm/)).toBeInTheDocument()
     fireEvent.change(method, { target: { value: 'v1' } })
     expect(method).toHaveValue('v1')
     expect(screen.queryByText('V2 shared-edge nesting')).not.toBeInTheDocument()
+  })
+
+  it('lets an existing V2 sheet recover from the old 22 mm minimum without moving parts', async () => {
+    const remote = await mock.load()
+    remote.sheet = { ...remote.sheet, nestingMethod: 'v2', borderSpacing: 22 }
+    mock.load.mockResolvedValue(remote)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Use 13 mm V2 border' }))
+    expect(screen.getByRole('spinbutton', { name: 'Border' })).toHaveValue(13)
+    expect(screen.getByText(/Click Auto Nest to rebuild the layout/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use 13 mm V2 border' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Shaped or notched outlines retain separate cuts/)).toBeInTheDocument()
   })
 
   it('lets the operator override pattern faces for the sheet and restores the restriction when unticked', async () => {

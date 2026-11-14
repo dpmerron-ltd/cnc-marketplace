@@ -122,7 +122,7 @@ four passes to 12.4 mm. Machine feed/spindle overrides remain operator controls.
 
 Each paired part has one retained outer tab on each of its three unshared sides.
 Pairs and separate parts are packed in rectangular machining envelopes with at least
-10 mm of continuous waste web between cutter sweeps and a minimum 22 mm envelope
+10 mm of continuous waste web between cutter sweeps and a minimum 13 mm envelope
 border. The preview marks shared cuts in cyan and tabs in yellow; the printed tab
 map uses the same regenerated paths. Programmed distance/time savings are estimates
 before machine overrides. Review the actual stock, tabs and workholding before cutting.
@@ -131,3 +131,10 @@ Moving or rotating one member independently, deleting its partner, changing sour
 machining, or obstructing the waste corridors blocks export until the layout is
 nested again. Locked pairs stay together. Completed/cutting production sheets retain
 their existing layout and prevent changing the method.
+
+The V2 border minimum is the cutter radius (3 mm) plus 10 mm of retained waste,
+not 22 mm. Existing sheets saved with the earlier 22 mm minimum retain their saved
+setting: use **Use 13 mm V2 border**, then **Auto Nest**, or enter a larger border
+that still fits the parts. A 1186.6 mm machining envelope fits 1220 mm stock at
+13 or 15 mm borders, but cannot fit at 22 mm. Oversized parts now report this
+constraint directly instead of returning an invalid layout.

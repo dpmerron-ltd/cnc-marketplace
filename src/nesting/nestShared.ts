@@ -3,7 +3,7 @@ import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
 import { createPartFromGCode } from '../gcode/importPart'
 import { compatibleCutSides, effectiveCutSide } from '../models/cutSide'
-import { generatePair, pairMemberInstances, planSharedCuts, sharedBorder, sharedSource, sharedSpacing, type SharedSource, type PairCam } from './sharedCuts'
+import { generatePair, pairMemberInstances, planSharedCuts, sharedBorder, sharedSource, sharedSpacing, minimumSharedBorderMm, type SharedSource, type PairCam } from './sharedCuts'
 
 // Use the unchanged V1 packer to place rectangular envelopes of pair/single units.
 export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], sheet: Sheet) => PartInstance[]): PartInstance[] {
@@ -14,6 +14,15 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
   const sources = new Map(parts.filter(p => placedPartIds.has(p.id)).map(p => [p.id, sharedSource(p, sheet)]))
   const current = planSharedCuts(parts, sheet)
   const availableWidth = sheet.width - sharedBorder(sheet) * 2, availableHeight = sheet.height - sharedBorder(sheet) * 2
+  for (const instance of sheet.instances.filter(i => !i.locked)) {
+    const part = byPart.get(instance.partId)
+    if (!part) continue
+    const fits = (border: number) => part.width <= sheet.width - 2 * border && part.height <= sheet.height - 2 * border || part.height <= sheet.width - 2 * border && part.width <= sheet.height - 2 * border
+    if (!fits(sharedBorder(sheet))) {
+      const hint = fits(minimumSharedBorderMm) ? ` Set Border to ${minimumSharedBorderMm} mm (the V2 minimum), then Auto Nest again.` : ' Use a larger sheet.'
+      throw new Error(`${part.name}: its ${part.width.toFixed(1)} × ${part.height.toFixed(1)} mm machining envelope cannot fit inside the ${sharedBorder(sheet)} mm border on a ${sheet.width} × ${sheet.height} mm sheet.${hint}`)
+    }
+  }
   const pairFits = (cam: PairCam) => cam.part.width <= availableWidth && cam.part.height <= availableHeight || cam.part.height <= availableWidth && cam.part.width <= availableHeight
   const addPair = (members: [PartInstance, PartInstance], pairSources: [SharedSource, SharedSource], cam: PairCam, existing?: PartInstance) => {
     const id = `shared-unit:${members[0].id}:${members[1].id}`

@@ -1,4 +1,4 @@
-import { sharedBorder, sharedSpacing } from './nesting/sharedCuts'
+import { minimumSharedBorderMm, sharedBorder, sharedSpacing } from './nesting/sharedCuts'
 import { addItemToSheet } from './nesting/addItemToSheet'
 import { MaterialAllocationDialog } from './ui/MaterialAllocationDialog'
 import { StockFields } from './ui/MaterialEditor'
@@ -1726,6 +1726,11 @@ function App() {
               <option value="v2">V2 — shared edges</option>
             </select>
           </label>
+          {sheet.nestingMethod === 'v2' && sheet.borderSpacing > minimumSharedBorderMm && !planningSheet.unavailableSheetIndices.length && <button type="button" onClick={() => {
+            setSheet({ ...sheet, borderSpacing: minimumSharedBorderMm })
+            setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+            setStatus(`Border set to ${minimumSharedBorderMm} mm, retaining 10 mm of waste outside the cutter sweep. Click Auto Nest to rebuild the layout.`)
+          }}>Use {minimumSharedBorderMm} mm V2 border</button>}
           <AutoNestButton parts={parts} sheet={sheet} accountId={userId} onStatus={setStatus}
             onComplete={instances => {
               setSheet({ ...sheet, instances })

@@ -20,7 +20,8 @@ import { simulateGCode } from '../gcode/simulator'
 
 export const sharedWebMm = camPreset.tabWidth
 export const sharedSpacing = (sheet: Sheet) => Math.max(sheet.spacing, camPreset.diameter + sharedWebMm)
-export const sharedBorder = (sheet: Sheet) => Math.max(sheet.borderSpacing, camPreset.diameter * 2 + sharedWebMm)
+export const minimumSharedBorderMm = camPreset.diameter / 2 + sharedWebMm
+export const sharedBorder = (sheet: Sheet) => Math.max(sheet.borderSpacing, minimumSharedBorderMm)
 const pad = camPreset.diameter / 2 + finishingAllowanceMm
 const close = (a: number, b: number) => Math.abs(a - b) < 0.0005
 const n = (v: number) => Number(v.toFixed(6))
