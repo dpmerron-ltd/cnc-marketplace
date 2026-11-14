@@ -70,9 +70,9 @@ describe('DXF review queue', () => {
     expect(screen.queryByText(/Export blocked/)).not.toBeInTheDocument()
   })
 
-  it.each(['6', '12', '12-2mm', '15', '12-2pass', '18-9mm', '12-ramp20-5deg', '18-9mm-ramp20-5deg', '12-2pass-2mm-ramp20-5deg', '12-3pass-2mm-feed60-ramp20-5deg', '12-2pass-2mm-depth12p4', '13-4pass-2mm-ramp10-5deg', '14-4pass-2mm-ramp10-5deg'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
+  it.each(['12-4pass-2mm-ramp20-5deg', '6', '12', '12-2mm', '15', '12-2pass', '18-9mm', '12-ramp20-5deg', '18-9mm-ramp20-5deg', '12-2pass-2mm-ramp20-5deg', '12-3pass-2mm-feed60-ramp20-5deg', '12-2pass-2mm-depth12p4', '13-4pass-2mm-ramp10-5deg', '14-4pass-2mm-ramp10-5deg'])('confirms one file at a time, retaining %s material/item but resetting overrides, units and review', async choice => {
     const thickness = choice.startsWith('14-') ? 14 : choice.startsWith('13-') ? 13 : choice.startsWith('18-9mm') ? 18 : choice === '15' ? 15 : choice === '6' ? 6 : 12
-    const suffix = choice.endsWith('-4pass-2mm-ramp10-5deg') ? `${thickness}mm-4pass-2mm-holes-ramp10-5deg` : choice === '12-2pass-2mm-depth12p4' ? '12mm-2pass-2mm-holes-depth12p4' : choice === '12-3pass-2mm-feed60-ramp20-5deg' ? '12mm-3pass-2mm-holes-feed60-ramp20-5deg' : choice === '12-2pass-2mm-ramp20-5deg' ? '12mm-2pass-2mm-holes-ramp20-5deg' : choice === '18-9mm-ramp20-5deg' ? '18mm-9mm-holes-ramp20-5deg' : choice === '12-ramp20-5deg' ? '12mm-ramp20-5deg' : choice === '12-2mm' ? '12mm-2mm-holes' : choice === '18-9mm' ? '18mm-9mm-holes' : choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
+    const suffix = choice === '12-4pass-2mm-ramp20-5deg' ? '12mm-4pass-2mm-holes-ramp20-5deg' : choice.endsWith('-4pass-2mm-ramp10-5deg') ? `${thickness}mm-4pass-2mm-holes-ramp10-5deg` : choice === '12-2pass-2mm-depth12p4' ? '12mm-2pass-2mm-holes-depth12p4' : choice === '12-3pass-2mm-feed60-ramp20-5deg' ? '12mm-3pass-2mm-holes-feed60-ramp20-5deg' : choice === '12-2pass-2mm-ramp20-5deg' ? '12mm-2pass-2mm-holes-ramp20-5deg' : choice === '18-9mm-ramp20-5deg' ? '18mm-9mm-holes-ramp20-5deg' : choice === '12-ramp20-5deg' ? '12mm-ramp20-5deg' : choice === '12-2mm' ? '12mm-2mm-holes' : choice === '18-9mm' ? '18mm-9mm-holes' : choice === '12-2pass' ? '12mm-2pass' : `${thickness}mm`
     const onSave = vi.fn()
     render(<CamPage items={[testItem]} programs={defaultProgramSettings} onSave={onSave} />)
     const first = file('first.dxf'), second = file('second.dxf')
@@ -80,6 +80,13 @@ describe('DXF review queue', () => {
     expect(screen.getByText('File 1 of 2')).toBeInTheDocument()
     expect(second.text).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('Material thickness'), { target: { value: choice } }); await generated()
+    if (choice === '12-4pass-2mm-ramp20-5deg') {
+      expect(screen.getByRole('option', { name: 'dan quiet mode 12mm' })).toBeInTheDocument()
+      expect(screen.getByText('3 + 3 + 3 + 3.2 mm')).toBeInTheDocument()
+      expect(screen.getByText('5 deg / 1200 mm/min')).toBeInTheDocument()
+      expect(screen.getByText('3,000 mm/min')).toBeInTheDocument()
+      expect(TestWorker.instances.at(-1)!.request.settings.profilePasses).toBe(4)
+    }
     if (choice.startsWith('12-3pass')) {
       expect(screen.getByText('4 + 4 + 4.2 mm')).toBeInTheDocument()
       expect(screen.getByText('3,600 mm/min')).toBeInTheDocument()
@@ -111,7 +118,7 @@ describe('DXF review queue', () => {
     await waitFor(() => expect(screen.getByText('File 2 of 2')).toBeInTheDocument())
     await generated()
     expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ filename: `first-${suffix}.nc`, itemId: testItem.id, source: dxf }))
-    expect(Object.keys(onSave.mock.calls[0][0].materialVariants.profiles)).toHaveLength(14)
+    expect(Object.keys(onSave.mock.calls[0][0].materialVariants.profiles)).toHaveLength(15)
     expect(onSave.mock.calls[0][0].materialVariants.profiles['6'].gcode).toContain('Pass depth 6.2')
     expect(onSave.mock.calls[0][0].materialVariants.profiles['18'].gcode).toContain('Pass depth 18.4')
     expect(screen.getByLabelText('Material thickness')).toHaveValue(choice)

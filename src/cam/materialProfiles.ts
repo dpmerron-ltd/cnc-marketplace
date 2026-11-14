@@ -10,6 +10,7 @@ export const materialProfiles = [
   { id: '12-2pass', label: '12 mm (2 passes)', thickness: 12, profilePasses: 2, drillDepthMm: undefined, rampProfile: undefined },
   { id: '12-2pass-2mm-depth12p4', label: '12 mm (2 x 6.2 mm, 2 mm drills)', thickness: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: undefined },
   { id: '12-2pass-2mm-ramp20-5deg', label: '12 mm (2 passes, 2 mm drills, ramp 20 mm/s at 5 deg)', thickness: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
+  { id: '12-4pass-2mm-ramp20-5deg', label: 'dan quiet mode 12mm', thickness: 12, profilePasses: 4, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
   { id: '12-3pass-2mm-feed60-ramp20-5deg', label: '12 mm (3 passes, 60 mm/s, 2 mm drills, ramp 20 mm/s at 5 deg)', thickness: 12, profilePasses: 3, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
   { id: '13-4pass-2mm-ramp10-5deg', label: '13 mm (4 x 3.35 mm, 2 mm drills, ramp 10 mm/s at 5 deg)', thickness: 13, profilePasses: 4, drillDepthMm: 2, rampProfile: '10mm-s-5deg' },
   { id: '14-4pass-2mm-ramp10-5deg', label: '14 mm (4 x 3.6 mm, 2 mm drills, ramp 10 mm/s at 5 deg)', thickness: 14, profilePasses: 4, drillDepthMm: 2, rampProfile: '10mm-s-5deg' },
@@ -22,7 +23,7 @@ export function rampPreset(profile?: RampProfile) {
   return profile === '20mm-s-5deg' ? { rampDegrees: 5, rampFeed: 1200 } : profile === '10mm-s-5deg' ? { rampDegrees: 5, rampFeed: 600 } : { rampDegrees: 3, rampFeed: 600 }
 }
 export type MaterialProfileId = typeof materialProfiles[number]['id']
-export const materialProfileSchema = z.enum(['6', '12', '12-2mm', '12-2pass', '15', '18', '18-9mm', '12-ramp20-5deg', '18-9mm-ramp20-5deg', '12-2pass-2mm-ramp20-5deg', '12-3pass-2mm-feed60-ramp20-5deg', '12-2pass-2mm-depth12p4', '13-4pass-2mm-ramp10-5deg', '14-4pass-2mm-ramp10-5deg'])
+export const materialProfileSchema = z.enum(['12-4pass-2mm-ramp20-5deg', '6', '12', '12-2mm', '12-2pass', '15', '18', '18-9mm', '12-ramp20-5deg', '18-9mm-ramp20-5deg', '12-2pass-2mm-ramp20-5deg', '12-3pass-2mm-feed60-ramp20-5deg', '12-2pass-2mm-depth12p4', '13-4pass-2mm-ramp10-5deg', '14-4pass-2mm-ramp10-5deg'])
 export const cutFeedPreset = (profile?: MaterialProfileId) => profile === '12-3pass-2mm-feed60-ramp20-5deg' ? 3600 : 3000
 const variantSchema = z.strictObject({
   gcode: z.string().max(2000000), warnings: z.array(z.string()), errors: z.array(z.string()),
@@ -30,7 +31,7 @@ const variantSchema = z.strictObject({
 export const materialVariantsSchema = z.strictObject({
   version: z.literal(1), primaryProfile: materialProfileSchema,
   // Older bundles remain valid; missing profiles are never fabricated.
-  profiles: z.strictObject({ '6': variantSchema, '12': variantSchema, '12-2pass': variantSchema, '15': variantSchema, '18': variantSchema, '18-9mm': variantSchema.optional(), '12-2mm': variantSchema.optional(), '12-ramp20-5deg': variantSchema.optional(), '18-9mm-ramp20-5deg': variantSchema.optional(), '12-2pass-2mm-ramp20-5deg': variantSchema.optional(), '12-3pass-2mm-feed60-ramp20-5deg': variantSchema.optional(), '12-2pass-2mm-depth12p4': variantSchema.optional(), '13-4pass-2mm-ramp10-5deg': variantSchema.optional(), '14-4pass-2mm-ramp10-5deg': variantSchema.optional() }),
+  profiles: z.strictObject({ '12-4pass-2mm-ramp20-5deg': variantSchema.optional(), '6': variantSchema, '12': variantSchema, '12-2pass': variantSchema, '15': variantSchema, '18': variantSchema, '18-9mm': variantSchema.optional(), '12-2mm': variantSchema.optional(), '12-ramp20-5deg': variantSchema.optional(), '18-9mm-ramp20-5deg': variantSchema.optional(), '12-2pass-2mm-ramp20-5deg': variantSchema.optional(), '12-3pass-2mm-feed60-ramp20-5deg': variantSchema.optional(), '12-2pass-2mm-depth12p4': variantSchema.optional(), '13-4pass-2mm-ramp10-5deg': variantSchema.optional(), '14-4pass-2mm-ramp10-5deg': variantSchema.optional() }),
 }).refine(value => Boolean(value.profiles[value.primaryProfile]), 'Primary material profile must be present.')
 export type MaterialVariants = z.infer<typeof materialVariantsSchema>
 export function materialProfileId(thickness: number, profilePasses?: number, drillDepthMm?: number, rampProfile?: RampProfile): MaterialProfileId | undefined {
@@ -40,5 +41,5 @@ export function materialProfileId(thickness: number, profilePasses?: number, dri
 export function validProfilePassSelection(thickness: number | undefined, passes?: number, drillDepthMm?: number, rampProfile?: RampProfile): boolean {
   if (thickness === 13 || thickness === 14) return materialProfileId(thickness, passes, drillDepthMm, rampProfile) !== undefined
   if (passes === undefined) return true
-  return thickness === 12 && [1, 2, 3].includes(passes) && (passes !== 3 || materialProfileId(thickness, passes, drillDepthMm, rampProfile) !== undefined)
+  return thickness === 12 && [1, 2, 3, 4].includes(passes) && (passes < 3 || materialProfileId(thickness, passes, drillDepthMm, rampProfile) !== undefined)
 }

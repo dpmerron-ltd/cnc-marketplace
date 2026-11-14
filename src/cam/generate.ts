@@ -21,6 +21,7 @@ export const materialPreset = (thickness: CamSettings['thickness'], profilePasse
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '14-4pass-2mm-ramp10-5deg') return { depth: 14.4, passes: [3.6, 7.2, 10.8, 14.4], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-depth12p4') return { depth: 12.4, passes: [6.2, 12.4], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-3pass-2mm-feed60-ramp20-5deg') return { depth: 12.2, passes: [4, 8, 12.2], drill: 2 }
+  if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-4pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [3, 6, 9, 12.2], drill: 2 }
   if (materialProfileId(thickness, profilePasses, drillDepthMm, rampProfile) === '12-2pass-2mm-ramp20-5deg') return { depth: 12.2, passes: [6, 12.2], drill: 2 }
   return thickness === 18 ? { depth: 18.4, passes: [9.2, 18.4], drill: drillDepthMm ?? 9.2 } : thickness === 15 ? { depth: 15.4, passes: [7.7, 15.4], drill: 9.2 } : thickness === 6 ? { depth: 6.2, passes: [6.2], drill: 4.5 } : { depth: 12.2, passes: profilePasses === 2 ? [6.1, 12.2] : [12.2], drill: drillDepthMm ?? 4.5 }
 }
@@ -94,7 +95,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
   if (settings.drillDepthMm !== undefined && !materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Use a supported material, pass, drill depth and ramp combination.')
   if (![6, 12, 13, 14, 15, 18].includes(settings.thickness)) errors.push('Select 6 mm, 12 mm, 13 mm, 14 mm, 15 mm or 18 mm material.')
-  if (!validProfilePassSelection(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Profile pass selection requires a supported preset: 12 mm with 1, 2 or 3 passes, or 13/14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.')
+  if (!validProfilePassSelection(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)) errors.push('Profile pass selection requires a supported preset: 12 mm with 1, 2, 3 or 4 passes, or 13/14 mm with 4 passes, 2 mm drills and the 10 mm/s, 5 degree ramp.')
   const factor = (settings.units === 'auto' ? drawing.units : settings.units) === 'inches' ? 25.4 : 1
   const features = drawing.features.map(f => ({ ...f, points: f.points.map(p => ({ x: p.x * factor, y: p.y * factor })), circle: f.circle ? { center: { x: f.circle.center.x * factor, y: f.circle.center.y * factor }, radius: f.circle.radius * factor } : undefined, ...settings.operations[f.id] }))
   const active = features.filter(f => f.kind !== 'ignore')
