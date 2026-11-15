@@ -76,9 +76,10 @@ describe('V2 shared-edge nesting',()=>{
   const extra={...sheet.instances[0],id:'extra',sharedEdgePartnerId:undefined,x:sheet.instances[0].x+1}
   expect(planSharedCuts(parts,{...sheet,instances:[...sheet.instances,extra]}).errors.join(' ')).toContain('corridors')
  })
- it('falls back to separate cuts for unknown source machining and incompatible edge lengths',()=>{
+ it('matches overlapping unequal edges but rejects unknown source machining',()=>{
   const parts=[rectanglePart('a'),rectanglePart('b',200,250)],sheet=withProfile(parts,pairSheet(parts))
-  expect(autoNest(parts,sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
+  expect(autoNest(parts,sheet).every(i=>!!i.sharedEdgePartnerId)).toBe(true)
+  expect(autoNest(parts.map(p=>({...p,dxf:undefined})),sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
   expect(sharedSource({...parts[0],dxf:undefined},sheet)).toBeUndefined()
   expect(sharedSource({...parts[0],gcode:parts[0].gcode.replaceAll('F3000','F2700')},sheet)).toBeUndefined()
  })

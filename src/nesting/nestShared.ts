@@ -1,9 +1,17 @@
+import { edgeLayouts } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
+import { camPreset } from '../cam/types'
+import { finishingAllowanceMm } from '../cam/finishing'
 import { createPartFromGCode } from '../gcode/importPart'
 import { compatibleCutSides, effectiveCutSide } from '../models/cutSide'
 import { generatePair, pairMemberInstances, planSharedCuts, sharedBorder, sharedSource, sharedSpacing, minimumSharedBorderMm, type SharedSource, type PairCam } from './sharedCuts'
+
+function envelopePart(part: Part): Part {
+  const rectangle = createPartFromGCode('nesting-envelope.nc', `G21\nG90\nG00 Z20\nG00 X0 Y0\nG01 Z-1 F600\nG01 X${part.width} Y0 F3000\nG01 X${part.width} Y${part.height}\nG01 X0 Y${part.height}\nG01 X0 Y0\nG00 Z20\nM30`)
+  return { ...rectangle, id: part.id, name: part.name, cutSide: part.cutSide }
+}
 
 // Use the unchanged V1 packer to place rectangular envelopes of pair/single units.
 export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], sheet: Sheet) => PartInstance[]): PartInstance[] {
@@ -23,12 +31,13 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
       throw new Error(`${part.name}: its ${part.width.toFixed(1)} × ${part.height.toFixed(1)} mm machining envelope cannot fit inside the ${sharedBorder(sheet)} mm border on a ${sheet.width} × ${sheet.height} mm sheet.${hint}`)
     }
   }
+  const envelopePadding = camPreset.diameter + 2 * finishingAllowanceMm
   const pairFits = (cam: PairCam) => cam.part.width <= availableWidth && cam.part.height <= availableHeight || cam.part.height <= availableWidth && cam.part.width <= availableHeight
   const addPair = (members: [PartInstance, PartInstance], pairSources: [SharedSource, SharedSource], cam: PairCam, existing?: PartInstance) => {
     const id = `shared-unit:${members[0].id}:${members[1].id}`
     const part = { ...cam.part, id }
-    nestingParts.push(part)
-    units.push({ ...(existing ?? members[0]), id, partId: id, rotation: existing?.rotation ?? 0, sharedEdgePartnerId: undefined, locked: members.some(m => m.locked) })
+    nestingParts.push(envelopePart(part))
+    units.push({ ...(existing ?? members[0]), id, partId: id, rotation: existing?.rotation ?? 0, sharedEdgePartnerId: undefined, sharedEdgeLayoutKey: undefined, locked: members.some(m => m.locked) })
     pairs.set(id, { members, sources: pairSources, cam }); members.forEach(m => used.add(m.id))
   }
   for (const i of sheet.instances) {
@@ -46,19 +55,23 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
     if (!a.locked && sa) for (const b of sheet.instances) {
       if (a.id === b.id || b.locked || used.has(b.id)) continue
       const sb = sources.get(b.partId)
-      if (!sb || sa.profile.id !== sb.profile.id || Math.abs(sa.height - sb.height) > 0.0005 || !compatibleCutSides(effectiveCutSide(sa.part, sheet), effectiveCutSide(sb.part, sheet))) continue
-      try {
-        const cam = generatePair(sa, sb)
-        if (!pairFits(cam) || cam.savedCutMm <= 0 || cam.savedSeconds <= 0) continue
-        addPair([a, b], [sa, sb], cam); paired = true; break
-      } catch { /* Keep separate machining when a pair cannot be regenerated. */ }
+      if (!sb || sa.profile.id !== sb.profile.id || !compatibleCutSides(effectiveCutSide(sa.part, sheet), effectiveCutSide(sb.part, sheet))) continue
+      const legacy = sa.rectangle && sb.rectangle && Math.abs(sa.height-sb.height)<0.0005
+      const layouts = edgeLayouts(sa,sb).filter(l=>(l.width+envelopePadding<=availableWidth && l.height+envelopePadding<=availableHeight) || (l.height+envelopePadding<=availableWidth && l.width+envelopePadding<=availableHeight)).slice(0,8)
+      for (const key of [...(legacy ? [undefined] : []), ...layouts.map(l=>l.key)]) {
+        try {
+          const cam = generatePair(sa, sb, key)
+          if (!pairFits(cam) || cam.savedCutMm <= 0 || cam.savedSeconds <= 0) continue
+          addPair([a, b], [sa, sb], cam); paired = true; break
+        } catch { /* Keep separate machining when a pair cannot be regenerated. */ }
+      }
+      if (paired) break
     }
     if (paired) continue
     const part = byPart.get(a.partId)
     if (!part) throw new Error('A placed part is missing.')
-    const rectangle = createPartFromGCode('nesting-envelope.nc', `G21\nG90\nG00 Z20\nG00 X0 Y0\nG01 Z-1 F600\nG01 X${part.width} Y0 F3000\nG01 X${part.width} Y${part.height}\nG01 X0 Y${part.height}\nG01 X0 Y0\nG00 Z20\nM30`)
-    nestingParts.push({ ...rectangle, id: part.id, cutSide: part.cutSide })
-    units.push({ ...a, rotation: a.locked ? a.rotation : 0, sharedEdgePartnerId: undefined }); used.add(a.id)
+    nestingParts.push(envelopePart(part))
+    units.push({ ...a, rotation: a.locked ? a.rotation : 0, sharedEdgePartnerId: undefined, sharedEdgeLayoutKey: undefined }); used.add(a.id)
   }
   const nested = nestV1(nestingParts, { ...sheet, nestingMethod: 'v1', materialProfile: undefined, spacing: sharedSpacing(sheet), borderSpacing: sharedBorder(sheet), instances: units })
   const placed = new Map<string, PartInstance>()

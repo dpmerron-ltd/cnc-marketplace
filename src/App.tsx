@@ -1720,7 +1720,7 @@ function App() {
               const nestingMethod = event.target.value as 'v1' | 'v2'
               setSheet({ ...sheet, nestingMethod, ...(nestingMethod === 'v2' ? { spacing: sharedSpacing(sheet), borderSpacing: sharedBorder(sheet) } : {}) })
               setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
-              setStatus(nestingMethod === 'v2' ? 'V2 selected. Auto Nest to pair matching rectangular edges. Three outer sides stay tabbed; unsupported parts keep separate cuts.' : 'V1 selected. Auto Nest again to separate any shared pairs before export.')
+              setStatus(nestingMethod === 'v2' ? 'V2 selected. Auto Nest to share compatible straight edges, including shaped and notched parts. Three outer sides stay tabbed; unsupported parts keep separate cuts.' : 'V1 selected. Auto Nest again to separate any shared pairs before export.')
             }}>
               <option value="v1">V1 — standard</option>
               <option value="v2">V2 — shared edges</option>

@@ -110,7 +110,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
       {sheet.nestingMethod === 'v2' && <div className="shared-nesting-summary" role="status">
         <strong>V2 shared-edge nesting</strong>
         <span>{shared.pairs.length} shared edge{shared.pairs.length === 1 ? '' : 's'} · {(shared.pairs.reduce((s, p) => s + p.cam.savedCutMm, 0) / 1000).toFixed(2)} m less programmed cutting · about {Math.round(shared.pairs.reduce((s, p) => s + p.cam.savedSeconds, 0))} seconds saved</span>
-        {!shared.pairs.length && <span>No shared edges to highlight on this sheet. V2 currently pairs complete rectangular outlines with matching edges and reproducible DXF machining. Shaped or notched outlines retain separate cuts.</span>}
+        {!shared.pairs.length && <span>No shared edges to highlight on this sheet. V2 matches straight sections on rectangular, shaped and notched parts. Parts keep separate cuts when no compatible edge leaves three supported sides.</span>}
         <span>Pairs retain tabs on three sides. Shared cuts have bold teal lines and numbered labels; yellow bars show retained tabs. Unsupported parts keep separate cuts.</span>
         <span>At least 10 mm of waste remains between machining envelopes; the border is {sharedBorder(sheet)} mm. Shared walls cut to size during depth passes, then receive one spring pass.</span>
         <div className="shared-edge-legend" aria-label="Sheet edge legend">

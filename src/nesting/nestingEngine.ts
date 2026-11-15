@@ -149,7 +149,7 @@ function nestAvailable(parts: Part[], sheet: Sheet, onProgress?: (completed: num
   const lockedErrors = cutSideErrors(parts, { ...sheet, instances: sheet.instances.filter(instance => instance.locked) })
   if (lockedErrors.length) throw new Error(lockedErrors.join(' '))
   if (parts.some(part => sheet.instances.some(instance => instance.partId === part.id) && part.cutSide !== undefined && !cutSides.includes(part.cutSide))) throw new Error('Unknown component cutting side. Set a valid cutting side before nesting.')
-  const instances = sheet.instances.map(instance => ({ ...instance, sharedEdgePartnerId: undefined }))
+  const instances = sheet.instances.map(instance => ({ ...instance, sharedEdgePartnerId: undefined, sharedEdgeLayoutKey: undefined }))
   const placed: PlacedShape[] = []
   const orientationCache = new Map<Part, ReturnType<typeof orientations>>()
   const noFitCache = new WeakMap<Point[], WeakMap<Point[], ClipperLib.Path>>()

@@ -1,3 +1,4 @@
+import { edgeLayouts, layoutFeatures } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
@@ -26,7 +27,7 @@ const pad = camPreset.diameter / 2 + finishingAllowanceMm
 const close = (a: number, b: number) => Math.abs(a - b) < 0.0005
 const n = (v: number) => Number(v.toFixed(6))
 const signature = (code: string) => JSON.stringify(parseGCode(code).bodyLines.filter(l => l.words.length).map(l => l.words.map(w => [w.letter, w.value])))
-export interface SharedSource { part: Part; features: CamFeature[]; settings: CamSettings; bounds: Bounds; width: number; height: number; profile: typeof materialProfiles[number] }
+export interface SharedSource { part: Part; features: CamFeature[]; settings: CamSettings; bounds: Bounds; width: number; height: number; rectangle: boolean; profile: typeof materialProfiles[number] }
 const sources = new WeakMap<Part, Map<string, SharedSource | null>>()
 
 // Reproduce the existing machining before accepting a component for sheet CAM.
@@ -48,17 +49,16 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     const settings: CamSettings = { thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
     const features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
     const outer = features.filter(f => f.kind === 'outside')
-    if (outer.length !== 1 || outer[0].circle || !outer[0].closed || !rectangleGeometry(outer[0].points)) return
+    if (outer.length !== 1 || outer[0].circle || !outer[0].closed) return
+    const rectangle = Boolean(rectangleGeometry(outer[0].points)) && outer[0].points.every((p,i,points)=>{
+      const next=points[(i+1)%points.length]
+      return close(p.x,next.x)||close(p.y,next.y)
+    })
     const bounds = polygonBounds(outer[0].points), width = bounds.maxX - bounds.minX, height = bounds.maxY - bounds.minY
-    if (Math.min(width, height) < 4 * (camPreset.tabWidth + camPreset.diameter)) return
-    // Only axis-aligned source rectangles in this version; the pair can rotate as a unit.
-    if (outer[0].points.some((p, i, points) => {
-      const next = points[(i + 1) % points.length]
-      return !close(p.x, next.x) && !close(p.y, next.y)
-    })) return
+    if (Math.min(width, height) < camPreset.tabWidth + camPreset.diameter) return
     // Keep internal operations away from the future tab roots. This conservative
     // intact rim also covers cutter-centreline features and corner relief.
-    for (const feature of features.filter(f => f.kind !== 'outside')) {
+    for (const feature of features.filter(f => rectangle && f.kind !== 'outside')) {
       const inner = feature.circle ? {
         minX: feature.circle.center.x - feature.circle.radius,
         maxX: feature.circle.center.x + feature.circle.radius,
@@ -73,7 +73,7 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     const reproduced = generateCam(drawing, settings)
     if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
     if (!close(part.width, width + pad * 2) || !close(part.height, height + pad * 2)) return
-    const source = { part, features, settings, bounds, width, height, profile }
+    const source = { part, features, settings, bounds, width, height, rectangle, profile }
     cache.set(key, source)
     return source
   } catch { return }
@@ -82,24 +82,29 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
 export interface PairCam {
   part: Part
   offsetB: number
+  key?: string
+  memberLayouts?: Array<{ rotation: number; x: number; y: number; width: number; height: number }>
   tabs: Array<{ points: Point[]; center: Point; member: 0 | 1; z: number }>
   shared: [Point, Point]
   savedCutMm: number
   savedSeconds: number
   memberPaths: [Point[][], Point[][]]
 }
-const pairCache = new WeakMap<SharedSource, WeakMap<SharedSource, PairCam>>()
-export function generatePair(a: SharedSource, b: SharedSource): PairCam {
-  const cached = pairCache.get(a)?.get(b)
+const pairCache = new WeakMap<SharedSource, WeakMap<SharedSource, Map<string, PairCam>>>()
+export function generatePair(a: SharedSource, b: SharedSource, key?: string): PairCam {
+  const layout = key ? edgeLayouts(a,b).find(l=>l.key===key) : !a.rectangle || !b.rectangle || !close(a.height,b.height) ? edgeLayouts(a,b)[0] : undefined
+  if (key && !layout || (!a.rectangle || !b.rectangle || !close(a.height,b.height)) && !layout) throw new Error('No straight edge can be shared while retaining tabs on three sides.')
+  const cacheKey = layout?.key ?? 'rectangle'
+  const cached = pairCache.get(a)?.get(b)?.get(cacheKey)
   if (cached) return cached
-  if (a.profile.id !== b.profile.id || !close(a.height, b.height)) throw new Error('Shared edges need matching lengths and cutting presets.')
+  if (a.profile.id !== b.profile.id) throw new Error('Shared edges need matching lengths and cutting presets.')
   const offsetB = a.width + camPreset.diameter, width = offsetB + b.width, height = a.height
-  const anchors = [{ x: 0, y: height / 2 }, { x: a.width / 2, y: 0 }, { x: a.width / 2, y: height }, { x: width, y: height / 2 }, { x: offsetB + b.width / 2, y: 0 }, { x: offsetB + b.width / 2, y: height }]
+  const anchors = layout?.anchors ?? [{ x: 0, y: height / 2 }, { x: a.width / 2, y: 0 }, { x: a.width / 2, y: height }, { x: width, y: height / 2 }, { x: offsetB + b.width / 2, y: 0 }, { x: offsetB + b.width / 2, y: height }]
   const internals = (s: SharedSource, dx: number, prefix: string) => s.features.filter(f => f.kind !== 'outside').map(f => {
     const translate = (p: Point) => ({ x: p.x - s.bounds.minX + dx, y: p.y - s.bounds.minY })
     return { ...f, id: prefix + f.id, points: f.points.map(translate), circle: f.circle ? { ...f.circle, center: translate(f.circle.center) } : undefined }
   })
-  const features: CamFeature[] = [...internals(a, 0, 'a-'), ...internals(b, offsetB, 'b-'), { id: 'shared-outer', name: 'Shared pair perimeter', layer: 'PROFILE', kind: 'outside', closed: true, points: boundsPolygon({ minX: 0, minY: 0, maxX: width, maxY: height }), tabAnchors: anchors }]
+  const features: CamFeature[] = [...(layout ? layoutFeatures(layout) : [...internals(a, 0, 'a-'), ...internals(b, offsetB, 'b-')]), { id: 'shared-outer', name: 'Shared pair perimeter', layer: 'PROFILE', kind: 'outside', closed: true, points: layout?.outline ?? boundsPolygon({ minX: 0, minY: 0, maxX: width, maxY: height }), tabAnchors: anchors }]
   const operations = Object.fromEntries(features.filter(f => f.id !== 'shared-outer').map(f => [f.id, { kind: f.kind, depthMm: f.depthMm, ...((f.id.startsWith('a-') ? a : b).settings.operations[f.id.slice(2)] ?? {}) }]))
   const result = generateCam({ features, errors: [], warnings: [], units: 'mm' }, { ...a.settings, operations })
   if (result.errors.length) throw new Error(result.errors.join(' '))
@@ -107,8 +112,8 @@ export function generatePair(a: SharedSource, b: SharedSource): PairCam {
   if (outer.tabs.length !== 6) throw new Error('A shared pair needs three retained tabs per part.')
   const { depth, passes } = materialPreset(a.settings.thickness, a.settings.profilePasses, a.settings.drillDepthMm, a.settings.rampProfile)
   const ramp = rampPreset(a.settings.rampProfile), feed = cutFeedPreset(a.profile.id)
-  const x = result.shift.x + a.width + camPreset.diameter / 2
-  const bottom = result.shift.y - pad, top = result.shift.y + height + pad
+  const x = result.shift.x + (layout?.slot[0].x ?? a.width + camPreset.diameter / 2)
+  const bottom = result.shift.y + (layout?.slot[0].y ?? 0) - pad, top = result.shift.y + (layout?.slot[1].y ?? height) + pad
   const shared: [Point, Point] = [{ x, y: bottom }, { x, y: top }]
   const lines = ['(V2 shared edge: cut to final width in depth passes; one spring pass)', '(Both parts remain held on three outer sides)']
   const move = (y: number, z: number, f: number) => lines.push(`G01 X${n(x)} Y${n(y)} Z${n(-z)} F${f}`)
@@ -142,21 +147,32 @@ export function generatePair(a: SharedSource, b: SharedSource): PairCam {
     [[{ x, y: sy - r }, { x: sx - r, y: sy - r }, { x: sx - r, y: sy + height + r }, { x, y: sy + height + r }], shared],
     [[{ x, y: sy - r }, { x: sx + width + r, y: sy - r }, { x: sx + width + r, y: sy + height + r }, { x, y: sy + height + r }], shared],
   ]
+  if (layout) {
+    memberPaths[0] = [shared]; memberPaths[1] = [shared]
+    for (let i=0;i<outer.path.length;i++) {
+      const start=outer.path[i],end=outer.path[(i+1)%outer.path.length]
+      if ((start.x-x)*(end.x-x)<-1e-8) {
+        const t=(x-start.x)/(end.x-start.x),middle={x,y:start.y+(end.y-start.y)*t}
+        memberPaths[start.x<x?0:1].push([start,middle]);memberPaths[end.x<x?0:1].push([middle,end])
+      } else memberPaths[(start.x+end.x)/2<x?0:1].push([start,end])
+    }
+  }
   for (const op of result.operations.filter(o => o.featureId !== 'shared-outer')) {
     const member = op.featureId.startsWith('a-') ? 0 : 1
     memberPaths[member].push(op.path)
     for (const t of op.tabs) tabs.push({ points: t.points, center: { x: (t.start.x + t.end.x) / 2, y: (t.start.y + t.end.y) / 2 }, member, z: -(depth - camPreset.tabHeight) })
   }
-  const cam = { part, offsetB, tabs, shared, memberPaths, savedCutMm: original.reduce((n, s) => n + s.cuttingDistanceMm, 0) - simulation.cuttingDistanceMm, savedSeconds: original.reduce((n, s) => n + s.estimatedSeconds, 0) - simulation.estimatedSeconds }
-  let cache = pairCache.get(a); if (!cache) { cache = new WeakMap(); pairCache.set(a, cache) }; cache.set(b, cam)
+  const cam: PairCam = { part, offsetB, key: layout?.key, memberLayouts: layout?.members.map((m,i)=>({rotation:m.rotation,...layout.offsets[i],width:m.width+2*pad,height:m.height+2*pad})), tabs, shared, memberPaths, savedCutMm: original.reduce((n, s) => n + s.cuttingDistanceMm, 0) - simulation.cuttingDistanceMm, savedSeconds: original.reduce((n, s) => n + s.estimatedSeconds, 0) - simulation.estimatedSeconds }
+  let cache = pairCache.get(a); if (!cache) { cache = new WeakMap(); pairCache.set(a, cache) }; let entries=cache.get(b);if(!entries){entries=new Map();cache.set(b,entries)}entries.set(cacheKey,cam)
   return cam
 }
 
 export function pairMemberInstances(cam: PairCam, block: PartInstance, members: [PartInstance, PartInstance], sources: [SharedSource, SharedSource]): [PartInstance, PartInstance] {
   return members.map((member, i) => {
-    const rect = { minX: i ? cam.offsetB : 0, minY: 0, maxX: (i ? cam.offsetB : 0) + sources[i].part.width, maxY: sources[i].part.height }
+    const local = cam.memberLayouts?.[i] ?? {x:i?cam.offsetB:0,y:0,width:sources[i].part.width,height:sources[i].part.height,rotation:0}
+    const rect = {minX:local.x,minY:local.y,maxX:local.x+local.width,maxY:local.y+local.height}
     const bounds = polygonBounds(boundsPolygon(rect).map(p => rotatePointInBounds(p, cam.part, block.rotation)))
-    return { ...member, x: block.x + bounds.minX, y: block.y + bounds.minY, rotation: block.rotation, sheetIndex: block.sheetIndex, sharedEdgePartnerId: members[1 - i].id }
+    return { ...member, x: block.x + bounds.minX, y: block.y + bounds.minY, rotation: (block.rotation + local.rotation) % 360, sheetIndex: block.sheetIndex, sharedEdgePartnerId: members[1 - i].id, sharedEdgeLayoutKey: cam.key }
   }) as [PartInstance, PartInstance]
 }
 export interface PlacedPair { cam: PairCam; instance: PartInstance; members: [PartInstance, PartInstance]; bounds: Bounds }
@@ -184,16 +200,17 @@ export function planSharedCuts(parts: Part[], sheet: Sheet): SharedPlan {
       try {
         const firstSource = sharedSource(firstPart, current), secondSource = sharedSource(secondPart, current)
         if (!firstSource || !secondSource || !compatibleCutSides(effectiveCutSide(firstPart, current), effectiveCutSide(secondPart, current))) throw new Error('Shared pair source or cutting face changed. Auto-nest again.')
-        if (![0, 90, 180, 270].includes(first.rotation) || first.rotation !== second.rotation) throw new Error('Shared pairs must rotate together. Auto-nest again.')
+        if (![first.rotation,second.rotation].every(r=>[0,90,180,270].includes(r)) || first.sharedEdgeLayoutKey !== second.sharedEdgeLayoutKey) throw new Error('Shared pairs must rotate together. Auto-nest again.')
         let found: PlacedPair | undefined
         for (const reverse of [false, true]) {
           const members: [PartInstance, PartInstance] = reverse ? [second, first] : [first, second]
           const sources: [SharedSource, SharedSource] = reverse ? [secondSource, firstSource] : [firstSource, secondSource]
-          const cam = generatePair(...sources)
+          let cam: PairCam
+          try { cam = generatePair(...sources, first.sharedEdgeLayoutKey) } catch { continue }
           const boxes = members.map((m, i) => instanceBounds(sources[i].part, m))
-          const instance = { ...members[0], id: `pair:${members[0].id}`, partId: cam.part.id, x: Math.min(...boxes.map(b => b.minX)), y: Math.min(...boxes.map(b => b.minY)) }
+          const instance = { ...members[0], id: `pair:${members[0].id}`, partId: cam.part.id, rotation: (members[0].rotation - (cam.memberLayouts?.[0].rotation ?? 0) + 360) % 360, x: Math.min(...boxes.map(b => b.minX)), y: Math.min(...boxes.map(b => b.minY)) }
           const expected = pairMemberInstances(cam, instance, members, sources)
-          if (expected.every((m, i) => close(m.x, members[i].x) && close(m.y, members[i].y))) { found = { cam, instance, members, bounds: instanceBounds(cam.part, instance) }; break }
+          if (expected.every((m, i) => close(m.x, members[i].x) && close(m.y, members[i].y) && m.rotation === members[i].rotation)) { found = { cam, instance, members, bounds: instanceBounds(cam.part, instance) }; break }
         }
         if (!found) throw new Error('Shared-edge alignment changed. Auto-nest again before export.')
         plan.pairs.push(found); found.members.forEach(m => plan.pairedIds.add(m.id)); groups.push({ bounds: found.bounds, ids: found.members.map(m => m.id) })

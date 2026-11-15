@@ -53,7 +53,7 @@ describe('export saves a machine snapshot before downloading', () => {
     expect(screen.getByRole('spinbutton', { name: 'Border' })).toHaveValue(13)
     expect(screen.getByText(/Click Auto Nest to rebuild the layout/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Use 13 mm V2 border' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Shaped or notched outlines retain separate cuts/)).toBeInTheDocument()
+    expect(screen.getByText(/V2 matches straight sections on rectangular, shaped and notched parts/)).toBeInTheDocument()
   })
 
   it('lets the operator override pattern faces for the sheet and restores the restriction when unticked', async () => {

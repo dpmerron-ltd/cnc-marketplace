@@ -104,13 +104,29 @@ On **Sheet**, select **Nesting method → V2 — shared edges**, then **Auto Nes
 V1 remains the default for existing and new sheets. Switching back to V1 requires
 Auto Nest again to separate any existing pairs. The choice is saved with the sheet.
 
-V2 pairs source rectangles with matching native vertical edge lengths and cutting
-presets; pairs may rotate through quarter turns. It regenerates machining from the
-saved DXF only when that source reproduces the component's selected NC. Unsupported
-outlines, missing source, unknown machining edits and incompatible cutting faces
-keep separate cuts. Internal features must also leave an intact rim at the tab roots;
-cutouts too close to the outer edge keep separate cuts. This first version does not share arbitrary curved or stepped
-edges or form multi-part chains.
+V2 matches individual straight exterior sections of source outlines, including
+notched panels and parts with curves elsewhere. Members can rotate independently
+in quarter turns before their pair is placed on the sheet. Matching sections may
+have different lengths: only their overlapping straight span is shared. The entire
+source shape and all internal operations are retained.
+
+The matcher uses straight sections on the outer support lines (the left, right,
+top or bottom extent of a rotated part), so the 6 mm cutter slot lies outside both
+finished parts. It joins the two source contours across that slot, regenerates the
+combined perimeter, and machines the separating slot once per selected depth.
+It does not share curved edges, recessed notch walls, or arbitrary angled sections.
+Pairs remain two parts rather than multi-part chains.
+
+Regeneration requires a saved DXF that reproduces the selected NC. Missing source,
+unknown machining edits, incompatible presets or cutting faces keep separate cuts.
+A pair must fit the stock, save cutting distance and time, and provide an intact
+10 mm holding tab on each of the three unshared sides of each member. Tab roots are
+checked against the actual outline and internal operations. Thin ends or interrupted
+support edges that cannot hold those tabs keep separate cuts.
+
+The selected edge arrangement is saved with the pair and revalidated when opening,
+previewing, printing or exporting. Existing rectangular pairs and V1 layouts remain
+compatible. To find new shared edges on an existing sheet, run **Auto Nest** again.
 
 The finished edges are 6 mm apart, allowing the shared 6 mm cutter slot to preserve
 both finished dimensions. The shared slot is machined once per selected depth pass
