@@ -40,8 +40,9 @@ export function copyProjectToAccount(project: Project, userId: string): Project 
       ...sheet,
       instances: sheet.instances.filter(instance => instanceIds.has(instance.id)).map(instance => ({
         ...instance, id: instanceIds.get(instance.id)!, partId: partIds.get(instance.partId)!,
+        sharedEdgePartnerId: instance.sharedEdgePartnerId ? instanceIds.get(instance.sharedEdgePartnerId) ?? instance.sharedEdgePartnerId : undefined,
       })),
-      pendingParts: sheet.pendingParts?.filter(instance => instanceIds.has(instance.id)).map(instance => ({ ...instance, id: instanceIds.get(instance.id)!, partId: partIds.get(instance.partId)! })),
+      pendingParts: sheet.pendingParts?.filter(instance => instanceIds.has(instance.id)).map(instance => ({ ...instance, id: instanceIds.get(instance.id)!, partId: partIds.get(instance.partId)!, sharedEdgePartnerId: instance.sharedEdgePartnerId ? instanceIds.get(instance.sharedEdgePartnerId) ?? instance.sharedEdgePartnerId : undefined })),
       orderImports: sheet.orderImports?.map(entry => ({ ...entry, instanceIds: entry.instanceIds.flatMap(id => instanceIds.has(id) ? [instanceIds.get(id)!] : []) })),
       gcodePresets: sheet.gcodePresets?.map((preset) => ({ ...preset, id: crypto.randomUUID(), ownerId: userId, uploadedBy: undefined })),
     }

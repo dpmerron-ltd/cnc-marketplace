@@ -70,6 +70,21 @@ describe('account-local projects', () => {
     expect(() => copyProjectToAccount({ ...original, items: original.items?.map(item => ({ ...item, imageDeferred: true })) }, 'bob')).toThrow('incomplete')
   })
 
+  it('remaps both shared-edge partners when importing a sheet under new IDs', () => {
+    const project = fixture()
+    const [a,b] = project.sheet.instances
+    project.sheet.nestingMethod = 'v2'
+    a.sharedEdgePartnerId = b.id; b.sharedEdgePartnerId = a.id
+    a.sharedEdgeLayoutKey = b.sharedEdgeLayoutKey = 'edge:270:90:0:11.7:1087.3'
+    const copy = copyProjectToAccount(project, 'alice')
+    const [first,second] = copy.sheet.instances
+    expect(first.id).not.toBe(a.id)
+    expect(first.sharedEdgePartnerId).toBe(second.id)
+    expect(second.sharedEdgePartnerId).toBe(first.id)
+    expect(first.sharedEdgeLayoutKey).toBe(a.sharedEdgeLayoutKey)
+    expect(second.sharedEdgeLayoutKey).toBe(b.sharedEdgeLayoutKey)
+  })
+
   it('keeps browser backups separate and ignores the old shared cache', () => {
     const project = fixture()
     localStorage.setItem('sheet-builder-project', JSON.stringify(project))
