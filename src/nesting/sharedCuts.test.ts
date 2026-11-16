@@ -7,7 +7,7 @@ import { exportCombinedGCode, exportPhysicalSheetGCodes } from '../gcode/exporte
 import { validateSheet } from '../gcode/validator'
 import { simulateGCode } from '../gcode/simulator'
 import { autoNest } from './nestingEngine'
-import { generatePair, pairMemberInstances, planSharedCuts, sharedSource, worldPairTabs, minimumSharedBorderMm, sharedBorder } from './sharedCuts'
+import { generatePair, pairMemberInstances, planSharedCuts, sharedSource, sharedSourceIssue, worldPairTabs, minimumSharedBorderMm, sharedBorder } from './sharedCuts'
 import { buildTabMap } from '../printing/tabMap'
 import { transformLocalPoint } from '../gcode/transform'
 import { camPreset } from '../cam/types'
@@ -176,6 +176,41 @@ describe('V2 shared-edge nesting',()=>{
   expect(source).toBeDefined()
   expect(() => generatePair(source,sharedSource(parts[1],sheet)!)).toThrow('three sides')
   expect(autoNest(parts,sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
+ })
+
+ it('recovers recorded pocket depths and tab choices only when the full NC reproduces',()=>{
+  const original = rectanglePart('custom',200,300,true)
+  const dxf = original.dxf!.replace('40\n3\n0\nENDSEC','40\n20\n0\nENDSEC')
+  const drawing = readDxf(dxf,'mm')
+  const circle = drawing.features.find(f=>f.circle)!
+  const outer = drawing.features.find(f=>f.kind==='outside')!
+  const result = generateCam(drawing,{thickness:12,profilePasses:4,drillDepthMm:2,rampProfile:'20mm-s-5deg',units:'mm',programs:defaultProgramSettings,operations:{[circle.id]:{kind:'pocket',depthMm:7},[outer.id]:{tabs:2}}})
+  expect(result.errors).toEqual([])
+  const part = createPartFromGCode('custom.nc',result.gcode,dxf)
+  const parts = [part,rectanglePart('second')], sheet = withProfile(parts,pairSheet(parts))
+  const source = sharedSource(part,sheet)!
+  expect(source).toBeDefined()
+  expect(source.settings.operations[circle.id]).toEqual({kind:'pocket',depthMm:7})
+  expect(source.settings.operations[outer.id]).toEqual({kind:'outside',tabs:2})
+  expect(generatePair(source,sharedSource(parts[1],sheet)!).part.gcode).toContain('full depth 7 mm')
+  expect(sharedSource({...part,gcode:part.gcode.replaceAll('F3000','F2700')},sheet)).toBeUndefined()
+ })
+
+ it('pairs long matching panels before a small divider regardless of catalogue order',()=>{
+  const parts = [rectanglePart('divider',220,220),rectanglePart('front',1064,240),rectanglePart('base',1064,222)]
+  const sheet = withProfile(parts,pairSheet(parts))
+  sheet.instances = autoNest(parts,sheet)
+  expect(sheet.instances[0].sharedEdgePartnerId).toBeUndefined()
+  expect(sheet.instances[1].sharedEdgePartnerId).toBe(sheet.instances[2].id)
+  expect(planSharedCuts(parts,sheet).errors).toEqual([])
+ })
+
+ it('explains an obsolete cutter without allowing its coordinates to be shared',()=>{
+  const part = rectanglePart('old')
+  const sheet = withProfile([part],pairSheet([part]))
+  const old = {...part,gcode:part.gcode.replace('cutter 6 mm','cutter 6.35 mm').replaceAll('F3000','F2700')}
+  expect(sharedSourceIssue(old,sheet)).toContain('6.35 mm cutter')
+  expect(sharedSource(old,sheet)).toBeUndefined()
  })
 
  it('fits 1186.6 mm panels on 1220 mm stock with a 15 mm border and diagnoses an oversized border',()=>{

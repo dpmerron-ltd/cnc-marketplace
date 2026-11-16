@@ -1,3 +1,4 @@
+import { recordedOperations } from '../cam/sourceOperations'
 import { edgeLayouts, layoutFeatures, rectanglePairAnchors } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
@@ -39,6 +40,8 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
   if (!cache) { cache = new Map(); sources.set(part, cache) }
   if (cache.has(key)) return cache.get(key) ?? undefined
   cache.set(key, null)
+  const cutter = part.gcode.match(/\(Material[^\n]*\/ cutter ([\d.]+) mm/i)?.[1]
+  if (cutter && !close(Number(cutter), camPreset.diameter)) return
   if (!part.dxf || part.dxf.length > 2000000) return
   const profile = materialProfiles.find(p => p.id === id)
   if (!profile) return
@@ -47,7 +50,7 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     if (drawing.errors.length || drawing.features.length > 100) return
     const provenance = part.metadata as typeof part.metadata & { rackingRegeneration?: { sourceLayerOverrides?: Record<string, OperationOverride> } }
     const settings: CamSettings = { thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
-    const features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
+    let features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
     const outer = features.filter(f => f.kind === 'outside')
     if (outer.length !== 1 || outer[0].circle || !outer[0].closed) return
     const rectangle = Boolean(rectangleGeometry(outer[0].points)) && outer[0].points.every((p,i,points)=>{
@@ -58,13 +61,30 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     if (Math.min(width, height) < camPreset.tabWidth + camPreset.diameter) return
     // Tab support is checked for the chosen pair, on its three unshared sides.
     // An operation near another edge must not disqualify the whole component.
-    const reproduced = generateCam(drawing, settings)
-    if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
+    let reproduced = generateCam(drawing, settings)
+    if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) {
+      const operations = recordedOperations(part.gcode, drawing)
+      if (!operations) return
+      settings.operations = operations
+      reproduced = generateCam(drawing, settings)
+      if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
+      features = drawing.features.map(f => ({ ...f, ...operations[f.id] })).filter(f => f.kind !== 'ignore')
+      const effectiveOuter = features.filter(f => f.kind === 'outside')
+      if (effectiveOuter.length !== 1 || effectiveOuter[0].id !== outer[0].id) return
+    }
     if (!close(part.width, width + pad * 2) || !close(part.height, height + pad * 2)) return
     const source = { part, features, settings, bounds, width, height, rectangle, profile }
     cache.set(key, source)
     return source
   } catch { return }
+}
+
+export function sharedSourceIssue(part: Part, sheet: Sheet): string | undefined {
+  if (sharedSource(part, sheet)) return
+  const diameter = part.gcode.match(/\(Material[^\n]*\/ cutter ([\d.]+) mm/i)?.[1]
+  if (diameter && !close(Number(diameter), camPreset.diameter)) return `${part.name}: saved toolpaths use a ${diameter} mm cutter. Regenerate from DXF for the ${camPreset.diameter} mm cutter before V2 can share edges.`
+  if (!part.dxf) return `${part.name}: source DXF is missing; V2 cannot regenerate a shared cut.`
+  return `${part.name}: V2 could not reproduce the saved machining from its DXF and cutting preset. Review and regenerate this component.`
 }
 
 export interface PairCam {

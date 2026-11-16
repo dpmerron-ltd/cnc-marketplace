@@ -48,10 +48,16 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
     if (!pair) throw new Error('A locked shared pair is incomplete or has moved. Unlock it and auto-nest again.')
     addPair(pair.members, pair.members.map(m => sources.get(m.partId)!) as [SharedSource, SharedSource], pair.cam, pair.instance)
   }
-  for (const a of sheet.instances) {
+  // Consider the longest parts first, then choose the greatest cut saving rather
+  // than accepting the first short edge encountered in catalogue order.
+  const ordered = [...sheet.instances].sort((a,b) => {
+    const pa = byPart.get(a.partId), pb = byPart.get(b.partId)
+    return Math.max(pb?.width ?? 0,pb?.height ?? 0)-Math.max(pa?.width ?? 0,pa?.height ?? 0)
+  })
+  for (const a of ordered) {
     if (used.has(a.id)) continue
     const sa = sources.get(a.partId)
-    let paired = false
+    let best: { b: PartInstance; source: SharedSource; cam: PairCam } | undefined
     if (!a.locked && sa) for (const b of sheet.instances) {
       if (a.id === b.id || b.locked || used.has(b.id)) continue
       const sb = sources.get(b.partId)
@@ -62,12 +68,11 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
         try {
           const cam = generatePair(sa, sb, key)
           if (!pairFits(cam) || cam.savedCutMm <= 0 || cam.savedSeconds <= 0) continue
-          addPair([a, b], [sa, sb], cam); paired = true; break
+          if (!best || cam.savedCutMm > best.cam.savedCutMm) best = { b, source: sb, cam }
         } catch { /* Keep separate machining when a pair cannot be regenerated. */ }
       }
-      if (paired) break
     }
-    if (paired) continue
+    if (best) { addPair([a, best.b], [sa!, best.source], best.cam); continue }
     const part = byPart.get(a.partId)
     if (!part) throw new Error('A placed part is missing.')
     nestingParts.push(envelopePart(part))

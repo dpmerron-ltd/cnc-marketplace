@@ -1,4 +1,6 @@
-import { planSharedCuts, worldPairTabs, sharedBorder } from '../nesting/sharedCuts'
+import { physicalSheet } from '../models/stockMaterial'
+import { selectMaterialParts } from '../gcode/materialSelection'
+import { planSharedCuts, worldPairTabs, sharedBorder, sharedSourceIssue } from '../nesting/sharedCuts'
 import { useMemo, useState } from 'react'
 import { partNumberText } from '../labels/partLabels'
 import type { Part } from '../models/Part'
@@ -85,6 +87,15 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
   )
 
   const shared = useMemo(() => planSharedCuts(parts, { ...sheet, instances: sheet.instances.filter(i => i.sheetIndex === sheetIndex) }), [parts, sheet, sheetIndex])
+  const sourceIssues = useMemo(() => {
+    if (sheet.nestingMethod !== 'v2') return []
+    const current = physicalSheet(sheet, sheetIndex)
+    const ids = new Set(current.instances.map(i => i.partId))
+    return selectMaterialParts(parts, current).parts.filter(p => ids.has(p.id)).flatMap(p => {
+      const issue = sharedSourceIssue(p, current)
+      return issue ? [issue] : []
+    })
+  }, [parts, sheet, sheetIndex])
   const pairSegments = useMemo(() => shared.pairs.flatMap(pair => transformPartProgram(pair.cam.part, pair.instance).segments), [shared])
   const collidingIds = new Set<string>()
   for (let a = 0; a < placed.length; a += 1) {
@@ -118,6 +129,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
           <span><svg width="32" height="16" aria-hidden="true"><line x1="3" y1="8" x2="29" y2="8" stroke="#725400" strokeWidth="8" /><line x1="3" y1="8" x2="29" y2="8" stroke="#ffc928" strokeWidth="5" /></svg>Retained tab</span>
           {shared.pairs.map((pair, index) => <span className="shared-edge-pair-key" key={pair.instance.id}>S{index + 1}: {pair.members.map(m => partNumberText(m.partNumber!)).join(' + ')}</span>)}
         </div>
+        {sourceIssues.map(issue => <span key={issue}>{issue}</span>)}
         {shared.errors.map(e => <span role="alert" key={e}>{e}</span>)}
       </div>}
       <svg

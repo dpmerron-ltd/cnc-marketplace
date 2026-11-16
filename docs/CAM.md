@@ -119,6 +119,13 @@ Pairs remain two parts rather than multi-part chains.
 
 Regeneration requires a saved DXF that reproduces the selected NC. Missing source,
 unknown machining edits, incompatible presets or cutting faces keep separate cuts.
+V2 considers long panels first and chooses the compatible pair with the greatest
+programmed cutting-distance saving, rather than the first matching small edge.
+Recorded per-feature pocket depths and tab counts are recovered only when they
+reproduce the complete saved NC exactly. A saved program for another cutter
+(e.g. 6.35 mm) remains ineligible until regenerated from DXF for the shared 6 mm
+preset; the sheet explains this instead of suggesting only a tab-support issue.
+
 A pair must fit the stock, save cutting distance and time, and provide an intact
 10 mm holding tab on each of the three unshared sides of each member. Original tab positions do not prevent sharing: tabs on the shared edge are removed,
 and the three retained tabs may move along their unshared edges. Tab roots are
