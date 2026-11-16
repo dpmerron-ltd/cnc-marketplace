@@ -123,7 +123,7 @@ export function SheetEditor({ parts, sheet, sheetIndex, selectedId, onAddPart, o
         <span>{shared.pairs.length} shared edge{shared.pairs.length === 1 ? '' : 's'} · {(shared.pairs.reduce((s, p) => s + p.cam.savedCutMm, 0) / 1000).toFixed(2)} m less programmed cutting · about {Math.round(shared.pairs.reduce((s, p) => s + p.cam.savedSeconds, 0))} seconds saved</span>
         {!shared.pairs.length && <span>No shared edges to highlight on this sheet. V2 matches straight sections on rectangular, shaped and notched parts. Parts keep separate cuts when no compatible edge leaves three supported sides.</span>}
         <span>Pairs retain tabs on three sides. Shared cuts have bold teal lines and numbered labels; yellow bars show retained tabs. Unsupported parts keep separate cuts.</span>
-        <span>At least 10 mm of waste remains between machining envelopes; the border is {sharedBorder(sheet)} mm. Shared walls cut to size during depth passes, then receive one spring pass.</span>
+        <span>At least 10 mm of waste remains between machining envelopes; the border is {sharedBorder(sheet)} mm. Shared slots leave 0.3 mm per face, then finish each face once without lifting between passes.</span>
         <div className="shared-edge-legend" aria-label="Sheet edge legend">
           <span><svg width="32" height="16" aria-hidden="true"><line x1="3" y1="8" x2="29" y2="8" stroke="#007d92" strokeWidth="5" strokeLinecap="round" /></svg>Shared cut</span>
           <span><svg width="32" height="16" aria-hidden="true"><line x1="3" y1="8" x2="29" y2="8" stroke="#725400" strokeWidth="8" /><line x1="3" y1="8" x2="29" y2="8" stroke="#ffc928" strokeWidth="5" /></svg>Retained tab</span>

@@ -10,6 +10,7 @@ import { autoNest } from './nestingEngine'
 import { generatePair, pairMemberInstances, planSharedCuts, sharedSource, sharedSourceIssue, worldPairTabs, minimumSharedBorderMm, sharedBorder } from './sharedCuts'
 import { buildTabMap } from '../printing/tabMap'
 import { transformLocalPoint } from '../gcode/transform'
+import { sharedSlotWidth } from './sharedGeometry'
 import { camPreset } from '../cam/types'
 import type { Sheet } from '../models/Sheet'
 import type { Part } from '../models/Part'
@@ -45,13 +46,34 @@ describe('V2 shared-edge nesting',()=>{
   const output=exportCombinedGCode(parts,sheet,defaultProgramSettings)
   expect(output.errors).toEqual([])
   expect([...output.gcode.matchAll(/\(Shared edge depth ([\d.]+) mm\)/g)].map(m=>Number(m[1]))).toEqual([3.1,6.2,9.3,12.4])
-  expect(output.gcode.match(/Shared edge spring pass/g)).toHaveLength(1)
+  expect(output.gcode).not.toContain('Shared edge spring pass')
+  expect(output.gcode.match(/Shared edge finishing /g)).toHaveLength(2)
+  const sharedStart=output.gcode.indexOf('(V2 shared edge:')
+  expect([...output.gcode.matchAll(/drill machining/g)].every(m=>m.index!<sharedStart)).toBe(true)
   expect(output.gcode.match(/drill machining/g)).toHaveLength(2)
   const simulation=simulateGCode(output.gcode)
   expect(simulation.errors).toEqual([]);expect(simulation.deepestCutMm).toBe(12.4)
   expect(simulation.moves.filter(m=>m.type==='rapid' && Math.hypot(m.end.x-m.start.x,m.end.y-m.start.y)>0.001).every(m=>Math.min(m.start.z,m.end.z)>=0)).toBe(true)
   const files=exportPhysicalSheetGCodes(parts,sheet,defaultProgramSettings)
   expect(files[0].errors).toEqual([]);expect(files[0].gcode.match(/Shared edge depth/g)).toHaveLength(4)
+ })
+ it('cuts an 18 mm shared slot in two depths and finishes both faces without intermediate lifts',()=>{
+  const parts=['a','b'].map(id=>{
+   const source=rectanglePart(id,200,300,true)
+   const result=generateCam(readDxf(source.dxf!,'mm'),{thickness:18,drillDepthMm:9,rampProfile:'20mm-s-5deg',units:'mm',operations:{},programs:defaultProgramSettings})
+   expect(result.errors).toEqual([])
+   return {...createPartFromGCode(id+'.nc',result.gcode,source.dxf),id,metadata:{...source.metadata,materialVariants:{version:1,primaryProfile:'18-9mm-ramp20-5deg',profiles:{'18-9mm-ramp20-5deg':{gcode:result.gcode,errors:[],warnings:[]}}} as never}}
+  })
+  const sheet=pairSheet(parts),cam=generatePair(sharedSource(parts[0],sheet)!,sharedSource(parts[1],sheet)!)
+  const slot=cam.part.gcode.split('(V2 shared edge:')[1].split('(End shared edge)')[0]
+  expect([...slot.matchAll(/Shared edge depth ([\d.]+)/g)].map(m=>Number(m[1]))).toEqual([9.2,18.4])
+  expect(slot.match(/Shared edge finishing /g)).toHaveLength(2)
+  expect(slot.match(/G00 Z20/g)).toHaveLength(2)
+  expect(slot.match(/G00 X/g)).toHaveLength(1)
+  const sim=simulateGCode('G21\nG90\n'+slot)
+  const atDepth=sim.moves.filter(m=>m.type!=='rapid'&&Math.abs(m.end.y-m.start.y)>200&&m.start.z===m.end.z)
+  expect(atDepth.map(m=>m.end.z)).toEqual([-9.2,-18.4,-18.4,-18.4])
+  expect(atDepth.map(m=>Math.sign(m.end.y-m.start.y))).toEqual([1,-1,1,-1])
  })
  it('retains V1 layout and output when the option is absent, and separates V2 pairs on a V1 re-nest',()=>{
   const parts=[rectanglePart('a'),rectanglePart('b')],sheet=withProfile(parts,pairSheet(parts,'v1'))
@@ -98,8 +120,8 @@ describe('V2 shared-edge nesting',()=>{
   expect(map.parts.flatMap(p=>p.tabs).every(t=>!t.inferred)).toBe(true)
   const slot=cam.shared[0]
   const aFace=parts[0].originalBounds.maxX-camPreset.diameter/2-0.3
-  expect(slot.x-aFace).toBeCloseTo(camPreset.diameter/2)
-  expect(cam.offsetB-sources[0].width).toBe(camPreset.diameter)
+  expect(slot.x-aFace).toBeCloseTo(sharedSlotWidth/2)
+  expect(cam.offsetB-sources[0].width).toBeCloseTo(sharedSlotWidth)
   for(let member=0;member<2;member++){
    const tabs=cam.tabs.filter(t=>t.member===member)
    expect(new Set(tabs.map(t=>Math.abs(t.center.y-13+3)<0.01?'bottom':Math.abs(t.center.y-13-300-3)<0.01?'top':'side'))).toEqual(new Set(['bottom','top','side']))
@@ -125,13 +147,28 @@ describe('V2 shared-edge nesting',()=>{
    expect(crossing.length).toBeGreaterThan(0)
    expect(crossing.every(m=>Math.min(m.start.z,m.end.z)>=tab.z-0.001)).toBe(true)
   }
-  const slotCode=cam.part.gcode.split('(V2 shared edge:')[1].split('(Shared edge spring pass)')[0]
+  const slotCode=cam.part.gcode.split('(V2 shared edge:')[1].split('(End shared edge)')[0]
   expect(slotCode).toContain('F3000')
+  const depthSection=slotCode.slice(slotCode.indexOf('(Shared edge depth'))
+  expect(depthSection.match(/G00 Z20/g)).toHaveLength(1)
+  expect(depthSection).not.toContain('G00 X')
+  expect(depthSection).not.toContain('G00 Z0.5')
   const slotSim=simulateGCode('G21\nG90\n'+slotCode)
   const ramps=slotSim.moves.filter(m=>m.end.z<m.start.z&&Math.hypot(m.end.x-m.start.x,m.end.y-m.start.y)>0.01)
   expect(ramps.length).toBe(8)
   for(const m of ramps) expect(Math.atan2(m.start.z-m.end.z,Math.hypot(m.end.x-m.start.x,m.end.y-m.start.y))*180/Math.PI).toBeCloseTo(5,4)
   expect(slotCode.match(/F1200/g)).toHaveLength(8)
+  const finish=slotCode.split('(Shared edge finishing ')
+  expect(finish).toHaveLength(3)
+  for(const [i, section] of finish.slice(1).entries()) {
+   const strokes=[...section.matchAll(/G01 X([\d.-]+) Y([\d.-]+) Z([\d.-]+)/g)]
+   expect(strokes).toHaveLength(2)
+   expect(Number(strokes[0][1])).toBeCloseTo(cam.shared[0].x+(i===0?-0.3:0.3),5)
+   expect(Number(strokes[1][1])).toBeCloseTo(Number(strokes[0][1]),5)
+   expect(Math.abs(Number(strokes[1][2])-Number(strokes[0][2]))).toBeCloseTo(cam.shared[1].y-cam.shared[0].y,5)
+   expect(Number(strokes[0][3])).toBe(-12.4)
+   expect(Number(strokes[1][3])).toBe(-12.4)
+  }
  })
  it('keeps locked pairs fixed and blocks source changes after nesting',()=>{
   const parts=[rectanglePart('a'),rectanglePart('b')],sheet=withProfile(parts,pairSheet(parts))

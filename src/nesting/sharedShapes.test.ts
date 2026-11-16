@@ -1,3 +1,4 @@
+import { sharedSlotWidth } from './sharedGeometry'
 import { describe, expect, it } from 'vitest'
 import { generateCam } from '../cam/generate'
 import { readDxf } from '../cam/dxf'
@@ -42,7 +43,7 @@ describe('sharing straight sections of shaped outlines',()=>{
     for(const layout of layouts){
       const polygons=layout.members.map((m,i)=>m.outer.map(p=>({x:p.x+layout.offsets[i].x,y:p.y+layout.offsets[i].y})))
       expect(intersectionArea(polygons[0],polygons[1])).toBe(0)
-      expect(Math.abs(area(layout.outline))).toBeCloseTo(Math.abs(area(polygons[0]))+Math.abs(area(polygons[1]))+layout.length*camPreset.diameter,2)
+      expect(Math.abs(area(layout.outline))).toBeCloseTo(Math.abs(area(polygons[0]))+Math.abs(area(polygons[1]))+layout.length*sharedSlotWidth,2)
       for(const polygon of polygons) expect(intersectionArea(layout.outline,polygon)).toBeCloseTo(Math.abs(area(polygon)),2)
       expect(layout.anchors).toHaveLength(6)
     }
@@ -54,7 +55,7 @@ describe('sharing straight sections of shaped outlines',()=>{
     const cam=plan.pairs[0].cam,output=exportCombinedGCode(parts,s)
     expect(output.errors).toEqual([])
     expect(output.gcode.match(/Shared edge depth/g)).toHaveLength(4)
-    expect(output.gcode.match(/Shared edge spring pass/g)).toHaveLength(1)
+    expect(output.gcode.match(/Shared edge finishing /g)).toHaveLength(2)
     expect(output.gcode).toContain('inside machining')
     expect(cam.savedCutMm).toBeGreaterThan(0)
     expect(simulateGCode(output.gcode).deepestCutMm).toBe(12.4)

@@ -1,5 +1,5 @@
 import { recordedOperations } from '../cam/sourceOperations'
-import { edgeLayouts, layoutFeatures, rectanglePairAnchors } from './sharedGeometry'
+import { edgeLayouts, layoutFeatures, rectanglePairAnchors, sharedSlotWidth } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
@@ -106,7 +106,7 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   const cached = pairCache.get(a)?.get(b)?.get(cacheKey)
   if (cached) return cached
   if (a.profile.id !== b.profile.id) throw new Error('Shared edges need matching lengths and cutting presets.')
-  const offsetB = a.width + camPreset.diameter, width = offsetB + b.width, height = a.height
+  const offsetB = a.width + sharedSlotWidth, width = offsetB + b.width, height = a.height
   const anchors = layout?.anchors ?? rectanglePairAnchors(a, b)
   if (!anchors) throw new Error('No straight edge can be shared while retaining tabs on three sides.')
   const internals = (s: SharedSource, dx: number, prefix: string) => s.features.filter(f => f.kind !== 'outside').map(f => {
@@ -121,24 +121,34 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   if (outer.tabs.length !== 6) throw new Error('A shared pair needs three retained tabs per part.')
   const { depth, passes } = materialPreset(a.settings.thickness, a.settings.profilePasses, a.settings.drillDepthMm, a.settings.rampProfile)
   const ramp = rampPreset(a.settings.rampProfile), feed = cutFeedPreset(a.profile.id)
-  const x = result.shift.x + (layout?.slot[0].x ?? a.width + camPreset.diameter / 2)
+  const x = result.shift.x + (layout?.slot[0].x ?? a.width + sharedSlotWidth / 2)
   const bottom = result.shift.y + (layout?.slot[0].y ?? 0) - pad, top = result.shift.y + (layout?.slot[1].y ?? height) + pad
   const shared: [Point, Point] = [{ x, y: bottom }, { x, y: top }]
-  const lines = ['(V2 shared edge: cut to final width in depth passes; one spring pass)', '(Both parts remain held on three outer sides)']
-  const move = (y: number, z: number, f: number) => lines.push(`G01 X${n(x)} Y${n(y)} Z${n(-z)} F${f}`)
-  let previous = 0
+  const lines = ['(V2 shared edge: one roughing traverse per depth; finish each face once)', '(Both parts remain held on three outer sides)', 'G00 Z20', `G00 X${n(x)} Y${n(bottom)}`, 'G00 Z0.5', 'G01 Z0 F600']
+  const move = (y: number, z: number, f: number, atX = x) => lines.push(`G01 X${n(atX)} Y${n(y)} Z${n(-z)} F${f}`)
+  let previous = 0, start = bottom, end = top
   for (const target of passes) {
-    lines.push(`(Shared edge depth ${target} mm)`, 'G00 Z20', `G00 X${n(x)} Y${n(bottom)}`, 'G00 Z0.5', `G01 Z${n(-previous)} F600`)
+    lines.push(`(Shared edge depth ${target} mm)`)
+    const direction = Math.sign(end - start)
     let current = previous
     while (current < target - 1e-7) {
       const travel = Math.min(top - bottom, (target - current) / (2 * Math.tan(ramp.rampDegrees * Math.PI / 180)))
       const next = Math.min(target, current + 2 * travel * Math.tan(ramp.rampDegrees * Math.PI / 180))
-      move(bottom + travel, (current + next) / 2, ramp.rampFeed); move(bottom, next, ramp.rampFeed); current = next
+      move(start + direction * travel, (current + next) / 2, ramp.rampFeed); move(start, next, ramp.rampFeed); current = next
     }
-    move(top, target, feed); lines.push('G00 Z20'); previous = target
+    move(end, target, feed)
+    previous = target
+    ;[start, end] = [end, start]
   }
-  lines.push('(Shared edge spring pass)', `G00 X${n(x)} Y${n(bottom)}`, 'G00 Z0.5', `G01 Z-${depth} F600`)
-  move(top, depth, feed); lines.push('G00 Z20')
+  // Remain inside the cleared slot between depths and finishing strokes.
+  // Each face gets its own 0.3 mm full-depth finish, with no duplicate spring pass.
+  for (const [face, finishX] of [['left', x - finishingAllowanceMm], ['right', x + finishingAllowanceMm]] as const) {
+    lines.push(`(Shared edge finishing ${face}: ${n(finishingAllowanceMm)} mm allowance / full depth ${depth} mm)`)
+    move(start, depth, feed, finishX)
+    move(end, depth, feed, finishX)
+    ;[start, end] = [end, start]
+  }
+  lines.push('G00 Z20', '(End shared edge)')
   const code = result.gcode.split('\n'); code.splice(outer.firstLine - 1, 0, ...lines)
   const gcode = code.join('\n'), simulation = simulateGCode(gcode)
   if (simulation.errors.length || !close(simulation.deepestCutMm, depth)) throw new Error('Shared-pair machining failed simulation.')
