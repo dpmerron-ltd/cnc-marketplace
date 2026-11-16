@@ -35,7 +35,7 @@ export function separateMaterialAdditions(parts: Part[], sheet: Sheet, additions
   }
   if (!groups.size) return undefined
   const newSheets = [...groups.values()].map(group => {
-    const target: Sheet = { ...sheet, ...group.setup, stockMaterial: group.setup.stockMaterial, name: today(), instances: [], pendingParts: [], sheetMaterials: undefined,
+    const target: Sheet = { ...sheet, ...group.setup, stockMaterial: group.setup.stockMaterial, materialProfile: group.setup.materialProfile, material: group.setup.material, name: today(), instances: [], pendingParts: [], sheetMaterials: undefined,
       orderNumber: undefined, orderImports: undefined, nextPartNumber: undefined, unavailableSheetIndices: undefined }
     return allocateMaterials(parts, target, group.additions.map(i => ({ ...i, sheetIndex: 0, x: target.borderSpacing, y: target.borderSpacing })), 0)
   })

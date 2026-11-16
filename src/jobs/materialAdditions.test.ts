@@ -20,10 +20,11 @@ describe('new jobs for different materials', () => {
   })
   it('uses the exact exported setup for re-cuts and clears inherited job state', () => {
     const source = { material: 'MDF' }
-    const result = separateMaterialAdditions(testParts, { ...sheet, orderNumber: 'OLD', pendingParts: [addition(testParts[0].id)], sheetMaterials: { 3: { stockMaterial: ply } } }, [{ ...addition(testParts[0].id), materialSetup: source, recutId: 'recut' }], 0)!
+    const result = separateMaterialAdditions(testParts, { ...sheet, materialProfile: '12', orderNumber: 'OLD', pendingParts: [addition(testParts[0].id)], sheetMaterials: { 3: { stockMaterial: ply } } }, [{ ...addition(testParts[0].id), materialSetup: source, recutId: 'recut' }], 0)!
     expect(result.current).toBeUndefined()
     expect(result.newSheets[0]).toMatchObject({ material: 'MDF', pendingParts: [], instances: [expect.objectContaining({ recutId: 'recut', sheetIndex: 0, materialSetup: source })] })
     expect(result.newSheets[0].stockMaterial).toBeUndefined()
+    expect(result.newSheets[0].materialProfile).toBeUndefined()
     expect(result.newSheets[0].sheetMaterials).toBeUndefined()
     expect(result.newSheets[0].orderNumber).toBeUndefined()
   })
