@@ -22,7 +22,12 @@ describe('new jobs for different materials', () => {
     const source = { material: 'MDF' }
     const result = separateMaterialAdditions(testParts, { ...sheet, materialProfile: '12', orderNumber: 'OLD', pendingParts: [addition(testParts[0].id)], sheetMaterials: { 3: { stockMaterial: ply } } }, [{ ...addition(testParts[0].id), materialSetup: source, recutId: 'recut' }], 0)!
     expect(result.current).toBeUndefined()
-    expect(result.newSheets[0]).toMatchObject({ material: 'MDF', pendingParts: [], instances: [expect.objectContaining({ recutId: 'recut', sheetIndex: 0, materialSetup: source })] })
+    expect(result.newSheets[0].material).toBe('MDF')
+    expect(result.newSheets[0].pendingParts).toEqual([])
+    expect(result.newSheets[0].instances).toHaveLength(1)
+    expect(result.newSheets[0].instances[0].recutId).toBe('recut')
+    expect(result.newSheets[0].instances[0].sheetIndex).toBe(0)
+    expect(result.newSheets[0].instances[0].materialSetup).toEqual(source)
     expect(result.newSheets[0].stockMaterial).toBeUndefined()
     expect(result.newSheets[0].materialProfile).toBeUndefined()
     expect(result.newSheets[0].sheetMaterials).toBeUndefined()
