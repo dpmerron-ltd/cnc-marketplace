@@ -46,6 +46,19 @@ describe('safe Z override', () => {
     }
   })
 
+  it('preserves fast returns above the previous drilled bottom but keeps XY travel at Z20', () => {
+    const generated=generateCam({units:'mm',errors:[],warnings:[],features:[{x:30,y:30},{x:80,y:70}].map((point,i)=>({id:`hole${i}`,name:`Hole ${i}`,layer:'DRILL',points:[point],closed:false,kind:'drill'}))},{thickness:18,drillDepthMm:9,rampProfile:'20mm-s-5deg',efficiencyTest:true,units:'mm',operations:{}})
+    expect(generated.errors).toEqual([])
+    const part=createPartFromGCode('trial.nc',generated.gcode),{sheet}=fixture()
+    sheet.safeZOverrideMm=20;sheet.instances[0]={...sheet.instances[0],partId:part.id,rotation:90}
+    for(const out of [exportCombinedGCode([part],sheet),...exportPhysicalSheetGCodes([part],sheet)]) {
+      expect(out.errors).toEqual([])
+      expect(out.gcode.match(/G01 Z-2 F600\nG00 Z0.5\nG00 Z-1.5\nG01 Z-4 F600/g)).toHaveLength(2)
+      const sim=simulateGCode(out.gcode)
+      expect(sim.moves.filter(m=>m.type==='rapid'&&Math.hypot(m.end.x-m.start.x,m.end.y-m.start.y)>0.001).every(m=>m.start.z===20&&m.end.z===20)).toBe(true)
+    }
+  })
+
   it.each(['G00 X50 Y20', 'M00\nG01 Z-4 F600', 'G01 X50 Y20 Z-4 F600'])('does not preserve a short retract before non-peck motion: %s', next => {
     const part = createPartFromGCode('not-peck.nc', `G21\nG90\nG00 Z20\n(No. 1 Drill machining: Hole)\nG00 X0 Y0\nG01 Z-2 F600\nG00 Z0.5\n${next}\nG01 Z-6 F600\nG00 Z20\nG00 X50 Y50\nM30`)
     const { sheet } = fixture()

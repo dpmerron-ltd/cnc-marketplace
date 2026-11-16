@@ -3,7 +3,7 @@ import { materialProfileId, materialProfiles, type MaterialProfileId, type Mater
 import type { CamDrawing, CamResult, CamSettings } from './types'
 
 export function generateMaterialVariants(drawing: CamDrawing, settings: CamSettings, primaryResult?: CamResult, selectedProfiles?: readonly MaterialProfileId[]): MaterialVariants {
-  const primaryProfile = materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)!
+  const primaryProfile = materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest)!
   const profiles = {} as MaterialVariants['profiles']
   for (const profile of materialProfiles) {
     if (selectedProfiles && !selectedProfiles.includes(profile.id)) {
@@ -12,7 +12,7 @@ export function generateMaterialVariants(drawing: CamDrawing, settings: CamSetti
     }
     try {
       const result = profile.id === primaryProfile && primaryResult ? primaryResult : generateCam(drawing, {
-        ...settings, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined,
+        ...settings, efficiencyTest: 'efficiencyTest' in profile, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined,
       })
       const errors = [...result.errors]
       if (result.gcode.split('\n').length > 30000 || new TextEncoder().encode(result.gcode).length > 2000000) errors.push('Generated NC exceeds 30,000 lines or 2 MB. Split the drawing.')

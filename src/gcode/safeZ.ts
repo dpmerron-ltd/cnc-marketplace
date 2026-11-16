@@ -26,7 +26,15 @@ export function overrideClearance(part: Part, lines: ParsedLine[], safeZ: number
       // Preserve only a same-hole retract immediately followed by a deeper vertical feed.
       let following = index + 1
       while (following < lines.length && !lines[following].words.length) following++
-      const feed = lines[following]
+      let feed = lines[following]
+      // The test profile returns rapidly within the same already-drilled hole,
+      // stopping 0.5 mm above its previous bottom before the next cutting feed.
+      const returnZ = feed && getWord(feed, 'Z')
+      if (feed?.effectiveMotion === 'G00' && returnZ !== undefined && Math.abs(returnZ - (source.position.z + 0.5)) < 0.0001 && feed.words.every(word => ['Z', 'N'].includes(word.letter) || word.letter === 'G' && word.value === 0)) {
+        following++
+        while (following < lines.length && !lines[following].words.length) following++
+        feed = lines[following]
+      }
       peckRetract = Boolean(feed && feed.effectiveMotion === 'G01' && (getWord(feed, 'Z') ?? Infinity) < source.position.z && feed.words.every(word => ['Z', 'F', 'N'].includes(word.letter) || word.letter === 'G' && word.value === 1))
     }
     if (line.effectiveMotion === 'G00') {

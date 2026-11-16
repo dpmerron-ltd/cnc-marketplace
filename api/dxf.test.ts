@@ -21,7 +21,7 @@ describe('DXF API generation', () => {
     expect(result.materialVariants.profiles['6'].gcode).toBe(result.gcode)
     for (const profile of materialProfiles) {
       expect(result.materialVariants.profiles[profile.id]!.errors).toEqual([])
-      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
+      expect(result.materialVariants.profiles[profile.id]!.gcode).toBe(generateCam(readDxf(drawing), { thickness: profile.thickness, efficiencyTest: 'efficiencyTest' in profile, rampProfile: profile.rampProfile, drillDepthMm: profile.drillDepthMm, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, units: 'auto', operations: { f0: { tabs: 2 } } }).gcode)
     }
     const uploaded = parseComponent({ id: '20000000-0000-4000-8000-000000000001', name: 'Panel', sku: 'PANEL', filename: 'panel.nc', dxf: drawing, gcode: result.gcode, materialVariants: result.materialVariants }, 'alice', '10000000-0000-4000-8000-000000000001')
     expect(uploaded.part.metadata.materialVariants).toEqual(result.materialVariants)
@@ -259,7 +259,7 @@ it('retains shallow centre marks beside normal drills and through profiles acros
     expect(nc.errors).toEqual([])
     const mark = nc.gcode.split('(Feature: f1 / Layer: MARK_RUNNER_D2_DEPTH2)')[1].split('(No.')[0]
     expect(mark.match(/G01 Z-\d+(?:\.\d+)? F600/g)).toEqual(['G01 Z-2 F600'])
-    expect(nc.gcode).toBe(generateCam(readDxf(source), { thickness: p.thickness, profilePasses: [12, 13, 14].includes(p.thickness) ? p.profilePasses : undefined, drillDepthMm: p.drillDepthMm, rampProfile: p.rampProfile, units: 'auto', operations: { f1: { kind: 'drill', depthMm: 2 } } }).gcode)
+    expect(nc.gcode).toBe(generateCam(readDxf(source), { thickness: p.thickness, profilePasses: [12, 13, 14].includes(p.thickness) ? p.profilePasses : undefined, drillDepthMm: p.drillDepthMm, efficiencyTest: 'efficiencyTest' in p, rampProfile: p.rampProfile, units: 'auto', operations: { f1: { kind: 'drill', depthMm: 2 } } }).gcode)
   }
   const override = await generateDxfNc({ dxf: source, thicknessMm: 18, layerOperations: { MARK_RUNNER_D2_DEPTH2: { depthMm: 2 } }, operations: { f1: { depthMm: 1 } }, variantProfiles: ['18'] })
   expect(override.operations.find(op => op.featureId === 'f1')?.depthMm).toBe(1)

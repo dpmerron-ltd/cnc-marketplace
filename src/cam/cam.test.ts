@@ -487,7 +487,7 @@ it('preserves explicit DXF drill depths across every cutting preset', () => {
   const drawing = readDxf(dxf([rectangle(), circle(20, 20, 3, 'DRILL_D6_DEPTH2')]))
   expect(drawing.features[1]).toMatchObject({ kind: 'drill', depthMm: 2 })
   for (const profile of materialProfiles) {
-    const result = generateCam(drawing, { ...settings, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile })
+    const result = generateCam(drawing, { ...settings, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, efficiencyTest: 'efficiencyTest' in profile, rampProfile: profile.rampProfile })
     expect(result.errors).toEqual([])
     expect(result.operations.find(op => op.kind === 'drill')?.depthMm).toBe(2)
     expect(result.operations.find(op => op.kind === 'outside')?.depthMm).toBeGreaterThan(6)

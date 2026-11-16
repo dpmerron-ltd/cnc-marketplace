@@ -11,7 +11,7 @@ import { readDxf } from '../cam/dxf'
 import { generateCam, materialPreset } from '../cam/generate'
 import { camPreset, type CamFeature, type CamSettings, type OperationOverride } from '../cam/types'
 import { finishingAllowanceMm } from '../cam/finishing'
-import { cutFeedPreset, materialProfiles, rampPreset } from '../cam/materialProfiles'
+import { finishingFeedPreset, cutFeedPreset, materialProfiles, rampPreset } from '../cam/materialProfiles'
 import { rectangleGeometry } from '../cam/rectangle'
 import { polygonBounds, boundsPolygon } from '../gcode/footprint'
 import { parseGCode } from '../gcode/parser'
@@ -49,7 +49,7 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     const drawing = readDxf(part.dxf, 'mm')
     if (drawing.errors.length || drawing.features.length > 100) return
     const provenance = part.metadata as typeof part.metadata & { rackingRegeneration?: { sourceLayerOverrides?: Record<string, OperationOverride> } }
-    const settings: CamSettings = { thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
+    const settings: CamSettings = { efficiencyTest: 'efficiencyTest' in profile, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
     let features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
     const outer = features.filter(f => f.kind === 'outside')
     if (outer.length !== 1 || outer[0].circle || !outer[0].closed) return
@@ -144,8 +144,8 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   // Each face gets its own 0.3 mm full-depth finish, with no duplicate spring pass.
   for (const [face, finishX] of [['left', x - finishingAllowanceMm], ['right', x + finishingAllowanceMm]] as const) {
     lines.push(`(Shared edge finishing ${face}: ${n(finishingAllowanceMm)} mm allowance / full depth ${depth} mm)`)
-    move(start, depth, feed, finishX)
-    move(end, depth, feed, finishX)
+    move(start, depth, finishingFeedPreset(a.profile.id), finishX)
+    move(end, depth, finishingFeedPreset(a.profile.id), finishX)
     ;[start, end] = [end, start]
   }
   lines.push('G00 Z20', '(End shared edge)')
