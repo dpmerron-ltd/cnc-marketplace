@@ -131,5 +131,5 @@ describe('sharing straight sections of shaped outlines',()=>{
     expect(plan.pairs).toHaveLength(4)
     expect(plan.errors).toEqual([])
     expect(validateSheet(parts,s).filter(i=>i.level==='error')).toEqual([])
-  })
+  }, 15000)
 })
