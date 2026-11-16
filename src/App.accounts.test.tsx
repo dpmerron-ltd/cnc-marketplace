@@ -231,6 +231,37 @@ describe('account switching', () => {
     expect(screen.getByRole('textbox', { name: 'Order number' })).toHaveValue('SECOND')
   })
 
+  it.each(['Add to sheet', 'Add all to sheet'])('creates and saves a separate material job for %s', async action => {
+    const remote = cutSideLibrary()
+    remote.parts = remote.parts.map(part => ({ ...part, metadata: { ...part.metadata, materialVariants: {
+      version: 1, primaryProfile: '18', profiles: { '6': { gcode: part.gcode, warnings: [], errors: [] }, '12': { gcode: part.gcode, warnings: [], errors: [] }, '12-2pass': { gcode: part.gcode, warnings: [], errors: [] }, '15': { gcode: part.gcode, warnings: [], errors: [] }, '18': { gcode: part.gcode, warnings: [], errors: [] } },
+    } } }))
+    const original = { ...remote.sheet, materialProfile: '12' as const }
+    mock.load.mockResolvedValue({ ...remote, sheet: original })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    await screen.findByRole('heading', { name: remote.parts[0].name })
+    fireEvent.click(screen.getAllByRole('button', { name: action })[0])
+    await openSheet()
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
+    expect(screen.getByRole('combobox', { name: 'Sheet cutting preset' })).toHaveValue('18')
+    await waitFor(() => {
+      const saved = mock.save.mock.calls.at(-1)?.[5] as { activeId: string; jobs: { id: string; sheet: typeof original }[] }
+      expect(saved.jobs).toHaveLength(2)
+      expect(saved.activeId).toBe(saved.jobs[1].id)
+      expect(saved.jobs[0].sheet).toMatchObject({ materialProfile: '12', instances: original.instances })
+      expect(saved.jobs[1].sheet.materialProfile).toBe('18')
+      expect(saved.jobs[1].sheet.instances).toHaveLength(action === 'Add to sheet' ? 1 : remote.parts.length)
+      expect(saved.jobs[1].sheet.instances.every(instance => instance.sheetIndex === 0)).toBe(true)
+    })
+    // A subsequent addition with the same material stays in the selected job.
+    fireEvent.click(screen.getByRole('button', { name: 'Items' }))
+    fireEvent.click(await screen.findByRole('button', { name: "Open alice's private item" }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add to sheet' })[0])
+    await openSheet()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+  })
+
   it('uses unloaded component metadata to choose a compatible sheet for manual additions', async () => {
     const { remote, components } = lazyLibrary()
     const faced = components.map((part, index): Part => ({ ...part, cutSide: index ? 'non-pattern' : 'pattern' }))

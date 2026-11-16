@@ -48,7 +48,7 @@ The latest cutting plan must load before downloading a managed job's file. Legac
 
 **Print labels** is available for every sheet in Cutting Jobs and in the exported-file view. Managed jobs print from the latest saved plan, including changed placements and added replacements. Saved snapshots also retain their original labels; older exports can print basic labels from their recorded part map.
 
-Select a failed part in its exported layout and choose **Re-cut**. **Queue → Re-cuts → Add to sheet** adds one replacement of the original component revision to the selected job. Empty jobs adopt its material/profile; populated jobs must use matching stock. Placement respects cutting face, existing parts and closed sheets. An already-added replacement cannot be added twice. Marking its destination sheet cut completes the queued replacement.
+Select a failed part in its exported layout and choose **Re-cut**. **Queue → Re-cuts → Add to sheet** adds one replacement of the original component revision to the selected job. A replacement whose stock or cutting profile differs from the selected sheet is added to a new job with its original material setup. Placement respects cutting face, existing parts and closed sheets. An already-added replacement cannot be added twice. Marking its destination sheet cut completes the queued replacement.
 
 Older exports without component IDs are recoverable when a saved sheet reproduces their exact NC bytes. If that check cannot succeed, the application asks the operator to select the original component from the library rather than guessing a revision. **Mark re-cut** and **Remove** remain available for completing or cancelling queue entries manually.
 
@@ -57,3 +57,5 @@ Older exports without component IDs are recoverable when a saved sheet reproduce
 Apply `supabase/schema.sql` before the frontend. Editable plans live in the account-scoped `sheet_projects.workspace`; daily numbers use `cnc_job_names` and `cnc_job_daily_numbers`. `cnc_machine_runs` continues to hold immutable exports, and `cnc_machine_recuts` holds replacement requests. Old single-sheet projects migrate into their first working tab without discarding the layout. API-created jobs continue to use the existing Queue workflow; their physical NC artifacts also include cutting-face suffixes.
 
 Tests cover separate job tabs, material/face grouping, fixed cutting/cut sheets, revisions that omit completed work, stale-file blocking, live label routing, numbering retries and MFA, account isolation, and database rejection of stale saves that reopen or rearrange cut sheets.
+
+Adding an individual component or all components of an item automatically creates and selects a new job for each required material that differs from the selected sheet. Matching components stay in the current job, and existing layouts are preserved.

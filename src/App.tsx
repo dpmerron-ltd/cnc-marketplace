@@ -1,3 +1,4 @@
+import { separateMaterialAdditions } from './jobs/materialAdditions'
 import { minimumSharedBorderMm, sharedBorder, sharedSpacing } from './nesting/sharedCuts'
 import { addItemToSheet } from './nesting/addItemToSheet'
 import { MaterialAllocationDialog } from './ui/MaterialAllocationDialog'
@@ -1101,10 +1102,25 @@ function App() {
     if (accountRef.current === userId) setStatus('Cutting side saved. New additions use the revised item; existing sheets keep their original version.')
   }
 
+  function addToMaterialJobs(loaded: Part[], additions: PartInstance[]) {
+    const planned = separateMaterialAdditions(loaded, planningSheet, additions, currentSheetIndex)
+    if (!planned) return false
+    const jobs = planned.newSheets.map(newProductionJob)
+    const before = workspaceRef.current
+    const updated = planned.current ? updateProductionSheet(activeJob, planned.current) : activeJob
+    setWorkspace({ ...before, activeId: jobs[0].id, jobs: [...before.jobs.map(job => job.id === updated.id ? updated : job), ...jobs] })
+    setActiveSheetIndex(0); setSelectedInstanceId(undefined)
+    setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+    setStatus(`Added parts to ${jobs.length} new job${jobs.length === 1 ? '' : 's'} using their required material.`)
+    return true
+  }
+
   function addPart(partId: string, x = sheet.borderSpacing, y = sheet.borderSpacing) {
     const parent = items.find(item => item.id === parts.find(part => part.id === partId)?.itemId)
     if (parent?.version?.status === 'draft') { setStatus('This item version is incomplete. Reload the catalogue before adding it.'); return }
     const part = parts.find(candidate => candidate.id === partId)
+    try { if (part && addToMaterialJobs(parts, [newInstance(partId, x, y, currentSheetIndex)])) return }
+    catch (error) { setStatus(errorMessage(error)); return }
     if (part && (requiredMaterial(part) || hasSheetMaterials(sheet))) {
       try {
         const next = allocateMaterials(parts, planningSheet, [newInstance(partId, x, y, currentSheetIndex)], currentSheetIndex)
@@ -1147,6 +1163,7 @@ function App() {
     if (latest.sheet.instances.some(instance => !latest.parts.some(part => part.id === instance.partId))) throw new Error('The sheet contains unavailable components. Refresh before adding this item.')
     const additions = latest.parts.filter(part => part.itemId === item.id).map(part => newInstance(part.id, sheet.borderSpacing, sheet.borderSpacing, currentSheetIndex))
     if (!additions.length) throw new Error('This item has no components.')
+    if (addToMaterialJobs(latest.parts, additions)) return additions.length
     if (!hasSheetMaterials(latest.sheet) && !latest.parts.some(p => p.itemId === item.id && requiredMaterial(p))) {
       setSheet(addItemToSheet(item, latest.parts, { ...latest.sheet, unavailableSheetIndices: planningSheet.unavailableSheetIndices }, userId, currentSheetIndex))
       return additions.length
@@ -1289,6 +1306,8 @@ function App() {
     const profile = run.snapshot.materialProfile ?? materialProfiles.find(profile => profile.label === run.snapshot.thickness)?.id
     const sourceSetup = run.snapshot.sheets?.find(s => s.index === entry.sheet_index)?.materialSetup ?? { materialProfile: profile, material: run.snapshot.material }
     const replacement = { ...newInstance(part.id, sheet.borderSpacing, sheet.borderSpacing, currentSheetIndex), materialSetup: sourceSetup }
+    Object.assign(replacement, { recutId: entry.id, orderName: entry.order_number, orderKey: source.orderKey })
+    if (addToMaterialJobs(latest.parts, [replacement])) { setPage('sheet'); return }
     const next = allocateMaterials(latest.parts, planningSheet, [replacement], currentSheetIndex)
     const added = next.instances.at(-1)!
     added.recutId = entry.id; added.orderName = entry.order_number; added.orderKey = source.orderKey
