@@ -76,6 +76,20 @@ function tabAnchor(member: OrientedSource, side: 'left' | 'right' | 'top' | 'bot
     }
   }
 }
+// The shared side deliberately has no retained tab. Reposition the other three
+// tabs independently of the original component's tab locations.
+export function rectanglePairAnchors(a: SharedSource, b: SharedSource): Point[] | undefined {
+  const left = orient(a, 0), right = orient(b, 0)
+  const anchors = [
+    ...(['left', 'bottom', 'top'] as const).map(side => tabAnchor(left, side)),
+    ...(['right', 'bottom', 'top'] as const).map(side => {
+      const anchor = tabAnchor(right, side)
+      return anchor && translate(anchor, { x: a.width + camPreset.diameter, y: 0 })
+    }),
+  ]
+  return anchors.every((anchor): anchor is Point => Boolean(anchor)) ? anchors : undefined
+}
+
 function segmentHitsBounds(a: Point, b: Point, bounds: Bounds): boolean {
   let low = 0, high = 1
   for (const [start, delta, min, max] of [[a.x,b.x-a.x,bounds.minX,bounds.maxX],[a.y,b.y-a.y,bounds.minY,bounds.maxY]]) {

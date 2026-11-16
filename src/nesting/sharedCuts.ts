@@ -1,4 +1,4 @@
-import { edgeLayouts, layoutFeatures } from './sharedGeometry'
+import { edgeLayouts, layoutFeatures, rectanglePairAnchors } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
@@ -56,20 +56,8 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     })
     const bounds = polygonBounds(outer[0].points), width = bounds.maxX - bounds.minX, height = bounds.maxY - bounds.minY
     if (Math.min(width, height) < camPreset.tabWidth + camPreset.diameter) return
-    // Keep internal operations away from the future tab roots. This conservative
-    // intact rim also covers cutter-centreline features and corner relief.
-    for (const feature of features.filter(f => rectangle && f.kind !== 'outside')) {
-      const inner = feature.circle ? {
-        minX: feature.circle.center.x - feature.circle.radius,
-        maxX: feature.circle.center.x + feature.circle.radius,
-        minY: feature.circle.center.y - feature.circle.radius,
-        maxY: feature.circle.center.y + feature.circle.radius,
-      } : polygonBounds(feature.points)
-      const rim = camPreset.diameter
-      if (![inner.minX, inner.maxX, inner.minY, inner.maxY].every(Number.isFinite) ||
-        inner.minX < bounds.minX + rim || inner.maxX > bounds.maxX - rim ||
-        inner.minY < bounds.minY + rim || inner.maxY > bounds.maxY - rim) return
-    }
+    // Tab support is checked for the chosen pair, on its three unshared sides.
+    // An operation near another edge must not disqualify the whole component.
     const reproduced = generateCam(drawing, settings)
     if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
     if (!close(part.width, width + pad * 2) || !close(part.height, height + pad * 2)) return
@@ -99,7 +87,8 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   if (cached) return cached
   if (a.profile.id !== b.profile.id) throw new Error('Shared edges need matching lengths and cutting presets.')
   const offsetB = a.width + camPreset.diameter, width = offsetB + b.width, height = a.height
-  const anchors = layout?.anchors ?? [{ x: 0, y: height / 2 }, { x: a.width / 2, y: 0 }, { x: a.width / 2, y: height }, { x: width, y: height / 2 }, { x: offsetB + b.width / 2, y: 0 }, { x: offsetB + b.width / 2, y: height }]
+  const anchors = layout?.anchors ?? rectanglePairAnchors(a, b)
+  if (!anchors) throw new Error('No straight edge can be shared while retaining tabs on three sides.')
   const internals = (s: SharedSource, dx: number, prefix: string) => s.features.filter(f => f.kind !== 'outside').map(f => {
     const translate = (p: Point) => ({ x: p.x - s.bounds.minX + dx, y: p.y - s.bounds.minY })
     return { ...f, id: prefix + f.id, points: f.points.map(translate), circle: f.circle ? { ...f.circle, center: translate(f.circle.center) } : undefined }

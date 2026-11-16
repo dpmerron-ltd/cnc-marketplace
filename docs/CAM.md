@@ -120,8 +120,10 @@ Pairs remain two parts rather than multi-part chains.
 Regeneration requires a saved DXF that reproduces the selected NC. Missing source,
 unknown machining edits, incompatible presets or cutting faces keep separate cuts.
 A pair must fit the stock, save cutting distance and time, and provide an intact
-10 mm holding tab on each of the three unshared sides of each member. Tab roots are
-checked against the actual outline and internal operations. Thin ends or interrupted
+10 mm holding tab on each of the three unshared sides of each member. Original tab positions do not prevent sharing: tabs on the shared edge are removed,
+and the three retained tabs may move along their unshared edges. Tab roots are
+checked locally against the actual outline and internal operations; a nearby hole
+or pocket elsewhere along an edge does not reject the whole component. Thin ends or interrupted
 support edges that cannot hold those tabs keep separate cuts.
 
 The selected edge arrangement is saved with the pair and revalidated when opening,

@@ -142,14 +142,39 @@ describe('V2 shared-edge nesting',()=>{
   expect(()=>autoNest(changed,sheet)).toThrow('locked shared pair')
  })
 
- it('keeps separate cuts when an internal hole compromises the outer holding rim',()=>{
+ it.each([40, 150])('shares edges and relocates retained tabs around a near-edge hole at y=%s', y=>{
   const original=rectanglePart('edge-hole',200,300,true)
-  const dxf=original.dxf!.replace('10\n40\n20\n40','10\n4\n20\n40')
+  const dxf=original.dxf!.replace('10\n40\n20\n40',`10\n4\n20\n${y}`)
   const result=generateCam(readDxf(dxf,'mm'),{thickness:12,profilePasses:4,drillDepthMm:2,rampProfile:'20mm-s-5deg',units:'mm',operations:{},programs:defaultProgramSettings})
   expect(result.errors).toEqual([])
   const part=createPartFromGCode('edge-hole.nc',result.gcode,dxf)
   const parts=[part,rectanglePart('second')],sheet=withProfile(parts,pairSheet(parts))
-  expect(sharedSource(part,sheet)).toBeUndefined()
+  const source = sharedSource(part,sheet)!
+  expect(source).toBeDefined()
+  const cam = generatePair(source, sharedSource(parts[1],sheet)!)
+  const leftTabs = cam.tabs.filter(t => t.member === 0)
+  expect(leftTabs).toHaveLength(3)
+  expect(leftTabs.every(t => Math.abs(t.center.x - cam.shared[0].x) > camPreset.diameter)).toBe(true)
+  // The left tab moves away from the original midpoint when the hole occupies it.
+  const sideTab = leftTabs.find(t => t.center.x < 13)!
+  expect(Math.abs(sideTab.center.y - (13 + y))).toBeGreaterThan(camPreset.diameter + camPreset.tabWidth / 2)
+  sheet.instances = autoNest(parts,sheet)
+  expect(sheet.instances.every(i=>!!i.sharedEdgePartnerId)).toBe(true)
+  expect(planSharedCuts(parts,sheet).errors).toEqual([])
+  expect(exportCombinedGCode(parts,sheet).errors).toEqual([])
+ })
+
+ it('keeps separate cuts when fewer than three unshared edges can hold tabs',()=>{
+  const original = rectanglePart('blocked')
+  const holes = [1, 192].flatMap(x => [0,'LWPOLYLINE',8,'INSIDE',90,4,70,1,10,x,20,10,10,x+7,20,10,10,x+7,20,290,10,x,20,290]).join('\n')
+  const dxf = original.dxf!.replace('0\nENDSEC\n0\nEOF', holes+'\n0\nENDSEC\n0\nEOF')
+  const result = generateCam(readDxf(dxf,'mm'),{thickness:12,profilePasses:4,drillDepthMm:2,rampProfile:'20mm-s-5deg',units:'mm',operations:{},programs:defaultProgramSettings})
+  expect(result.errors).toEqual([])
+  const part = createPartFromGCode('blocked.nc',result.gcode,dxf)
+  const parts = [part,rectanglePart('second')], sheet = withProfile(parts,pairSheet(parts))
+  const source = sharedSource(part,sheet)!
+  expect(source).toBeDefined()
+  expect(() => generatePair(source,sharedSource(parts[1],sheet)!)).toThrow('three sides')
   expect(autoNest(parts,sheet).every(i=>!i.sharedEdgePartnerId)).toBe(true)
  })
 
