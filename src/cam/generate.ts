@@ -8,7 +8,7 @@ import { arcPoints, area, contains, cornerOvercuts, cornerReliefScale, distance,
 import { camPreset, cutterWidthOpening, defaultTabCount, requiresHoldingTabs, tabFreeOpening } from './types'
 import { cutterWidthGeometry } from './rectangle'
 import type { CamDrawing, CamFeature, CamOperation, CamResult, CamSettings } from './types'
-import { finishingFeedPreset, cutFeedPreset, materialProfileId, rampPreset, validProfilePassSelection } from './materialProfiles'
+import { fastPeckReturnPreset, finishingFeedPreset, cutFeedPreset, materialProfileId, rampPreset, validProfilePassSelection } from './materialProfiles'
 import { profileEntry, routeOperations, type RouteOperation } from './routing'
 import { finishingAllowanceMm, machiningOutline, pocketPerimeters, roughingTabs } from './finishing'
 
@@ -102,6 +102,7 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
 }
 
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
+  const fastPeckReturn = fastPeckReturnPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   const rampSettings = rampPreset(settings.rampProfile)
   const cutFeed = cutFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   const finishFeed = finishingFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
@@ -228,7 +229,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
         approach(center)
         const pecks = Math.ceil(depth / 2)
         for (let peck = 1; peck <= pecks; peck++) {
-          if (settings.efficiencyTest && peck > 1) emit(`G00 Z-${n((peck - 1) * 2 - 0.5)}`)
+          if (fastPeckReturn && peck > 1) emit(`G00 Z-${n((peck - 1) * 2 - 0.5)}`)
           emit(`G01 Z-${n(Math.min(peck * 2, depth))} F600`, peck === pecks ? 'G00 Z20' : 'G00 Z0.5')
         }
         operations.push({ featureId: f.id, name: f.name, kind: f.kind, path: [center], tabs: [], depthMm: depth, firstLine, lastLine: lines.length })
@@ -441,7 +442,7 @@ export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResu
   const maxX = Math.ceil(Math.max(0, exactBounds.maxX, ...cutPoints.map(p => p.x)) * 10000) / 10000
   const maxY = Math.ceil(Math.max(0, exactBounds.maxY, ...cutPoints.map(p => p.y)) * 10000) / 10000
   if (maxX > 10000 || maxY > 10000) errors.push('Compensated machining extent exceeds 10,000 mm.')
-  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter ${camPreset.diameter} mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F${cutFeed} / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...(settings.efficiencyTest ? [`(TEST PROFILE: finishing F${finishFeed} / fast peck return 0.5 mm above previous depth / clearance Z20)`] : []), ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
+  const header = [`(DXF CAM - ${hasControllerStart(programs.startGcode) ? 'DUET' : 'DDCS 4.1'} - OPERATOR REVIEW REQUIRED)`, `(Material ${settings.thickness} mm / cutter ${camPreset.diameter} mm / drill depth ${material.drill} mm / peck 2 mm)`, `(Ramp ${rampSettings.rampDegrees} degrees F${rampSettings.rampFeed} / cutting F${cutFeed} / tabs 10 mm wide, 6 mm above final depth)`, `(Drawing translation X${n(shift.x)} Y${n(shift.y)})`, ...(fastPeckReturn ? [`(${settings.efficiencyTest ? 'TEST PROFILE' : 'FAST PROFILE'}: finishing F${finishFeed} / fast peck return 0.5 mm above previous depth / clearance Z20)`] : []), ...startProgramLines(programs, 20), ...programLines(programs.spindleStartGcode)]
   for (const op of operations) { op.firstLine += header.length; op.lastLine += header.length }
   const candidate = [...header, ...lines, 'G00 Z20', 'M05', ...programLines(programs.endGcode), ''].join('\n')
   const simulation = simulateGCode(candidate)

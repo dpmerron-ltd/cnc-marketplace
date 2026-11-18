@@ -11,9 +11,9 @@ const id = '12-2pass-2mm-ramp20-5deg'
 const options = { thicknessMm: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: '20mm-s-5deg' } as const
 const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
 
-it('generates 6/12.2 mm passes with breakthrough, 2 mm drills, F3000 cuts and 5 degree F1200 ramps', async () => {
+it('generates 6/12.2 mm passes with breakthrough, 2 mm drills, F3000 roughing, F6000 finishing and 5 degree F1200 ramps', async () => {
   const result = await generateDxfNc({ dxf, ...options })
-  expect(result.settings).toMatchObject({ thicknessMm: 12, passDepthsMm: [6, 12.2], cutDepthMm: 12.2, drillDepthMm: 2, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 1200, rampDegrees: 5, clearanceMm: 20 })
+  expect(result.settings).toMatchObject({ thicknessMm: 12, passDepthsMm: [6, 12.2], cutDepthMm: 12.2, drillDepthMm: 2, cutFeedMmPerMinute: 3000, finishingFeedMmPerMinute: 6000, fastPeckReturn: true, rampFeedMmPerMinute: 1200, rampDegrees: 5, clearanceMm: 20 })
   expect(result.filename).toBe('component-12mm-2pass-2mm-holes-ramp20-5deg.nc')
   expect(result.materialVariants.primaryProfile).toBe(id)
   expect(result.gcode).toContain('(Pass depth 6 mm)')
@@ -35,7 +35,10 @@ it('generates 6/12.2 mm passes with breakthrough, 2 mm drills, F3000 cuts and 5 
   }
   const cuts = simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < 0 && Math.abs(m.start.z - m.end.z) < 0.001 && Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.001)
   expect(cuts.length).toBeGreaterThan(0)
-  expect(cuts.every(m => m.feedMmPerMinute === 3000)).toBe(true)
+  const finishLine=result.gcode.split('\n').findIndex(line=>line.startsWith('(Finishing pass:'))+1
+  expect(cuts.filter(m=>m.lineNumber<finishLine).every(m=>m.feedMmPerMinute===3000)).toBe(true)
+  expect(cuts.filter(m=>m.lineNumber>finishLine).every(m=>m.feedMmPerMinute===6000)).toBe(true)
+  expect(cuts.some(m=>m.feedMmPerMinute===6000)).toBe(true)
   expect(result.operations.find(op => op.kind === 'outside')?.tabCount).toBe(4)
   expect(result.materialVariants.profiles['12-2pass'].gcode).toContain('Pass depth 6.1')
   expect(result.materialVariants.profiles['12-2mm']?.gcode).toContain('Pass depth 12.2')
@@ -75,4 +78,24 @@ it('includes the profile in automatic variants and supports generating only this
 it.each([{ drillDepthMm: undefined }, { profilePasses: 1 }, { thicknessMm: 18 }])('rejects unsupported option combinations %j', async patch => {
   await expect(generateDxfNc({ dxf, ...options, ...patch })).rejects.toMatchObject({ status: 400 })
   expect(() => parseJobRequest({ jobName: 'Test', orderNumber: 'TEST', items: [{ itemId: testItem.id, quantity: 1 }], sheet: { widthMm: 500, heightMm: 400, material: 'Plywood', ...options, ...patch } })).toThrow()
+})
+
+import {autoNest} from '../nesting/nestingEngine'
+import {planSharedCuts} from '../nesting/sharedCuts'
+import {exportCombinedGCode} from '../gcode/exporter'
+import {pairSheet} from '../nesting/sharedCuts.test'
+it('uses fast finishing on both shared faces, retains shallow holes and keeps other profiles unchanged',async()=>{
+ const result=await generateDxfNc({dxf,...options})
+ const parts=['20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002'].map(partId=>parseComponent({id:partId,name:'Fast panel',sku:'FAST',filename:result.filename,gcode:result.gcode,dxf,materialVariants:result.materialVariants},'alice',testItem.id).part)
+ const sheet={...pairSheet(parts),materialProfile:id as '12-2pass-2mm-ramp20-5deg'}
+ sheet.instances=autoNest(parts,sheet)
+ const plan=planSharedCuts(parts,sheet);expect(plan.errors).toEqual([]);expect(plan.pairs).toHaveLength(1)
+ const out=exportCombinedGCode(parts,sheet);expect(out.errors).toEqual([])
+ const slot=out.gcode.split('(V2 shared edge:')[1].split('(End shared edge)')[0]
+ expect([...slot.matchAll(/Shared edge depth ([\d.]+)/g)].map(m=>Number(m[1]))).toEqual([6,12.2])
+ expect(slot.match(/Shared edge finishing /g)).toHaveLength(2)
+ expect(slot.split('(Shared edge finishing ')[1]).toContain('F6000')
+ expect(slot.split('(Shared edge finishing ')[2]).toContain('F6000')
+ expect(out.gcode.match(/G01 Z-2 F600/g)).toHaveLength(2)
+ for(const profile of ['12-2pass','12-2pass-2mm-depth12p4','12-4pass-2mm-ramp20-5deg'] as const) expect(result.materialVariants.profiles[profile]!.gcode).not.toContain('F6000')
 })

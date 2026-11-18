@@ -106,6 +106,7 @@ describe('DXF review queue', () => {
       expect(screen.getAllByText('3,000 mm/min')[0]).toBeInTheDocument()
     }
     if (choice === '12-2pass-2mm-ramp20-5deg') {
+      expect(screen.getByText('6,000 mm/min')).toBeInTheDocument()
       expect(screen.getByText('6 + 6.2 mm')).toBeInTheDocument()
       expect(screen.getByText('2 mm')).toBeInTheDocument()
     }

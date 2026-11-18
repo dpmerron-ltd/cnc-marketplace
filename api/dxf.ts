@@ -6,7 +6,7 @@ import { camPreset, type CamDrawing, type OperationOverride } from '../src/cam/t
 import { JobError, sha256 } from '../src/jobs/generateJob'
 import { defaultProgramSettings, spindleRpm, type ProgramSettings } from '../src/gcode/programSettings'
 import { generateMaterialVariants } from '../src/cam/materialVariants'
-import { finishingFeedPreset, validProfilePassSelection, materialProfileId, materialProfiles, materialProfileSchema, cutFeedPreset, rampPreset, rampProfileSchema } from '../src/cam/materialProfiles'
+import { fastPeckReturnPreset, finishingFeedPreset, validProfilePassSelection, materialProfileId, materialProfiles, materialProfileSchema, cutFeedPreset, rampPreset, rampProfileSchema } from '../src/cam/materialProfiles'
 
 export const dxfBodyLimit = 4 * 1024 * 1024
 const override = z.strictObject({
@@ -76,7 +76,7 @@ export async function generateDxfNc(value: unknown, programs: ProgramSettings = 
       cutterDiameterMm: camPreset.diameter, spindleRpm: spindleRpm(programs), clearanceMm: camPreset.clearance,
       cutDepthMm: material.depth, passDepthsMm: material.passes, drillDepthMm: material.drill, drillPeckMm: 2, drillPeckRetractMm: 0.5,
       finishingAllowanceMm, fullDepthFinishing: true,
-      rampDegrees: ramp.rampDegrees, rampFeedMmPerMinute: ramp.rampFeed, cutFeedMmPerMinute: cutFeedPreset(materialVariants.primaryProfile), finishingFeedMmPerMinute: finishingFeedPreset(materialVariants.primaryProfile), fastPeckReturn: Boolean(input.efficiencyTest),
+      rampDegrees: ramp.rampDegrees, rampFeedMmPerMinute: ramp.rampFeed, cutFeedMmPerMinute: cutFeedPreset(materialVariants.primaryProfile), finishingFeedMmPerMinute: finishingFeedPreset(materialVariants.primaryProfile), fastPeckReturn: fastPeckReturnPreset(materialVariants.primaryProfile),
       reachCheck: false, screwMarking: false,
     },
     drawingShiftMm: result.shift,

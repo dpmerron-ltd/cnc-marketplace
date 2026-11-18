@@ -9,7 +9,7 @@ export const materialProfiles = [
   { id: '12-2mm', label: '12 mm (1 pass, 2 mm drills)', thickness: 12, profilePasses: 1, drillDepthMm: 2, rampProfile: undefined },
   { id: '12-2pass', label: '12 mm (2 passes)', thickness: 12, profilePasses: 2, drillDepthMm: undefined, rampProfile: undefined },
   { id: '12-2pass-2mm-depth12p4', label: '12 mm (2 x 6.2 mm, 2 mm drills)', thickness: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: undefined },
-  { id: '12-2pass-2mm-ramp20-5deg', label: '12 mm (2 passes, 2 mm drills, ramp 20 mm/s at 5 deg)', thickness: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
+  { id: '12-2pass-2mm-ramp20-5deg', label: 'FAST 12 mm (2 passes, 2 mm drills, ramp 20 mm/s at 5 deg)', thickness: 12, profilePasses: 2, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
   { id: '12-4pass-2mm-ramp20-5deg', label: 'dan quiet mode 12mm', thickness: 12, profilePasses: 4, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
   { id: '12-3pass-2mm-feed60-ramp20-5deg', label: '12 mm (3 passes, 60 mm/s, 2 mm drills, ramp 20 mm/s at 5 deg)', thickness: 12, profilePasses: 3, drillDepthMm: 2, rampProfile: '20mm-s-5deg' },
   { id: '13-4pass-2mm-ramp10-5deg', label: '13 mm (4 x 3.35 mm, 2 mm drills, ramp 10 mm/s at 5 deg)', thickness: 13, profilePasses: 4, drillDepthMm: 2, rampProfile: '10mm-s-5deg' },
@@ -46,4 +46,5 @@ export function validProfilePassSelection(thickness: number | undefined, passes?
   return thickness === 12 && [1, 2, 3, 4].includes(passes) && (passes < 3 || materialProfileId(thickness, passes, drillDepthMm, rampProfile) !== undefined)
 }
 
-export const finishingFeedPreset = (profile?: MaterialProfileId) => profile === '18-9mm-finish100-fastpeck-test' ? 6000 : cutFeedPreset(profile)
+export const fastPeckReturnPreset = (profile?: MaterialProfileId) => profile === '18-9mm-finish100-fastpeck-test' || profile === '12-2pass-2mm-ramp20-5deg'
+export const finishingFeedPreset = (profile?: MaterialProfileId) => fastPeckReturnPreset(profile) ? 6000 : cutFeedPreset(profile)
