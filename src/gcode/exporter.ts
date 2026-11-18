@@ -174,7 +174,7 @@ function transformedInstanceLines(
     }
     const result = transformedInstanceLines(syntheticParts, { ...sheet, nestingMethod: 'v1', instances }, instances.map(i => i.id), startingInstanceNumber)
     result.lines.unshift(`(V2 shared-edge nesting: ${plan.pairs.length} shared edges; three outer tabs per paired part)`)
-    result.warnings.push('V2: shared slots retain 0.3 mm per face and finish each face once, staying down between passes. Verify the three-sided tab map and sheet workholding.')
+    if (!sheet.skipFinishingPass) result.warnings.push('V2: shared slots retain 0.3 mm per face and finish each face once, staying down between passes. Verify the three-sided tab map and sheet workholding.')
     result.nextInstanceNumber = startingInstanceNumber + instanceIds.length
     return result
   }
