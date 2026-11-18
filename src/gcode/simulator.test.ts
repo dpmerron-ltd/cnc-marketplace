@@ -49,3 +49,10 @@ describe('G-code simulator', () => {
     expect(simulation.errors.some((error) => error.includes('drops to Z0 before the end'))).toBe(true)
   })
 })
+
+it('computes depth for a large combined job without overflowing function arguments', () => {
+  const code = ['G21','G90','G01 Z-12.4 F3000',...Array.from({length:150000},(_,i)=>`G01 X${i%2}`),'G00 Z20'].join('\n')
+  const result = simulateGCode(code)
+  expect(result.errors).toEqual([])
+  expect(result.deepestCutMm).toBe(12.4)
+})

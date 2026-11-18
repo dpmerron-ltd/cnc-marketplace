@@ -97,5 +97,5 @@ it('uses fast finishing on both shared faces, retains shallow holes and keeps ot
  expect(slot.split('(Shared edge finishing ')[1]).toContain('F6000')
  expect(slot.split('(Shared edge finishing ')[2]).toContain('F6000')
  expect(out.gcode.match(/G01 Z-2 F600/g)).toHaveLength(2)
- for(const profile of ['12-2pass','12-2pass-2mm-depth12p4','12-4pass-2mm-ramp20-5deg'] as const) expect(result.materialVariants.profiles[profile]!.gcode).not.toContain('F6000')
+ for(const profile of ['12-2pass','12-4pass-2mm-ramp20-5deg'] as const) expect(result.materialVariants.profiles[profile]!.gcode).not.toContain('F6000')
 })

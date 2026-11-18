@@ -1,5 +1,6 @@
+import { machiningSignature, noFinishingMarker } from '../cam/withoutFinishing'
 import { recordedOperations } from '../cam/sourceOperations'
-import { edgeLayouts, layoutFeatures, rectanglePairAnchors, sharedSlotWidth } from './sharedGeometry'
+import { edgeLayouts, layoutFeatures, rectanglePairAnchors, sourceSlotWidth } from './sharedGeometry'
 import type { Part } from '../models/Part'
 import type { PartInstance } from '../models/PartInstance'
 import type { Sheet } from '../models/Sheet'
@@ -14,7 +15,6 @@ import { finishingAllowanceMm } from '../cam/finishing'
 import { finishingFeedPreset, cutFeedPreset, materialProfiles, rampPreset } from '../cam/materialProfiles'
 import { rectangleGeometry } from '../cam/rectangle'
 import { polygonBounds, boundsPolygon } from '../gcode/footprint'
-import { parseGCode } from '../gcode/parser'
 import { createPartFromGCode } from '../gcode/importPart'
 import { instanceBounds, transformLocalPoint } from '../gcode/transform'
 import { selectMaterialParts } from '../gcode/materialSelection'
@@ -24,10 +24,9 @@ export const sharedWebMm = camPreset.tabWidth
 export const sharedSpacing = (sheet: Sheet) => Math.max(sheet.spacing, camPreset.diameter + sharedWebMm)
 export const minimumSharedBorderMm = camPreset.diameter / 2 + sharedWebMm
 export const sharedBorder = (sheet: Sheet) => Math.max(sheet.borderSpacing, minimumSharedBorderMm)
-const pad = camPreset.diameter / 2 + finishingAllowanceMm
+const sourcePad = (skip?: boolean) => camPreset.diameter / 2 + (skip ? 0 : finishingAllowanceMm)
 const close = (a: number, b: number) => Math.abs(a - b) < 0.0005
 const n = (v: number) => Number(v.toFixed(6))
-const signature = (code: string) => JSON.stringify(parseGCode(code).bodyLines.filter(l => l.words.length).map(l => l.words.map(w => [w.letter, w.value])))
 export interface SharedSource { part: Part; features: CamFeature[]; settings: CamSettings; bounds: Bounds; width: number; height: number; rectangle: boolean; profile: typeof materialProfiles[number] }
 const sources = new WeakMap<Part, Map<string, SharedSource | null>>()
 
@@ -35,7 +34,7 @@ const sources = new WeakMap<Part, Map<string, SharedSource | null>>()
 // Missing DXFs, edited NC, old cutters and unknown overrides retain V1 cuts.
 export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined {
   const id = sheet.materialProfile ?? part.metadata.materialVariants?.primaryProfile
-  const key = JSON.stringify([id, sheet.gcodeSettings])
+  const key = JSON.stringify([id, sheet.gcodeSettings, part.gcode.includes(noFinishingMarker)])
   let cache = sources.get(part)
   if (!cache) { cache = new Map(); sources.set(part, cache) }
   if (cache.has(key)) return cache.get(key) ?? undefined
@@ -49,7 +48,7 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     const drawing = readDxf(part.dxf, 'mm')
     if (drawing.errors.length || drawing.features.length > 100) return
     const provenance = part.metadata as typeof part.metadata & { rackingRegeneration?: { sourceLayerOverrides?: Record<string, OperationOverride> } }
-    const settings: CamSettings = { efficiencyTest: 'efficiencyTest' in profile, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
+    const settings: CamSettings = { skipFinishingPass: part.gcode.includes(noFinishingMarker), efficiencyTest: 'efficiencyTest' in profile, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
     let features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
     const outer = features.filter(f => f.kind === 'outside')
     if (outer.length !== 1 || outer[0].circle || !outer[0].closed) return
@@ -62,16 +61,17 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     // Tab support is checked for the chosen pair, on its three unshared sides.
     // An operation near another edge must not disqualify the whole component.
     let reproduced = generateCam(drawing, settings)
-    if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) {
+    if (reproduced.errors.length || machiningSignature(reproduced.gcode) !== machiningSignature(part.gcode)) {
       const operations = recordedOperations(part.gcode, drawing)
       if (!operations) return
       settings.operations = operations
       reproduced = generateCam(drawing, settings)
-      if (reproduced.errors.length || signature(reproduced.gcode) !== signature(part.gcode)) return
+      if (reproduced.errors.length || machiningSignature(reproduced.gcode) !== machiningSignature(part.gcode)) return
       features = drawing.features.map(f => ({ ...f, ...operations[f.id] })).filter(f => f.kind !== 'ignore')
       const effectiveOuter = features.filter(f => f.kind === 'outside')
       if (effectiveOuter.length !== 1 || effectiveOuter[0].id !== outer[0].id) return
     }
+    const pad = sourcePad(settings.skipFinishingPass)
     if (!close(part.width, width + pad * 2) || !close(part.height, height + pad * 2)) return
     const source = { part, features, settings, bounds, width, height, rectangle, profile }
     cache.set(key, source)
@@ -100,6 +100,8 @@ export interface PairCam {
 }
 const pairCache = new WeakMap<SharedSource, WeakMap<SharedSource, Map<string, PairCam>>>()
 export function generatePair(a: SharedSource, b: SharedSource, key?: string): PairCam {
+  const pad = sourcePad(a.settings.skipFinishingPass), sharedSlotWidth = sourceSlotWidth(a)
+  if (Boolean(a.settings.skipFinishingPass) !== Boolean(b.settings.skipFinishingPass)) throw new Error('Shared edges need matching finishing settings.')
   const layout = key ? edgeLayouts(a,b).find(l=>l.key===key) : !a.rectangle || !b.rectangle || !close(a.height,b.height) ? edgeLayouts(a,b)[0] : undefined
   if (key && !layout || (!a.rectangle || !b.rectangle || !close(a.height,b.height)) && !layout) throw new Error('No straight edge can be shared while retaining tabs on three sides.')
   const cacheKey = layout?.key ?? 'rectangle'
@@ -124,7 +126,7 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   const x = result.shift.x + (layout?.slot[0].x ?? a.width + sharedSlotWidth / 2)
   const bottom = result.shift.y + (layout?.slot[0].y ?? 0) - pad, top = result.shift.y + (layout?.slot[1].y ?? height) + pad
   const shared: [Point, Point] = [{ x, y: bottom }, { x, y: top }]
-  const lines = ['(V2 shared edge: one roughing traverse per depth; finish each face once)', '(Both parts remain held on three outer sides)', 'G00 Z20', `G00 X${n(x)} Y${n(bottom)}`, 'G00 Z0.5', 'G01 Z0 F600']
+  const lines = [a.settings.skipFinishingPass ? '(V2 shared edge: one cut per depth; no finishing allowance)' : '(V2 shared edge: one roughing traverse per depth; finish each face once)', '(Both parts remain held on three outer sides)', 'G00 Z20', `G00 X${n(x)} Y${n(bottom)}`, 'G00 Z0.5', 'G01 Z0 F600']
   const move = (y: number, z: number, f: number, atX = x) => lines.push(`G01 X${n(atX)} Y${n(y)} Z${n(-z)} F${f}`)
   let previous = 0, start = bottom, end = top
   for (const target of passes) {
@@ -142,7 +144,7 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   }
   // Remain inside the cleared slot between depths and finishing strokes.
   // Each face gets its own 0.3 mm full-depth finish, with no duplicate spring pass.
-  for (const [face, finishX] of [['left', x - finishingAllowanceMm], ['right', x + finishingAllowanceMm]] as const) {
+  if (!a.settings.skipFinishingPass) for (const [face, finishX] of [['left', x - finishingAllowanceMm], ['right', x + finishingAllowanceMm]] as const) {
     lines.push(`(Shared edge finishing ${face}: ${n(finishingAllowanceMm)} mm allowance / full depth ${depth} mm)`)
     move(start, depth, finishingFeedPreset(a.profile.id), finishX)
     move(end, depth, finishingFeedPreset(a.profile.id), finishX)

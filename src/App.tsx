@@ -1692,6 +1692,11 @@ function App() {
               {materialProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
             </select>
           </label>
+          <label><input type="checkbox" checked={sheet.skipFinishingPass === true} disabled={planningSheet.unavailableSheetIndices.length > 0} onChange={event => {
+            setSheet({ ...sheet, skipFinishingPass: event.target.checked, instances: sheet.instances.map(i => ({ ...i, sharedEdgePartnerId: undefined, sharedEdgeLayoutKey: undefined })) })
+            setPreview(undefined); setPreviewSimulation(undefined); setPendingExport(undefined)
+            setStatus('Finishing setting changed. Auto-nest again before exporting.')
+          }} /> Skip finishing pass</label>
           <label><input type="checkbox" checked={Boolean(currentMaterial.stockMaterial)} onChange={e => changePhysicalMaterial({ ...currentMaterial, stockMaterial: e.target.checked ? { thicknessMm: 12, type: 'Plywood', finish: 'Natural' } : undefined })} /> Specify actual stock</label>
           {currentMaterial.stockMaterial && <StockFields label={`Sheet ${currentSheetIndex + 1}`} value={currentMaterial.stockMaterial} onChange={stockMaterial => changePhysicalMaterial({ ...currentMaterial, stockMaterial })} disabled={planningSheet.unavailableSheetIndices.includes(currentSheetIndex)} />}
           <label>

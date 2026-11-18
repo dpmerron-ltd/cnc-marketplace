@@ -8,6 +8,7 @@ import type { SharedSource } from './sharedCuts'
 import { finishingAllowanceMm } from '../cam/finishing'
 
 export const sharedSlotWidth = camPreset.diameter + 2 * finishingAllowanceMm
+export const sourceSlotWidth = (source: SharedSource) => source.settings.skipFinishingPass ? camPreset.diameter : sharedSlotWidth
 
 const close = (a: number, b: number) => Math.abs(a - b) < 0.0001
 const clean = (x: number) => Number(x.toFixed(4))
@@ -87,7 +88,7 @@ export function rectanglePairAnchors(a: SharedSource, b: SharedSource): Point[] 
     ...(['left', 'bottom', 'top'] as const).map(side => tabAnchor(left, side)),
     ...(['right', 'bottom', 'top'] as const).map(side => {
       const anchor = tabAnchor(right, side)
-      return anchor && translate(anchor, { x: a.width + sharedSlotWidth, y: 0 })
+      return anchor && translate(anchor, { x: a.width + sourceSlotWidth(a), y: 0 })
     }),
   ]
   return anchors.every((anchor): anchor is Point => Boolean(anchor)) ? anchors : undefined
@@ -137,13 +138,13 @@ export function edgeLayouts(a: SharedSource,b: SharedSource): EdgeLayout[] {
         seen.add(key)
         const low=Math.max(a0,b0+dy),high=Math.min(a1,b1+dy),length=high-low
         if(length<camPreset.diameter*6) continue
-        const offsets: [Point,Point]=[{x:0,y:-Math.min(0,dy)},{x:left.width+sharedSlotWidth,y:Math.max(0,dy)}]
+        const offsets: [Point,Point]=[{x:0,y:-Math.min(0,dy)},{x:left.width+sourceSlotWidth(a),y:Math.max(0,dy)}]
         const pa=left.outer.map(p=>translate(p,offsets[0])),pb=right.outer.map(p=>translate(p,offsets[1]))
         const bridge=boundsPolygon({minX:left.width,maxX:offsets[1].x,minY:low+offsets[0].y,maxY:high+offsets[0].y})
         try {
           const outline=union([pa,pb,bridge])
-          if(Math.abs(Math.abs(area(outline))-Math.abs(area(pa))-Math.abs(area(pb))-length*sharedSlotWidth)>0.01) continue
-          const bounds=polygonBounds(outline),x=left.width+sharedSlotWidth/2
+          if(Math.abs(Math.abs(area(outline))-Math.abs(area(pa))-Math.abs(area(pb))-length*sourceSlotWidth(a))>0.01) continue
+          const bounds=polygonBounds(outline),x=left.width+sourceSlotWidth(a)/2
           layouts.push({key,members:[left,right],offsets,outline,anchors:[...anchorsLeft.map(p=>translate(p!,offsets[0])),...anchorsRight.map(p=>translate(p!,offsets[1]))],slot:[{x,y:low+offsets[0].y},{x,y:high+offsets[0].y}],length,width:bounds.maxX,height:bounds.maxY})
         } catch { /* A disconnected or ambiguous bridge cannot be shared. */ }
       }

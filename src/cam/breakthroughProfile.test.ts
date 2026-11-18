@@ -32,7 +32,8 @@ it('generates two 6.2 mm passes, 2 mm drills, F3000 cuts and F600 ramps at up to
   }
   const cuts = simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < 0 && Math.abs(m.start.z - m.end.z) < 0.001 && Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.001)
   expect(cuts.length).toBeGreaterThan(0)
-  expect(cuts.every(m => m.feedMmPerMinute === 3000)).toBe(true)
+  expect(cuts.every(m => [3000, 6000].includes(m.feedMmPerMinute))).toBe(true)
+  expect(cuts.some(m => m.feedMmPerMinute === 6000)).toBe(true)
   expect(result.operations.find(op => op.kind === 'outside')?.tabCount).toBe(4)
   expect(result.materialVariants.profiles['12-2pass'].gcode).toContain('Pass depth 6.1')
   expect(result.materialVariants.profiles['12-2pass-2mm-ramp20-5deg']?.gcode).toContain('Pass depth 12.2')

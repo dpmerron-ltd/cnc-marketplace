@@ -203,7 +203,7 @@ export function simulateGCode(source: string): GCodeSimulation {
     cuttingDistanceMm: cuttingMoves.reduce((total, move) => total + move.lengthMm, 0),
     rapidDistanceMm: rapidMoves.reduce((total, move) => total + move.lengthMm, 0),
     estimatedSeconds: moves.reduce((total, move) => total + move.seconds, 0),
-    deepestCutMm: Math.abs(Math.min(0, ...moves.filter((move) => move.type !== 'rapid').map((move) => move.end.z))),
+    deepestCutMm: Math.abs(cuttingMoves.reduce((depth, move) => Math.min(depth, move.end.z), 0)),
     warnings: Array.from(new Set(warnings)),
     errors: Array.from(new Set(errors)),
   }

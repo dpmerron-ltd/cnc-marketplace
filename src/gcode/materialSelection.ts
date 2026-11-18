@@ -1,3 +1,4 @@
+import { withoutFinishing } from '../cam/withoutFinishing'
 import type { Part } from '../models/Part'
 import type { Sheet } from '../models/Sheet'
 import { materialProfiles, type MaterialProfileId } from '../cam/materialProfiles'
@@ -5,7 +6,7 @@ import { createPartFromGCode } from './importPart'
 
 const cache = new WeakMap<Part, Map<MaterialProfileId, { gcode: string; part: Part }>>()
 
-export function selectMaterialParts(parts: Part[], sheet: Pick<Sheet, 'materialProfile'> & { instances: ReadonlyArray<{ partId: string }> }) {
+function selectSavedMaterialParts(parts: Part[], sheet: Pick<Sheet, 'materialProfile' | 'skipFinishingPass'> & { instances: ReadonlyArray<{ partId: string }> }) {
   const errors: string[] = []
   if (sheet.materialProfile === undefined) return { parts, errors }
   const profile = materialProfiles.find(profile => profile.id === sheet.materialProfile)
@@ -30,4 +31,15 @@ export function selectMaterialParts(parts: Part[], sheet: Pick<Sheet, 'materialP
     return resolved
   })
   return { parts: selected, errors }
+}
+
+export function selectMaterialParts(parts: Part[], sheet: Pick<Sheet, 'materialProfile' | 'skipFinishingPass'> & { instances: ReadonlyArray<{ partId: string }> }) {
+  const selected = selectSavedMaterialParts(parts, sheet)
+  if (!sheet.skipFinishingPass || selected.errors.length) return selected
+  const placed = new Set(sheet.instances.map(i => i.partId))
+  return { errors: selected.errors, parts: selected.parts.map(part => {
+    if (!placed.has(part.id)) return part
+    try { return withoutFinishing(part, sheet.materialProfile) }
+    catch (error) { selected.errors.push(`${part.name}: ${error instanceof Error ? error.message : 'Cannot skip finishing.'}`); return part }
+  }) }
 }

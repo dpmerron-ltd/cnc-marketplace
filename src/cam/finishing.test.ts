@@ -173,3 +173,28 @@ describe('Default full-depth finishing', () => {
     expect(block).toContain('G01 Z-4.5 F600\nG00 Z20')
   })
 })
+
+it.each(['outside','inside','pocket'] as const)('skips finishing for %s without leaving stock on the walls', kind => {
+  const normal = generateCam(drawing(feature(kind)), settings)
+  const fast = generateCam(drawing(feature(kind)), { ...settings, skipFinishingPass: true })
+  expect(fast.errors).toEqual([])
+  expect(fast.gcode).not.toContain('(Finishing pass:')
+  expect(fast.gcode).toContain('zero allowance')
+  expect(fast.simulation.deepestCutMm).toBe(normal.simulation.deepestCutMm)
+  expect(fast.operations[0].tabs.length).toBe(normal.operations[0].tabs.length)
+  expect(fast.simulation.estimatedSeconds).toBeLessThan(normal.simulation.estimatedSeconds)
+  const cuts = fast.simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < 0)
+  const xs = cuts.flatMap(m => [m.start.x,m.end.x])
+  // Coordinates are shifted to the same drawing origin; cutter centre reaches the final wall.
+  expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(kind === 'outside' ? 206 : 194, 3)
+})
+
+it('omits the cutter-width slot spring pass while retaining its depth passes',()=>{
+ const f={...feature('inside'),points:rectangle(6,80)}
+ const result=generateCam(drawing(f),{...settings,skipFinishingPass:true})
+ expect(result.errors).toEqual([])
+ expect(result.gcode).not.toContain('(Finishing pass:')
+ expect(result.gcode).toContain('Pass depth 9.2 mm')
+ expect(result.gcode).toContain('Pass depth 18.4 mm')
+ expect(result.simulation.deepestCutMm).toBe(18.4)
+})

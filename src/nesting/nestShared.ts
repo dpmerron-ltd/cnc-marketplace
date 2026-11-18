@@ -31,7 +31,7 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
       throw new Error(`${part.name}: its ${part.width.toFixed(1)} × ${part.height.toFixed(1)} mm machining envelope cannot fit inside the ${sharedBorder(sheet)} mm border on a ${sheet.width} × ${sheet.height} mm sheet.${hint}`)
     }
   }
-  const envelopePadding = camPreset.diameter + 2 * finishingAllowanceMm
+  const envelopePadding = camPreset.diameter + 2 * (sheet.skipFinishingPass ? 0 : finishingAllowanceMm)
   const pairFits = (cam: PairCam) => cam.part.width <= availableWidth && cam.part.height <= availableHeight || cam.part.height <= availableWidth && cam.part.width <= availableHeight
   const addPair = (members: [PartInstance, PartInstance], pairSources: [SharedSource, SharedSource], cam: PairCam, existing?: PartInstance) => {
     const id = `shared-unit:${members[0].id}:${members[1].id}`
@@ -78,7 +78,7 @@ export function nestShared(parts: Part[], sheet: Sheet, nestV1: (parts: Part[], 
     nestingParts.push(envelopePart(part))
     units.push({ ...a, rotation: a.locked ? a.rotation : 0, sharedEdgePartnerId: undefined, sharedEdgeLayoutKey: undefined }); used.add(a.id)
   }
-  const nested = nestV1(nestingParts, { ...sheet, nestingMethod: 'v1', materialProfile: undefined, spacing: sharedSpacing(sheet), borderSpacing: sharedBorder(sheet), instances: units })
+  const nested = nestV1(nestingParts, { ...sheet, nestingMethod: 'v1', skipFinishingPass: false, materialProfile: undefined, spacing: sharedSpacing(sheet), borderSpacing: sharedBorder(sheet), instances: units })
   const placed = new Map<string, PartInstance>()
   for (const unit of nested) {
     const pair = pairs.get(unit.id)

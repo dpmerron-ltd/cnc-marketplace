@@ -16,6 +16,7 @@ export type MachineStatus = 'waiting' | 'cutting' | 'completed' | 'cancelled'
 export const machineStatusNames: Record<MachineStatus, string> = { waiting: 'Waiting to cut', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
 export interface MachineFile { sheetIndices?: number[]; filename: string; gcode: string; sha256: string; estimatedSeconds: number }
 export interface ExportSnapshot {
+  skipFinishingPass?: boolean
   version: 1
   jobId?: string
   labels?: PartLabel[]
@@ -74,7 +75,7 @@ export async function buildExportSnapshot(input: {
   const files: MachineFile[] = []
   for (const file of input.files) files.push({ sheetIndices: file.sheetIndices, filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
   return {
-    version: 1, jobId: input.jobId, labels: buildPartLabels(input.parts, input.items ?? [], sheet), materialProfile: sheet.materialProfile, mode: input.mode, map, sheets, files, safeZ,
+    version: 1, skipFinishingPass: sheet.skipFinishingPass, jobId: input.jobId, labels: buildPartLabels(input.parts, input.items ?? [], sheet), materialProfile: sheet.materialProfile, mode: input.mode, map, sheets, files, safeZ,
     material: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => s.materialSetup?.stockMaterial ? stockLabel(s.materialSetup.stockMaterial) : s.materialSetup?.material?.trim() || 'Not specified'))].join('; '),
     thickness: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => materialProfiles.find(profile => profile.id === s.materialSetup?.materialProfile)?.label ?? 'Original NC - verify stock thickness'))].join('; '),
     deepestCutMm: input.summary.deepestCutMm, warnings: [...input.summary.exportWarnings], programs: sheet.gcodeSettings,

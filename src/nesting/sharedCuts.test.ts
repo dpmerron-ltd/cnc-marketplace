@@ -270,3 +270,31 @@ describe('V2 shared-edge nesting',()=>{
  })
 
 })
+
+it('skips finishing at job level, uses a 6 mm shared slot and keeps three tabs per member',()=>{
+ const parts=[rectanglePart('skip-a',200,300,true),rectanglePart('skip-b',180,300,true)]
+ const sheet=withProfile(parts,pairSheet(parts));sheet.skipFinishingPass=true
+ sheet.instances=autoNest(parts,sheet)
+ const plan=planSharedCuts(parts,sheet)
+ expect(plan.errors).toEqual([]);expect(plan.pairs).toHaveLength(1)
+ const pair=plan.pairs[0]
+ expect(pair.cam.offsetB).toBe(206)
+ expect(pair.cam.tabs).toHaveLength(6)
+ const output=exportCombinedGCode(parts,sheet,defaultProgramSettings)
+ expect(output.errors).toEqual([])
+ expect(output.gcode).not.toContain('(Finishing pass:')
+ expect(output.gcode).not.toContain('Shared edge finishing')
+ expect(output.gcode.match(/Shared edge depth/g)).toHaveLength(4)
+ expect(output.gcode.match(/drill machining/g)).toHaveLength(2)
+ expect(simulateGCode(output.gcode).deepestCutMm).toBe(12.4)
+})
+
+it('blocks skip-finishing export when saved machining cannot be reproduced',()=>{
+ const part=rectanglePart('edited'),sheet=withProfile([part],pairSheet([part]));sheet.skipFinishingPass=true;sheet.materialProfile='12-4pass-2mm-ramp20-5deg'
+ const profile=part.metadata.materialVariants!.profiles['12-4pass-2mm-ramp20-5deg']!
+ profile.gcode=profile.gcode.replaceAll('F3000','F2700')
+ const output=exportCombinedGCode([part],sheet,defaultProgramSettings)
+ expect(output.errors.join(' ')).toContain('could not be reproduced')
+ sheet.skipFinishingPass=false
+ expect(exportCombinedGCode([part],{...sheet,nestingMethod:'v1'},defaultProgramSettings).errors).toEqual([])
+})
