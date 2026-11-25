@@ -5,7 +5,7 @@ import { shopifyReader } from './shopify'
 const alice = '00000000-0000-4000-8000-000000000001', bob = '00000000-0000-4000-8000-000000000002'
 const config = [{ ownerId: alice, shop: 'test-shop.myshopify.com', clientId: 'app-id', clientSecret: 'test-secret' }]
 const pageInfo = { hasNextPage: false, endCursor: null }
-const order = { id: 'gid://shopify/Order/123', name: '#1001', lineItems: { nodes: [{ id: 'line1', title: 'Rack', variantTitle: '12 mm', sku: 'RACK', quantity: 2, currentQuantity: 1, unfulfilledQuantity: 1 }], pageInfo } }
+const order = { id: 'gid://shopify/Order/123', name: '#1001', createdAt: '2026-11-20T09:00:00Z', cancelledAt: null, closedAt: null, lineItems: { nodes: [{ id: 'line1', title: 'Rack', variantTitle: '12 mm', sku: 'RACK', quantity: 2, currentQuantity: 1, unfulfilledQuantity: 1 }], pageInfo } }
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status })
 function fixture() {
   const fetcher = vi.fn<typeof fetch>(async (url, options) => String(url).endsWith('access_token') ? response({ access_token: 'short-lived-token', expires_in: 86400, scope: 'read_orders' }) : response({ data: JSON.parse(String(options?.body)).query.includes('CncOrders(') ? { orders: { nodes: [order], pageInfo } } : { order } }))
@@ -49,6 +49,8 @@ describe('Shopify order access', () => {
     expect(await reader.order(alice, '123', new URLSearchParams('after=lines2'))).toMatchObject({ order })
     expect(fetcher).toHaveBeenCalledTimes(3)
     const sent = fetcher.mock.calls.filter(([url]) => String(url).endsWith('graphql.json')).map(([, options]) => JSON.parse(String(options?.body)))
+    expect(sent[0].query).toContain('createdAt cancelledAt closedAt')
+    expect(sent[1].query).toContain('createdAt cancelledAt closedAt')
     expect(sent[0].variables).toEqual({ after: 'abc', query: 'status:open (fulfillment_status:unfulfilled OR fulfillment_status:partial) name:"#1001"' })
     expect(sent[1].variables).toEqual({ id: order.id, after: 'lines2' })
     for (const request of sent) expect(request.query).not.toMatch(/price|total|money|customer|email|address|mutation/i)

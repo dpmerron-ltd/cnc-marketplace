@@ -1066,3 +1066,9 @@ textarea {
 .shared-edge-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; }
 .shared-edge-legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .shared-edge-pair-key { padding: 3px 8px; border: 1px solid #91bac2; border-radius: 5px; background: white; font-weight: 600; }
+
+.daily-plan-dialog { width: min(1100px, 94vw); max-height: 90vh; overflow: auto; border: 1px solid #64748b; border-radius: 10px; padding: 24px; }
+.daily-plan { margin: 18px 0; padding: 16px; border: 1px solid #64748b; border-radius: 8px; }
+.daily-plan h4 { margin: 18px 0 8px; }
+.daily-plan table { width: 100%; }
+.daily-plan td, .daily-plan th { padding: 8px; text-align: left; }
