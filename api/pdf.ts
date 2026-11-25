@@ -1,3 +1,4 @@
+import { partBarcode } from '../src/labels/partBarcode'
 import { physicalSheet, stockLabel } from '../src/models/stockMaterial'
 import { selectMaterialParts } from '../src/gcode/materialSelection'
 import { materialProfiles } from '../src/cam/materialProfiles'
@@ -156,19 +157,25 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
     const width = request.labels.widthMm * mm, height = request.labels.heightMm * mm
     const label = labels.pdf.addPage([width, height])
     const unit = Math.min(1, (request.labels.heightMm - 3) / 22)
-    const pad = 1.5 * mm, usable = width - pad * 2
+    const pad = 1.5 * mm, code = partBarcode(cut.instanceId), qrSize = Math.min(23, request.labels.heightMm - 6) * mm
+    const usable = width - pad * 2 - (code ? qrSize + mm : 0)
+    if (code) {
+      const unit = qrSize / (code.size + 8)
+      for (let row=0;row<code.size;row++) for(let col=0;col<code.size;col++) if(code.get(row,col)) label.drawRectangle({x:width-pad-qrSize+(col+4)*unit,y:height-pad-(row+5)*unit,width:unit,height:unit,color:rgb(0,0,0)})
+      const id = cut.instanceId.toUpperCase(), size = Math.min(1.8 * mm, (width-pad*2) / labels.font.widthOfTextAtSize(id,1))
+      label.drawText(id,{x:pad,y:1*mm,size,font:labels.font,color:ink})
+    }
     function line(value: string, top: number, size: number, lineWidth = usable, x = pad) {
       const points = size * mm * unit
       label.drawText(fitted(labels.font, value, points, lineWidth), { x, y: height - pad - top * mm * unit - points, size: points, font: labels.font, color: ink })
     }
-    line(cut.partNumber, 0, 4.3, usable * 0.53)
-    line(`Sheet ${cut.sheetNumber} / Cut ${cut.cutOrder}`, 1, 2.1, usable * 0.46, pad + usable * 0.54)
+    line(`${cut.partNumber} · S${cut.sheetNumber}`, 0, 3.3)
     line(cut.component, 4.9, 2.7)
     line(`Job: ${cut.job}`, 8.3, 2.4)
     line(`Order: ${cut.order}`, 11.3, 2.4)
     line(`SKU: ${cut.sku}`, 14.3, 2.2)
     line(cut.material || cut.item, 17.3, 2.2)
-    line(cut.cutSide && cut.cutSide !== 'either' ? cutSideLabel(cut.cutSide) : `X ${cut.x.toFixed(1)} Y ${cut.y.toFixed(1)} mm / ${cut.rotation} deg`, 20, 1.9)
+    line(cut.cutSide && cut.cutSide !== 'either' ? cutSideLabel(cut.cutSide) : `X ${cut.x.toFixed(1)} Y ${cut.y.toFixed(1)} mm / ${cut.rotation} deg`, 19.7, 1.4)
   }
   return { plan: await pdf.save(), labels: await labels.pdf.save() }
 }

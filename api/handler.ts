@@ -70,7 +70,7 @@ async function body(request: Request, maxBytes = 65536): Promise<unknown> {
   try { return JSON.parse(value + decoder.decode()) } catch { throw new JobError('Invalid JSON.', 400) }
 }
 
-export function createApi(repository: JobRepository, fontBytes: Uint8Array, getShopify: () => ShopifyReader = () => shopifyReader()) {
+export function createApi(repository: JobRepository, fontBytes: Uint8Array, getShopify: () => ShopifyReader = () => shopifyReader(), publishTelegram?: (owner: string, createdAt: string) => Promise<{ configured: boolean; sent: boolean }>) {
   return async (request: Request): Promise<Response> => {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
     const requestId = crypto.randomUUID()
@@ -82,6 +82,12 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
       if (!await repository.allowRequest(owner)) return json({ error: 'Account rate limit exceeded. Retry in 60 seconds.', requestId }, 429, { 'Retry-After': '60' })
       const url = new URL(request.url)
       const path = url.pathname.replace(/^.*?\/cnc-api(?=\/|$)/, '')
+      if (path === '/v1/telegram/day-plan' && request.method === 'POST') {
+        const input = z.strictObject({ createdAt: z.string().datetime() }).safeParse(await body(request))
+        if (!input.success) throw new JobError('Supply the saved plan creation timestamp.', 400)
+        if (!publishTelegram) return json({ configured: false, sent: false })
+        return json(await publishTelegram(owner, input.data.createdAt))
+      }
       if (path === '/v1/boxes' && request.method === 'GET') return json({ boxes: await repository.boxes(owner) })
       if (path === '/v1/boxes' && request.method === 'POST') {
         const input = boxInputSchema.safeParse(await body(request))

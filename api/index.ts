@@ -1,3 +1,5 @@
+import { telegramRuntime } from './telegramRuntime'
+import type { TelegramConfig } from './telegram'
 import { createClient } from '@supabase/supabase-js'
 import { createApi, decodeBase64 } from './handler'
 import { supabaseRepository } from './repository'
@@ -11,4 +13,11 @@ const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in the backend environment.')
 const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
 let shopify: ShopifyReader | undefined
-Deno.serve(createApi(supabaseRepository(db), decodeBase64(__PDF_FONT_BASE64__), () => shopify ??= shopifyReader(Deno.env.get('CNC_SHOPIFY_CONNECTIONS') ?? '[]')))
+const repo = supabaseRepository(db)
+const getShopify = () => shopify ??= shopifyReader(Deno.env.get('CNC_SHOPIFY_CONNECTIONS') ?? '[]')
+const rawTelegram = Deno.env.get('CNC_TELEGRAM_CONFIG')
+const telegram = rawTelegram ? telegramRuntime(db, JSON.parse(rawTelegram) as TelegramConfig, repo, getShopify) : undefined
+const api = createApi(repo, decodeBase64(__PDF_FONT_BASE64__), getShopify, telegram?.publish)
+Deno.serve(request => new URL(request.url).pathname.endsWith('/telegram/webhook')
+  ? telegram ? telegram.handle(request) : Promise.resolve(new Response('Not configured', { status: 503 }))
+  : api(request))

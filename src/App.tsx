@@ -1,3 +1,4 @@
+import { shareDailyPlan } from './storage/telegramStore'
 import { loadExportProfiles, type ExportProfile } from './storage/exportProfilesStore'
 import { machineArchive, downloadMachineArchive } from './machine/machineArchive'
 import type { ReportPlanningProgress } from './jobs/planningProgress'
@@ -1287,7 +1288,13 @@ function App() {
     if (accountRef.current !== baseline.owner) return
     window.location.hash = '#machine'
     setPage('machine')
-    setStatus('Daily cutting plan saved. Review and export the scheduled sheets before cutting.')
+    setStatus('Daily cutting plan saved. Sharing with Telegram…')
+    try {
+      const shared = await shareDailyPlan(baseline.owner, result.dailyPlan!.createdAt)
+      if (accountRef.current === baseline.owner) setStatus(shared.sent ? 'Daily cutting plan saved and shared with Telegram. Review and export the scheduled sheets before cutting.' : 'Daily cutting plan saved. Review and export the scheduled sheets before cutting.')
+    } catch {
+      if (accountRef.current === baseline.owner) setStatus('Daily plan saved, but Telegram delivery failed. Use /today in the group to retrieve the saved plan.')
+    }
   }
 
   async function loadJobParts(jobs: ProductionJob[], onProgress?: (completed: number, total: number) => void) {
