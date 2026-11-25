@@ -156,7 +156,7 @@ export async function jobPdfs(job: Generated, jobId: string, fontBytes: Uint8Arr
   for (const cut of manifest.cuts) {
     const width = request.labels.widthMm * mm, height = request.labels.heightMm * mm
     const label = labels.pdf.addPage([width, height])
-    const unit = Math.min(1, (request.labels.heightMm - 3) / 22)
+    const unit = Math.min(1, (request.labels.heightMm - 6) / 22)
     const pad = 1.5 * mm, code = partBarcode(cut.instanceId), qrSize = Math.min(23, request.labels.heightMm - 6) * mm
     const usable = width - pad * 2 - (code ? qrSize + mm : 0)
     if (code) {

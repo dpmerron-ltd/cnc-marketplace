@@ -1,3 +1,4 @@
+import { copyPartIdentities } from './labels/copyPartIdentities'
 import { shareDailyPlan } from './storage/telegramStore'
 import { loadExportProfiles, type ExportProfile } from './storage/exportProfilesStore'
 import { machineArchive, downloadMachineArchive } from './machine/machineArchive'
@@ -1674,7 +1675,7 @@ function App() {
 
   function openHistoryEntry(entry: SheetHistoryEntry) {
     const nextSheet = pruneMissingSheetInstances(normalizeSheet(entry.sheet), catalogueComponents)
-    const recalled = newProductionJob(nextSheet)
+    const recalled = newProductionJob(copyPartIdentities(nextSheet))
     setWorkspace(current => ({ activeId: recalled.id, jobs: [...current.jobs, recalled] }))
     setSelectedItemId(entry.selectedItemId)
     setSelectedInstanceId(undefined)
