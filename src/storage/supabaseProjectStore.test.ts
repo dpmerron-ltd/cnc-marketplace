@@ -116,16 +116,16 @@ describe('cloud account boundaries', () => {
     expect(new Set(result?.componentIndex?.map(part => part.id)).size).toBe(1078)
     expect(result?.componentIndex?.at(-1)).not.toHaveProperty('gcode')
     const pages = mock.queries.filter(query => query.range)
-    expect(pages.every(query => query.range![1] - query.range![0] === (query.table === 'marketplace_items' ? query.columns === 'id,image' ? 4 : 249 : 24))).toBe(true)
+    expect(pages.every(query => query.range![1] - query.range![0] === 249)).toBe(true)
     expect(pages.every(query => !query.filters.some(([key]) => key === 'owner_id'))).toBe(true)
     expect(pages.filter(query => query.table === 'cnc_components').every(query => query.included?.[0] === 'item_id' && query.included[1].length <= 40)).toBe(true)
-    expect(pages.filter(query => query.table === 'cnc_components').every(query => !query.columns?.split(',').some(field => ['*', 'gcode', 'dxf', 'material_variants'].includes(field)))).toBe(true)
+    expect(pages.filter(query => query.table === 'cnc_components').every(query => !query.columns?.split(',').some(field => ['*', 'gcode', 'dxf'].includes(field)) && !query.columns?.includes('material_variants'))).toBe(true)
   })
 
   it('reports a failed later page without returning an incomplete library', async () => {
     mock.rows = [{ id: 'item', owner_id: 'alice', name: 'Item', sku: 'ITEM' }]
-    mock.components = Array.from({ length: 100 }, (_, index) => ({ id: `part-${index}`, item_id: 'item', owner_id: 'alice' }))
-    mock.failOffset = 75
+    mock.components = Array.from({ length: 800 }, (_, index) => ({ id: `part-${index}`, item_id: 'item', owner_id: 'alice' }))
+    mock.failOffset = 750
     await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load component index: Response too large')
   })
 
@@ -151,7 +151,7 @@ describe('cloud account boundaries', () => {
     expect(result?.items).toHaveLength(640)
     expect(result?.componentIndex).toHaveLength(23)
     expect(result?.componentIndex?.map(part => part.id)).toEqual(expect.arrayContaining(['part-0-0', 'part-1-0', 'part-2-0', 'part-639-0']))
-    expect(result?.componentIndex?.every(part => part.materialThicknessMm === 12)).toBe(true)
+    expect(result?.componentIndex?.every(part => part.materialThicknessMm === undefined)).toBe(true)
     expect(result?.sheet).toEqual((mock.project as { sheet: Sheet }).sheet)
     expect(result?.sheetHistory[0].sheet.instances).toHaveLength(2)
     expect(result?.selectedItemId).toBe('version-0')
@@ -161,13 +161,15 @@ describe('cloud account boundaries', () => {
       ? JSON.stringify(query.included[1]) === JSON.stringify(['version-639'])
       : JSON.stringify(query.included?.[1]) === JSON.stringify(['part-0-0', 'part-2-0', 'part-1-0']))).toBe(true)
     const profileQueries = mock.queries.filter(query => query.columns?.includes('material_variants->>'))
-    expect(profileQueries).toHaveLength(1)
-    expect(profileQueries[0].included?.[0]).toBe('id')
-    expect(new Set(profileQueries[0].included?.[1])).toEqual(new Set(result?.componentIndex?.map(part => part.id)))
+    expect(profileQueries).toHaveLength(0)
+    expect(mock.queries.some(query => query.columns?.includes('material_variants'))).toBe(false)
     mock.queries = []
     const historical = await loadRemoteItemComponents(result!.items[0], 'alice')
     expect(historical).toHaveLength(20)
     expect(historical.every(part => part.itemId === 'version-0')).toBe(true)
+    const openedProfileQueries = mock.queries.filter(query => query.columns?.includes('material_variants'))
+    expect(openedProfileQueries.length).toBeGreaterThan(0)
+    expect(openedProfileQueries.every(query => query.filters.some(([key, value]) => key === 'item_id' && value === 'version-0'))).toBe(true)
   })
 
   it('does not return a partially indexed project when a pinned revision query fails', async () => {

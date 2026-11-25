@@ -208,7 +208,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     for (let offset = 0; offset < ids.length; offset += 40) {
       if (await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
       rows.push(...await readLibraryPages((from, to) => client.from('cnc_components')
-        .select(indexColumns).in(column, ids.slice(offset, offset + 40)).order('id').range(from, to), 'component index', onProgress))
+        .select(indexColumns).in(column, ids.slice(offset, offset + 40)).order('id').range(from, to), 'component index', onProgress, 250))
     }
     return rows
   }
@@ -220,15 +220,8 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
   const savedSheets = [projectResult.data?.sheet, ...(workspace?.jobs.map(job => job.sheet) ?? []), ...(recoveryWorkspace(userId)?.jobs.map(job => job.sheet) ?? []), ...((historyResult.data ?? []) as SheetHistoryRow[]).map(row => row.sheet)]
   const pinnedIds = [...new Set(savedSheets.flatMap(sheet => sheet ? [...sheet.instances, ...(sheet.pendingParts ?? [])].map(instance => instance.partId) : []))].filter(id => !indexedIds.has(id))
   componentRows.push(...await readIndex('id', pinnedIds))
-  // Fetch profiles by the exact page IDs so PostgreSQL cannot decompress a
-  // whole item's bundles before sorting/limiting the summary query.
-  const profileRows = await readLibraryPages((from, to) => {
-    const ids = componentRows.slice(from, to + 1).map(row => row.id)
-    return ids.length ? client.from('cnc_components').select('id,material_profile:material_variants->>primaryProfile').in('id', ids)
-      : Promise.resolve({ data: [], error: null })
-  }, 'component profiles', onProgress)
-  if (profileRows.length !== componentRows.length) throw new Error('The component index changed while loading. Please retry.')
-  const profileById = new Map(profileRows.map(row => [row.id, materialProfiles.find(profile => profile.id === row.material_profile)]))
+  // Profiles (including primary-profile hints) are loaded with an opened item's
+  // components. List loading must never touch/decompress material_variants.
 
   const items: MarketplaceItem[] = itemRows.map((row) => ({
     id: row.id,
@@ -253,7 +246,6 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     id: row.id, ownerId: row.owner_id, itemId: row.item_id,
     sku: row.sku ?? fallbackComponentSku(row.id, itemSkuById.get(row.item_id)!), name: row.name,
     originalFilename: row.original_filename, width: row.width, height: row.height, cutSide: row.cut_side ?? 'either', stockMaterial: row.stock_material ?? undefined, defaultStockMaterial: items.find(i => i.id === row.item_id)?.defaultMaterial,
-    ...(profileById.get(row.id) ? { materialThicknessMm: profileById.get(row.id)!.thickness } : {}),
   }))
 
   const project = projectResult.error ? undefined : projectResult.data
