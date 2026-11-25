@@ -21,7 +21,7 @@ export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout:
   const qrSize = Math.min(23, layout.height - 6)
   const width = layout.width - padding * 2 - (hasBarcode ? qrSize + 1 : 0)
   if (hasBarcode) drawPartBarcode(ctx, label.instanceId, layout.width - padding - qrSize, padding, qrSize)
-  const unit = Math.min(1, (layout.height - padding * 2) / 22)
+  const unit = Math.min(1, (layout.height - (hasBarcode ? 6 : padding * 2)) / 22)
   function line(text: string, y: number, size: number, bold = false, maxWidth = width, x = padding) {
     const clean = text.replace(/\s+/g, ' ').trim()
     ctx.font = `${bold ? '700' : '400'} ${size * unit}px Arial, sans-serif`
