@@ -24,3 +24,11 @@ Scanning and queries do not change manufacturing progress, mark orders fulfilled
 In the group, `/scan` sends an **Open scanner** deep link into the bot’s private chat. Telegram keyboard Mini Apps are private-chat only. In that chat, tap **Scan part QR**; `part-scanner.html` opens Telegram’s native `showScanQrPopup` on supported iOS/Android clients (Bot API 7.7+, including scanner-close events). Telegram handles camera permission. Unsupported desktop clients can enter the readable UUID manually. The web page does not upload camera images or receive account credentials.
 
 Only recognised part UUIDs or this bot’s QR deep links are accepted. The scanned result is returned with `WebApp.sendData` as a `part_lookup` service message. The webhook rechecks the Telegram sender, private chat and UUID; no client-provided account or status is accepted. Cancelling, denying permission, unrelated codes and duplicate scanner callbacks are handled without changing manufacturing progress.
+
+### Saved sheet tab maps
+
+`/tabs` lists saved CNC exports, newest first, with date, status and a short export ID. Tap an export, then a physical sheet. The bot sends a PDF with the selected sheet overview, highlighted tab spans, part numbers and detailed X/Y position pages. `/tabs EXPORT-UUID SHEET-NUMBER` also works. The sheet number is the original physical sheet number; empty indices are not renumbered.
+
+Maps come from the immutable `cnc_machine_runs.snapshot.map`, scoped to the configured owner, not a newly regenerated workspace layout. Match the export and NC file to the physical sheet; later edits require a new export. Source/inference warnings are preserved. The PDF links to that saved export's interactive sheet view. No cutting state or NC is changed.
+
+The webhook must enable `message` and `callback_query` updates. Buttons use the same fixed workshop-group/allowed-private-user access rules as commands. Old or deleted exports and missing sheets fail explicitly rather than guessing another layout.
