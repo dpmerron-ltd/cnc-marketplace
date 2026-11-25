@@ -1,3 +1,7 @@
+import { DailyPlanDialog } from './ui/DailyPlanDialog'
+import { planDay } from './jobs/planDay'
+import { loadOpenOrders } from './orders/loadOpenOrders'
+import { matchOrderItems as matchDailyOrderItems } from './orders/addOrderToSheet'
 import { separateMaterialAdditions } from './jobs/materialAdditions'
 import { minimumSharedBorderMm, sharedBorder, sharedSpacing } from './nesting/sharedCuts'
 import { addItemToSheet } from './nesting/addItemToSheet'
@@ -501,7 +505,7 @@ function App() {
   }
   function addJob() {
     const job = newProductionJob({ ...defaultSheet, ...sheetMaterial(sheet, currentSheetIndex), name: today() })
-    setWorkspace(current => ({ activeId: job.id, jobs: [...current.jobs, job] }))
+    setWorkspace(current => ({ ...current, activeId: job.id, jobs: [...current.jobs, job] }))
     setActiveSheetIndex(0); setSelectedInstanceId(undefined); setPendingExport(undefined); setPage('sheet')
   }
   function removeJob(id: string) {
@@ -531,6 +535,8 @@ function App() {
   const exportBusyRef = useRef(false)
   const [exportError, setExportError] = useState('')
   const [labelsOpen, setLabelsOpen] = useState(false)
+  const [dailyPlanOpen, setDailyPlanOpen] = useState(false)
+  const dailyPlanBaseline = useRef<{ workspace: SheetWorkspace; owner: string; epoch: number; items: MarketplaceItem[]; programs: typeof programs } | undefined>(undefined)
   const [status, setStatus] = useState(initialState.restored ? 'Loaded saved marketplace from this browser.' : 'Ready')
   const [authReady, setAuthReady] = useState(!supabase)
   const [mfaReady, setMfaReady] = useState(!supabase)
@@ -924,6 +930,7 @@ function App() {
         setPreviewSimulation(undefined)
         setPendingExport(undefined)
         setLabelsOpen(false)
+        setDailyPlanOpen(false)
         setPage(pageFromHash())
         setStatus(session ? 'Loading your account...' : 'Signed out.')
       }
@@ -1226,6 +1233,35 @@ function App() {
     setPendingExport(undefined)
     setPage('sheet')
     setStatus(`Added ${prepared.count} components for order ${request.order.name}. Review the sheet before cutting.`)
+  }
+
+  async function prepareDailyPlan(signal: AbortSignal): Promise<SheetWorkspace> {
+    const owner = userId, before = workspaceRef.current, epoch = componentEpoch.current
+    if (!owner || accountRef.current !== owner || loadedAccountId !== owner || workspaceSaveError || !programs) throw new Error('Wait for the account and program settings to load and sync before planning.')
+    const catalogue = orderSheetInputs.current.items
+    const { shop, orders } = await loadOpenOrders(owner, signal)
+    const required = new Set(orders.flatMap(order => Object.values(matchDailyOrderItems(order, catalogue, owner))).filter(Boolean))
+    for (const id of required) { signal.throwIfAborted(); await ensureItemComponents(id) }
+    await loadJobParts(before.jobs.filter(job => !job.archived))
+    signal.throwIfAborted()
+    if (workspaceRef.current !== before || accountRef.current !== owner || componentEpoch.current !== epoch || orderSheetInputs.current.items !== catalogue) throw new Error('The account, catalogue or cutting jobs changed. Plan again.')
+    const result = await planDay({ workspace: before, parts: orderSheetInputs.current.parts, items: catalogue, baseSheet: { ...defaultSheet, ...sheet, instances: [] }, orders, shop, owner, programs }, signal)
+    signal.throwIfAborted()
+    dailyPlanBaseline.current = { workspace: before, owner, epoch, items: catalogue, programs }
+    return result
+  }
+  async function applyDailyPlan(result: SheetWorkspace) {
+    const baseline = dailyPlanBaseline.current
+    if (!baseline || accountRef.current !== baseline.owner || workspaceRef.current !== baseline.workspace || componentEpoch.current !== baseline.epoch || orderSheetInputs.current.items !== baseline.items || programs !== baseline.programs || workspaceSaveError) throw new Error('The account, catalogue, settings or jobs changed. Close this preview and plan again.')
+    setWorkspace(result)
+    if (!await saveCurrentProject()) {
+      if (accountRef.current === baseline.owner) setWorkspace(baseline.workspace)
+      throw new Error('The day plan could not be saved. Check sync and try again.')
+    }
+    if (accountRef.current !== baseline.owner) return
+    window.location.hash = '#machine'
+    setPage('machine')
+    setStatus('Daily cutting plan saved. Review and export the scheduled sheets before cutting.')
   }
 
   async function loadJobParts(jobs: ProductionJob[]) {
@@ -1776,7 +1812,7 @@ function App() {
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
       {allocation && <MaterialAllocationDialog name={allocation.name} parts={allocation.parts} sheet={allocation.sheet} additions={allocation.additions} startIndex={allocation.startIndex} onApply={allocation.apply} onCancel={allocation.cancel} />}
-      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage key={userId} userId={userId!} cuttingJobs={loadedAccountId === userId ? workspace.jobs : undefined} onOpenSheet={openJob} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
+      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} onPlanDay={() => setDailyPlanOpen(true)} workspace={workspace} programs={programs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage onPlanDay={() => setDailyPlanOpen(true)} key={userId} userId={userId!} cuttingJobs={loadedAccountId === userId ? workspace.jobs : undefined} onOpenSheet={openJob} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -1872,6 +1908,7 @@ function App() {
         </div>
       )}
 
+      {dailyPlanOpen && <DailyPlanDialog key={userId} onPrepare={prepareDailyPlan} onApply={applyDailyPlan} onClose={() => setDailyPlanOpen(false)} />}
       {labelsOpen && <PartLabelsDialog key={userId} parts={parts} items={items} sheet={sheet} sheetIndex={currentSheetIndex} onClose={() => setLabelsOpen(false)} />}
 
       {pendingExport && (

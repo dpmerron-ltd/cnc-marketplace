@@ -13,10 +13,10 @@ const listParams = z.strictObject({ after: cursor, status: z.enum(['all', 'open'
 const detailParams = z.strictObject({ after: cursor })
 const pageInfo = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }).refine(p => !p.hasNextPage || Boolean(p.endCursor))
 const lineItem = z.object({ id: z.string(), title: z.string(), variantTitle: z.string().nullable(), sku: z.string().nullable(), quantity: z.number().int().nonnegative(), currentQuantity: z.number().int().nonnegative(), unfulfilledQuantity: z.number().int().nonnegative() })
-const order = z.object({ id: z.string().regex(/^gid:\/\/shopify\/Order\/\d+$/), name: z.string(), lineItems: z.object({ nodes: z.array(lineItem), pageInfo }) })
+const order = z.object({ id: z.string().regex(/^gid:\/\/shopify\/Order\/\d+$/), name: z.string(), createdAt: z.string().optional(), cancelledAt: z.string().nullable().optional(), closedAt: z.string().nullable().optional(), lineItems: z.object({ nodes: z.array(lineItem), pageInfo }) })
 const itemFields = 'nodes { id title variantTitle sku quantity currentQuantity unfulfilledQuantity } pageInfo { hasNextPage endCursor }'
-const listQuery = `query CncOrders($after: String, $query: String!) { orders(first: 25, after: $after, sortKey: CREATED_AT, reverse: true, query: $query) { nodes { id name lineItems(first: 5) { ${itemFields} } } pageInfo { hasNextPage endCursor } } }`
-const detailQuery = `query CncOrder($id: ID!, $after: String) { order(id: $id) { id name lineItems(first: 100, after: $after) { ${itemFields} } } }`
+const listQuery = `query CncOrders($after: String, $query: String!) { orders(first: 25, after: $after, sortKey: CREATED_AT, reverse: true, query: $query) { nodes { id name createdAt cancelledAt closedAt lineItems(first: 5) { ${itemFields} } } pageInfo { hasNextPage endCursor } } }`
+const detailQuery = `query CncOrder($id: ID!, $after: String) { order(id: $id) { id name createdAt cancelledAt closedAt lineItems(first: 100, after: $after) { ${itemFields} } } }`
 const filters = { all: '', open: 'status:open', unfulfilled: 'status:open (fulfillment_status:unfulfilled OR fulfillment_status:partial)', fulfilled: 'fulfillment_status:fulfilled', cancelled: 'status:cancelled' }
 
 export interface ShopifyReader {
@@ -91,7 +91,7 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
       const c = get(owner)
       if (!ids.length || ids.length > 25 || ids.some(id => !/^\d{1,30}$/.test(id))) throw new JobError('Invalid assigned order IDs.', 400)
       const gids = ids.map(id => `gid://shopify/Order/${id}`)
-      const query = `query CncAssignedOrders($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id name lineItems(first: 5) { ${itemFields} } } } }`
+      const query = `query CncAssignedOrders($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id name createdAt cancelledAt closedAt lineItems(first: 5) { ${itemFields} } } } }`
       const result = z.object({ nodes: z.array(order.nullable()) }).safeParse(await graphql(c, query, { ids: gids }))
       if (!result.success || result.data.nodes.some(o => o && !gids.includes(o.id))) throw new JobError('Shopify returned unexpected assigned orders.', 502)
       return result.data.nodes.flatMap(o => o ? [o] : [])

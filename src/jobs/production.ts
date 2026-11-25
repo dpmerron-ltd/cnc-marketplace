@@ -19,7 +19,7 @@ export interface ProductionJob {
   sheet: Sheet
   sheets: Record<number, ProductionSheet>
 }
-export interface SheetWorkspace { updatedAt?: string; activeId: string; jobs: ProductionJob[] }
+export interface SheetWorkspace { dailyPlan?: import('./dailyPlan').DailyPlan; updatedAt?: string; activeId: string; jobs: ProductionJob[] }
 export function today(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }

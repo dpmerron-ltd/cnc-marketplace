@@ -12,7 +12,7 @@ import './OrdersPage.css'
 
 const orderId = (order: ShopifyOrder) => order.id.split('/').at(-1)!
 
-export function OrdersPage({ userId, sheetTarget, cuttingJobs, onOpenSheet }: { userId: string; sheetTarget?: OrderSheetProps; cuttingJobs?: ProductionJob[]; onOpenSheet?: (jobId: string, index?: number) => void }) {
+export function OrdersPage({ userId, sheetTarget, cuttingJobs, onOpenSheet, onPlanDay }: { onPlanDay?: () => void; userId: string; sheetTarget?: OrderSheetProps; cuttingJobs?: ProductionJob[]; onOpenSheet?: (jobId: string, index?: number) => void }) {
   const [cuttingOrder, setCuttingOrder] = useState<CuttingOrder>()
   const [addingOrder, setAddingOrder] = useState('')
   const [printingOrder, setPrintingOrder] = useState('')
@@ -78,6 +78,7 @@ export function OrdersPage({ userId, sheetTarget, cuttingJobs, onOpenSheet }: { 
   function refresh() { closeDetail(); setCursors([]); setRevision(v => v + 1) }
   return <main className="queue-page orders-page">
     <div className="queue-heading"><div><h2>{connection?.isOrderAdmin ? 'Orders' : 'My orders'}</h2>{connection?.shop && <p className="orders-store">{connection.shop}</p>}</div><button type="button" className="icon-button" title="Refresh orders" aria-label="Refresh orders" disabled={loading} onClick={refresh}><RefreshCw size={18} /></button></div>
+    {connection?.isOrderAdmin && onPlanDay && <button type="button" disabled={loading} onClick={onPlanDay}>Plan today’s cuts</button>}
     {error && <p className="queue-error" role="alert">{error}</p>}
     {connection && !connection.connected && !loading && !error ? <p>No Shopify store connected to this account.</p> : <>
       <form className="orders-filters" onSubmit={e => { e.preventDefault(); closeDetail(); setCursors([]); setSearch(draft.trim()); setRevision(v => v + 1) }}>

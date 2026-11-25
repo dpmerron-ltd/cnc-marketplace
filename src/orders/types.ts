@@ -11,6 +11,9 @@ export interface OrderAssignment {
 }
 export interface OrderPageInfo { hasNextPage: boolean; endCursor: string | null }
 export interface ShopifyOrder {
+  createdAt?: string
+  cancelledAt?: string | null
+  closedAt?: string | null
   id: string
   name: string
   assignment?: OrderAssignment | null
