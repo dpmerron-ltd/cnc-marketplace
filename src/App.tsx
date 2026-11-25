@@ -620,6 +620,21 @@ function App() {
     return task
   }, [userId])
 
+  const loadingImages = useRef(new Map<string, Promise<void>>())
+  const ensureItemImage = useCallback((itemId: string): Promise<void> => {
+    if (!userId || accountRef.current !== userId) return Promise.reject(new Error('Your account changed. Please reload.'))
+    const key = `${userId}:${componentEpoch.current}:${itemId}`
+    const pending = loadingImages.current.get(key)
+    if (pending) return pending
+    const epoch = componentEpoch.current
+    const task = loadRemoteItemImage(itemId, userId).then(image => {
+      if (accountRef.current !== userId || componentEpoch.current !== epoch) return
+      setItems(current => current.map(item => item.id === itemId && item.imageDeferred ? { ...item, image, imageDeferred: false } : item))
+    }).finally(() => { loadingImages.current.delete(key) })
+    loadingImages.current.set(key, task)
+    return task
+  }, [userId])
+
   const catalogueComponents = useMemo(() => [...new Map<ComponentSummary['id'], ComponentSummary>([...componentIndex, ...parts.map(summarizePart)].map(part => [part.id, part])).values()], [componentIndex, parts])
   const sheetReady = sheet.instances.every(instance => parts.some(part => part.id === instance.partId))
   const requiredSheetItems = JSON.stringify([...new Set([
@@ -1784,6 +1799,7 @@ function App() {
           componentIndex={catalogueComponents}
           componentLoads={componentLoads}
           onLoadComponents={ensureItemComponents}
+          onLoadImage={ensureItemImage}
           currentUserId={userId}
           onCreateItem={createMarketplaceItem}
           onSelectItem={setSelectedItemId}

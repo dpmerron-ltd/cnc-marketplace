@@ -452,11 +452,12 @@ describe('account switching', () => {
     remote.items[1] = { ...remote.items[1], imageDeferred: true, version: { familyId: 'old-family', number: 1, status: 'published', isDefault: false } }
     mock.load.mockResolvedValue(remote)
     mock.loadItem.mockImplementation(async item => components.filter(part => part.itemId === item.id))
-    mock.loadImage.mockResolvedValue(testImage).mockRejectedValueOnce(new Error('Historical image unavailable'))
+    mock.loadImage.mockRejectedValue(new Error('Historical image unavailable'))
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: 'Export Project' }))
     await screen.findByText('Project export failed: Historical image unavailable')
     expect(mock.download).not.toHaveBeenCalled()
+    mock.loadImage.mockResolvedValue(testImage)
     fireEvent.click(screen.getByRole('button', { name: 'Export Project' }))
     await waitFor(() => expect(mock.download).toHaveBeenCalledOnce())
     expect(mock.loadImage).toHaveBeenLastCalledWith('alice-second', 'alice')

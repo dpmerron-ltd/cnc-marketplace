@@ -153,7 +153,21 @@ async function readLibraryPages<T>(fetchPage: (from: number, to: number) => Prom
   }
 }
 
+// Keep image downloads from saturating the connection while browsing the grid.
+let activeImageLoads = 0
+const imageWaiters: Array<() => void> = []
 export async function loadRemoteItemImage(itemId: string, expectedUserId: string): Promise<ItemImage | undefined> {
+  if (activeImageLoads >= 3) await new Promise<void>(resolve => imageWaiters.push(resolve))
+  else activeImageLoads++
+  try { return await fetchRemoteItemImage(itemId, expectedUserId) }
+  finally {
+    const next = imageWaiters.shift()
+    if (next) next()
+    else activeImageLoads--
+  }
+}
+
+async function fetchRemoteItemImage(itemId: string, expectedUserId: string): Promise<ItemImage | undefined> {
   if (!supabase || await getUserId() !== expectedUserId) throw new Error('Your account changed. Please reload.')
   const { data, error } = await supabase.from('marketplace_items').select('image').eq('id', itemId).single()
   if (error) throw new Error(`Could not load item image: ${error.message}`)
@@ -199,15 +213,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     return rows
   }
   const currentItemIds = itemRows.filter(row => !row.version_family_id || row.version_default || row.version_status === 'draft').map(row => row.id)
-  // Images are large JSON values. Fetch only current versions, five at a time,
-  // without competing image queries; historical images load when opened.
-  const imageRows = []
-  for (let offset = 0; offset < currentItemIds.length; offset += 40) {
-    imageRows.push(...await readLibraryPages((from, to) => client.from('marketplace_items').select('id,image')
-      .in('id', currentItemIds.slice(offset, offset + 40)).order('id').range(from, to), 'item images', onProgress, 5, 1))
-  }
-  if (imageRows.length !== currentItemIds.length) throw new Error('The item catalogue changed while loading. Please retry.')
-  const imageById = new Map(imageRows.map(row => [row.id, row.image]))
+  // Image bytes are deferred until cards enter the viewport or an item opens.
   const componentRows = await readIndex('item_id', currentItemIds)
   const indexedIds = new Set(componentRows.map(row => row.id))
   // Saved sheets deliberately retain the exact revisions they were built with.
@@ -235,8 +241,7 @@ export async function loadRemoteProject(expectedUserId: string, onProgress?: (me
     updatedAt: row.updated_at,
     packing: row.packing ?? undefined,
     defaultMaterial: row.default_material ?? undefined,
-    image: itemImageSchema.safeParse(imageById.get(row.id)).success ? imageById.get(row.id) : undefined,
-    ...(!imageById.has(row.id) ? { imageDeferred: true } : {}),
+    imageDeferred: true,
     ...(row.version_family_id ? { version: { familyId: row.version_family_id, number: row.version_number, status: row.version_status, isDefault: row.version_default, publishedAt: row.published_at ?? undefined } } : {}),
   }))
 

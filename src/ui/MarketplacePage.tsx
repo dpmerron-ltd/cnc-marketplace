@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, FileUp, Package, Plus, RefreshCw, Search, Trash2
 import type { MarketplaceItem } from '../models/Item'
 import { catalogueItems, editableItem, itemFamily, versionLabel } from '../models/itemVersions'
 import { itemImageUrl, type ItemImage } from '../models/ItemImage'
-import { HistoricalItemImage } from './HistoricalItemImage'
+import { DeferredItemImage } from './DeferredItemImage'
 import { ItemImageEditor } from './ItemImageEditor'
 import { ItemDocuments } from './ItemDocuments'
 import type { ComponentSummary, Part } from '../models/Part'
@@ -24,6 +24,7 @@ interface MarketplacePageProps {
   componentIndex?: ComponentSummary[]
   componentLoads?: Record<string, { state: 'idle' | 'loading' | 'loaded' | 'error'; error?: string }>
   onLoadComponents?: (itemId: string) => Promise<unknown>
+  onLoadImage?: (itemId: string) => Promise<void>
   currentUserId?: string
   onCreateItem: () => string
   onSelectItem: (itemId: string) => void
@@ -43,7 +44,7 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onSaveMaterials, onSaveCutSide, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
+export function MarketplacePage({ items, parts, componentIndex, componentLoads, onLoadComponents, onLoadImage, currentUserId, onCreateItem, onSelectItem, onUpdateItem, onSaveImage, onImportComponents, onDeleteComponent, onSaveMaterials, onSaveCutSide, onAddToSheet, onAddItemToSheet, onOpenSheet }: MarketplacePageProps) {
   const [detailId, setDetailId] = useState<string>()
   const [followDefault, setFollowDefault] = useState(true)
   const [query, setQuery] = useState('')
@@ -133,7 +134,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         <div className="items-dates"><span>Created {dateLabel(selectedItem.createdAt)}</span><span>Updated {dateLabel(selectedItem.updatedAt)}</span></div>
       </section>
       {componentsReady && onSaveMaterials && <MaterialEditor key={selectedItem.id} item={selectedItem} parts={selectedParts} readOnly={!editable} onSave={(stock, overrides) => onSaveMaterials(selectedItem, stock, overrides)} />}
-      {editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.imageDeferred && currentUserId ? <HistoricalItemImage key={`${currentUserId}:${selectedItem.id}`} itemId={selectedItem.id} userId={currentUserId} name={selectedItem.name} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
+      {selectedItem.imageDeferred && onLoadImage ? <DeferredItemImage key={`${currentUserId}:${selectedItem.id}`} itemId={selectedItem.id} onLoad={onLoadImage} eager /> : editable ? <ItemImageEditor key={`${currentUserId}:${itemFamily(selectedItem)}`} image={selectedItem.image} name={selectedItem.name} onSave={image => onSaveImage(selectedItem.id, image)} /> : selectedItem.image && <img className="items-version-image" src={itemImageUrl(selectedItem.image)} alt={selectedItem.name} />}
       {currentUserId && <ItemDocuments key={`documents:${currentUserId}:${itemFamily(selectedItem)}`} userId={currentUserId} item={selectedItem} readOnly={!editable} />}
       {componentsReady && selectedParts.length > 0 && <PackingPanel readOnly={!editable} pieces={packingPieces(selectedParts, selectedItem.packing)} settings={selectedItem.packing} estimate={estimates[selectedItem.id]?.result} error={stock.error || estimates[selectedItem.id]?.error} onChange={packing => onUpdateItem(selectedItem.id, { packing })} />}
       <div className="items-component-bar"><h3>Components <span>{selectedCount}</span></h3><label className="items-search"><Search size={17} /><input aria-label="Search components" placeholder="Search components" value={componentQuery} onChange={event => setComponentQuery(event.target.value)} /></label></div>
@@ -171,7 +172,7 @@ export function MarketplacePage({ items, parts, componentIndex, componentLoads, 
         {visibleItems.map(item => {
           const components = partsByItem.get(item.id) ?? []
           return <button type="button" className="items-grid-card" key={item.id} aria-label={`Open ${item.name || 'Untitled item'}`} onClick={() => openItem(item.id)}>
-            {item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
+            {item.imageDeferred && onLoadImage ? <DeferredItemImage itemId={item.id} onLoad={onLoadImage} /> : item.image ? <div className="items-preview item-photo"><img loading="lazy" src={itemImageUrl(item.image)} alt={item.name || 'Item'} /></div> : <ItemPreview parts={parts.filter(part => part.itemId === item.id)} label={`${item.name} components`} emptyLabel={components.length ? 'Component preview' : 'No components'} />}
             <div className="items-card-body"><div className="items-card-title"><h3>{item.name || 'Untitled item'}</h3><ArrowRight size={17} /></div><span className="items-sku">{item.sku}</span><p className="items-description">{item.description || 'No description'}</p>{estimates[item.id] && <span className="items-box-estimate">{estimates[item.id]?.result?.boxes[0] ? `${estimates[item.id].result!.boxes.length} box${estimates[item.id].result!.boxes.length === 1 ? '' : 'es'}: ${estimates[item.id].result!.boxes.map(box => boxSize(box.internal)).join(' + ')}` : estimates[item.id]?.error || 'Box estimate: review dimensions'}</span>}</div>
             <div className="items-card-footer"><span className={`items-count ${components.length ? '' : 'is-empty'}`}><Package size={14} />{components.length} component{components.length === 1 ? '' : 's'}</span><small>{item.version ? versionLabel(item) : `Updated ${dateLabel(item.updatedAt)}`}</small></div>
           </button>

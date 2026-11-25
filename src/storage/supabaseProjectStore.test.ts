@@ -225,7 +225,7 @@ describe('cloud account boundaries', () => {
     expect(mock.queries.filter(query => query.table === 'cnc_components')).toHaveLength(1)
   })
 
-  it('defers historical images while keeping metadata, and fetches an image with account checks', async () => {
+  it('defers all images while keeping metadata, and fetches an image with account checks', async () => {
     mock.rows = [
       { id: 'old', owner_id: 'alice', name: 'Old', sku: 'OLD', image: testImage, version_family_id: 'family', version_default: false, version_status: 'published' },
       { id: 'current', owner_id: 'alice', name: 'Current', sku: 'NEW', image: testImage, version_family_id: 'family', version_default: true, version_status: 'published' },
@@ -233,24 +233,25 @@ describe('cloud account boundaries', () => {
     const loaded = await loadRemoteProject('alice')
     expect(loaded?.items[0]).toMatchObject({ id: 'old', imageDeferred: true })
     expect(loaded?.items[0].image).toBeUndefined()
-    expect(loaded?.items[1].image).toEqual(testImage)
+    expect(loaded?.items[1]).toMatchObject({ imageDeferred: true })
+    expect(loaded?.items[1].image).toBeUndefined()
     const metadataQueries = mock.queries.filter(query => query.table === 'marketplace_items' && !query.included)
     expect(metadataQueries.every(query => !query.columns?.split(',').some(column => column === '*' || column === 'image'))).toBe(true)
-    expect(mock.queries.filter(query => query.columns === 'id,image').every(query => query.included?.[1].join() === 'current')).toBe(true)
+    expect(mock.queries.some(query => query.columns?.split(',').includes('image'))).toBe(false)
     expect(await loadRemoteItemImage('old', 'alice')).toEqual(testImage)
     mock.userId = 'bob'
     await expect(loadRemoteItemImage('old', 'alice')).rejects.toThrow('account changed')
   })
 
-  it('bounds image batches and rejects a failed later batch without returning a partial catalogue', async () => {
+  it('loads the catalogue without waiting for image batches or image failures', async () => {
     mock.rows = Array.from({ length: 11 }, (_, index) => ({ id: `item-${index}`, owner_id: 'alice', name: 'Item', sku: `I${index}`, image: testImage }))
     mock.failImageOffset = 5
-    await expect(loadRemoteProject('alice')).rejects.toThrow('Could not load item images: canceling statement due to statement timeout')
-    expect(mock.queries.filter(query => query.columns === 'id,image').map(query => query.range)).toEqual([[0, 4], [5, 9]])
-    mock.failImageOffset = undefined
     const loaded = await loadRemoteProject('alice')
     expect(loaded?.items).toHaveLength(11)
-    expect(loaded?.items.every(item => item.image === testImage && !item.imageDeferred)).toBe(true)
+    expect(loaded?.items.every(item => !item.image && item.imageDeferred)).toBe(true)
+    expect(mock.queries.filter(query => query.columns === 'id,image')).toEqual([])
+    mock.error = { message: 'Image temporarily unavailable' }
+    await expect(loadRemoteItemImage('item-0', 'alice')).rejects.toThrow('Image temporarily unavailable')
   })
 
   it('loads validated shared images and rejects stale sessions and failed saves', async () => {
@@ -258,7 +259,9 @@ describe('cloud account boundaries', () => {
     mock.rows = [row, { ...row, id: 'foreign', owner_id: 'bob' }, { ...row, id: 'invalid', image: { contentType: 'image/svg+xml', dataBase64: 'abcd' } }]
     const result = await loadRemoteProject('alice')
     expect(result?.items.map(item => item.id)).toEqual(['item', 'foreign', 'invalid'])
-    expect(result?.items[0].image).toEqual(testImage)
+    expect(result?.items[0].imageDeferred).toBe(true)
+    expect(await loadRemoteItemImage('item', 'alice')).toEqual(testImage)
+    expect(await loadRemoteItemImage('invalid', 'alice')).toBeUndefined()
     expect(result?.items[2].image).toBeUndefined()
     mock.queries = []
     const item = result!.items[0]
