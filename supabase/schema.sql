@@ -614,3 +614,28 @@ begin
 end $$;
 revoke all on function public.save_cnc_workspace(uuid,jsonb,jsonb,uuid,integer) from public, anon;
 grant execute on function public.save_cnc_workspace(uuid,jsonb,jsonb,uuid,integer) to authenticated;
+
+-- Explicitly configured machine-program sharing; private account settings remain private.
+create table if not exists public.cnc_export_machines (
+  machine_key text primary key check (machine_key in ('andy', 'dan')),
+  owner_id uuid not null unique references auth.users(id) on delete cascade
+);
+alter table public.cnc_export_machines enable row level security;
+revoke all on public.cnc_export_machines from anon, authenticated;
+grant all on public.cnc_export_machines to service_role;
+create or replace function public.load_cnc_export_profiles()
+returns table(machine_key text, is_current boolean, start_gcode text, spindle_start_gcode text, end_gcode text)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if auth.uid() is null or coalesce(auth.jwt()->>'aal', '') <> 'aal2' then
+    raise exception 'Verified sign-in required';
+  end if;
+  if not exists(select 1 from public.cnc_export_machines m where m.owner_id = auth.uid()) then return; end if;
+  if (select count(*) from public.cnc_export_machines m join public.user_program_settings s on s.owner_id=m.owner_id) <> 2 then
+    raise exception 'Both Andy and Dan machine programs must be configured before exporting sheets';
+  end if;
+  return query select m.machine_key, m.owner_id=auth.uid(), s.start_gcode, s.spindle_start_gcode, s.end_gcode
+    from public.cnc_export_machines m join public.user_program_settings s on s.owner_id=m.owner_id order by m.machine_key;
+end $$;
+revoke all on function public.load_cnc_export_profiles() from public, anon;
+grant execute on function public.load_cnc_export_profiles() to authenticated;

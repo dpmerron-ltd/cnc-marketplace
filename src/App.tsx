@@ -1,3 +1,5 @@
+import { loadExportProfiles, type ExportProfile } from './storage/exportProfilesStore'
+import { machineArchive, downloadMachineArchive } from './machine/machineArchive'
 import type { ReportPlanningProgress } from './jobs/planningProgress'
 import { DailyPlanDialog } from './ui/DailyPlanDialog'
 import { planDay } from './jobs/planDay'
@@ -362,6 +364,7 @@ interface PendingExport {
   revision: number
   mode: 'combined' | 'sheets'
   files: PendingExportFile[]
+  machineVariants?: Array<Omit<ExportProfile, 'isCurrent'> & { files: PendingExportFile[] }>
   summary: ExportSummary
   tabMap: { parts: Part[]; sheet: Sheet }
 }
@@ -1598,6 +1601,9 @@ function App() {
     if (!waitingSheetIndices(job).length) { setStatus('There are no waiting sheets to export.'); return }
     exportBusyRef.current = true; setExportBusy(true)
     try {
+      const profiles = mode === 'sheets' ? await loadExportProfiles(owner) : []
+      const activePrograms = profiles.find(profile => profile.isCurrent)?.programs ?? programs
+      if (!activePrograms) throw new Error('Save your machine programs before exporting.')
       const name = await reserveExportName(job.id, owner)
       if (accountRef.current !== owner || workspaceRef.current.activeId !== job.id || workspaceRef.current.jobs.find(value => value.id === job.id)?.sheet !== initialSheet) return
       const namedJob = { ...job, name, sheet: { ...job.sheet, name } }
@@ -1605,18 +1611,24 @@ function App() {
       const revision = job.revision + 1
       const base = revision === 1 ? name : `${name}-r${revision}`
       const exportSheet = { ...waitingExportSheet(namedJob), name: base }
-      const results = mode === 'combined' ? [{ ...exportCombinedGCode(parts, exportSheet, programs), sheetIndex: undefined }] : exportPhysicalSheetGCodes(parts, exportSheet, programs)
-      const exportErrors = results.flatMap(result => result.errors)
-      if (exportErrors.length) throw new Error(exportErrors[0])
-      const files = results.map(result => ({
-        filename: sheetGCodeFilename(result.sheetIndex === undefined ? base : `${base}-sheet-${result.sheetIndex + 1}`, parts, exportSheet, result.sheetIndex),
-        sheetIndices: result.sheetIndex === undefined ? sheetIndices(exportSheet) : [result.sheetIndex],
-        gcode: result.gcode, simulation: safeSimulateGCode(result.gcode),
-      }))
-      if (files.some(file => file.simulation.errors.length)) throw new Error('The generated program failed simulation.')
-      setPendingExport({ id: crypto.randomUUID(), jobId: job.id, revision, mode, files,
-        summary: { ...exportSummary(results.flatMap(result => result.warnings), files.map(file => file.simulation), exportSheet), sheetName: base, physicalSheets: sheetIndices(exportSheet).length, placedParts: exportSheet.instances.length },
-        tabMap: { parts, sheet: { ...exportSheet, gcodeSettings: { ...exportSheet.gcodeSettings, ...programs } } },
+      const generate = (programs: ProgramSettings) => {
+        const results = mode === 'combined' ? [{ ...exportCombinedGCode(parts, exportSheet, programs), sheetIndex: undefined }] : exportPhysicalSheetGCodes(parts, exportSheet, programs)
+        const exportErrors = results.flatMap(result => result.errors)
+        if (exportErrors.length) throw new Error(exportErrors[0])
+        const files = results.map(result => ({
+          filename: sheetGCodeFilename(result.sheetIndex === undefined ? base : `${base}-sheet-${result.sheetIndex + 1}`, parts, exportSheet, result.sheetIndex),
+          sheetIndices: result.sheetIndex === undefined ? sheetIndices(exportSheet) : [result.sheetIndex],
+          gcode: result.gcode, simulation: safeSimulateGCode(result.gcode),
+        }))
+        if (files.some(file => file.simulation.errors.length)) throw new Error('The generated program failed simulation.')
+        return { results, files }
+      }
+      const generated = profiles.map(profile => ({ ...profile, ...generate(profile.programs) }))
+      const { results, files } = generated.find(profile => profile.isCurrent) ?? generate(activePrograms)
+      const machineVariants = generated.length ? generated.map(({ key, label, programs, files }) => ({ key, label, programs, files })) : undefined
+      setPendingExport({ id: crypto.randomUUID(), jobId: job.id, revision, mode, files, machineVariants,
+        summary: { ...exportSummary(generated.length ? generated.flatMap(profile => profile.results.flatMap(result => result.warnings.map(warning => `${profile.label}: ${warning}`))) : results.flatMap(result => result.warnings), files.map(file => file.simulation), exportSheet), sheetName: base, physicalSheets: sheetIndices(exportSheet).length, placedParts: exportSheet.instances.length },
+        tabMap: { parts, sheet: { ...exportSheet, gcodeSettings: { ...exportSheet.gcodeSettings, ...activePrograms } } },
       })
       setExportError('')
     } catch (error) { if (accountRef.current === owner) setStatus(`Export blocked: ${errorMessage(error)}`) }
@@ -1631,6 +1643,7 @@ function App() {
     setExportBusy(true); setExportError('')
     try {
       const snapshot = await buildExportSnapshot({ ...exportToConfirm, ...exportToConfirm.tabMap, items })
+      const archive = snapshot.machineVariants ? await machineArchive(snapshot) : undefined
       if (accountRef.current !== ownerId) return
       await saveMachineRun(exportToConfirm.id, ownerId, snapshot)
       if (accountRef.current !== ownerId) return
@@ -1643,9 +1656,10 @@ function App() {
       const saved = await saveCurrentProject()
       if (!saved) { setWorkspace(beforeSavingPlan); throw new Error('The cutting plan could not be saved. Retry before downloading files') }
       if (accountRef.current !== ownerId) return
-      exportToConfirm.files.forEach(file => downloadText(file.filename, file.gcode, 'application/x-gcode'))
+      if (archive) downloadMachineArchive(archive, exportToConfirm.summary.sheetName)
+      else exportToConfirm.files.forEach(file => downloadText(file.filename, file.gcode, 'application/x-gcode'))
       setPendingExport(undefined)
-      if (accountRef.current === ownerId) setStatus(`Exported ${exportToConfirm.files.length} NC file(s) and saved to Cutting Jobs, waiting to cut.${saved ? '' : ' The editable sheet history could not be saved.'}`)
+      if (accountRef.current === ownerId) setStatus(`Exported ${archive ? 'Andy and Dan folders in one ZIP' : `${exportToConfirm.files.length} NC file(s)`} and saved to Cutting Jobs, waiting to cut.${saved ? '' : ' The editable sheet history could not be saved.'}`)
     } catch (error) {
       if (accountRef.current === ownerId) setExportError(`Export could not finish: ${errorMessage(error)}. Retry to save the same export; no new cutting programs will be generated.`)
     } finally { exportBusyRef.current = false; setExportBusy(false) }
@@ -1958,7 +1972,7 @@ function App() {
               </div>
               <div>
                 <span>Files</span>
-                <strong>{pendingExport.files.length}</strong>
+                <strong>{pendingExport.machineVariants?.reduce((sum, profile) => sum + profile.files.length, 0) ?? pendingExport.files.length}</strong>
               </div>
               <div>
                 <span>Physical sheets</span>
@@ -2026,8 +2040,9 @@ function App() {
               <h3>Material face for each sheet</h3>
               <ul>{Array.from({ length: pendingExport.summary.physicalSheets }, (_, index) => <li key={index}>Sheet {index + 1}: {cutSideLabel(sheetCutSide(pendingExport.tabMap.parts, pendingExport.tabMap.sheet, index))}</li>)}</ul>
               <h3>Files to export</h3>
+              {pendingExport.machineVariants && <p>One ZIP with Andy/ and Dan/ folders. These are alternative programs for the same sheets; cut each sheet once. Time estimates use your machine profile.</p>}
               <ul>
-                {pendingExport.files.map((file) => (
+                {(pendingExport.machineVariants?.flatMap(profile => profile.files.map(file => ({ ...file, filename: `${profile.label}/${file.filename}` }))) ?? pendingExport.files).map((file) => (
                   <li key={file.filename}>{file.filename}</li>
                 ))}
               </ul>

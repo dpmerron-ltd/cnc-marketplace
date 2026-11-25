@@ -1,10 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { unzipSync, strFromU8 } from 'fflate'
 import { testItem, testParts } from './test/jobFixtures'
 import { defaultProgramSettings } from './gcode/programSettings'
 
-const mock = vi.hoisted(() => ({ saveRun: vi.fn(), download: vi.fn(), load: vi.fn(), loadRun: vi.fn(), recuts: vi.fn(), completeRecuts: vi.fn() }))
+const mock = vi.hoisted(() => ({ profiles: vi.fn(), archive: vi.fn(), saveRun: vi.fn(), download: vi.fn(), load: vi.fn(), loadRun: vi.fn(), recuts: vi.fn(), completeRecuts: vi.fn() }))
+vi.mock('./storage/exportProfilesStore', () => ({ loadExportProfiles: (...args: unknown[]) => mock.profiles(...args) }))
+vi.mock('./machine/machineArchive', async original => ({ ...await original<typeof import('./machine/machineArchive')>(), downloadMachineArchive: (...args: unknown[]) => mock.archive(...args) }))
 vi.mock('./storage/exportNamesStore', () => ({ reserveExportName: vi.fn(async () => '2026-10-29-001') }))
 vi.mock('./storage/machineRecutsStore', () => ({ listMachineRecuts: (...args: unknown[]) => mock.recuts(...args), listRunRecuts: async () => [], queueMachineRecut: vi.fn(), changeMachineRecutStatus: vi.fn(), completeSheetRecuts: (...args: unknown[]) => mock.completeRecuts(...args) }))
 vi.mock('./storage/useBoxStock', () => ({ useBoxStock: () => ({ boxes: [], loading: false, reload: vi.fn() }) }))
@@ -20,6 +23,7 @@ vi.mock('./storage/projectStorage', async original => ({ ...await original<typeo
 
 describe('export saves a machine snapshot before downloading', () => {
   beforeEach(() => {
+    mock.profiles.mockReset().mockResolvedValue([]); mock.archive.mockReset()
     localStorage.clear(); window.history.replaceState({}, '', '/')
     mock.recuts.mockReset().mockResolvedValue([]); mock.completeRecuts.mockReset().mockResolvedValue(undefined)
     mock.saveRun.mockReset().mockResolvedValue(undefined); mock.download.mockReset()
@@ -29,6 +33,47 @@ describe('export saves a machine snapshot before downloading', () => {
     } })
   })
   afterEach(cleanup)
+  it('saves both independent profiles once and downloads both folders only after a successful retry', async () => {
+    const remote = await mock.load()
+    remote.sheet.instances.push({ ...remote.sheet.instances[0], id: 'second', sheetIndex: 1 })
+    mock.load.mockResolvedValue(remote)
+    mock.profiles.mockResolvedValue([
+      { key: 'andy', label: 'Andy', isCurrent: false, programs: { ...defaultProgramSettings, spindleStartGcode: 'S16000 M03' } },
+      { key: 'dan', label: 'Dan', isCurrent: true, programs: defaultProgramSettings },
+    ])
+    mock.saveRun.mockRejectedValueOnce(new Error('Offline'))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+    expect(mock.profiles).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Sheets' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export G-code' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Offline')
+    expect(mock.archive).not.toHaveBeenCalled()
+    const first = mock.saveRun.mock.calls[0]
+    expect(first[2].files).toHaveLength(2)
+    expect(first[2].machineVariants).toHaveLength(2)
+    expect(first[2].map.sheetCount).toBe(2)
+    fireEvent.click(await screen.findByRole('button', { name: 'Export G-code' }))
+    await waitFor(() => expect(mock.archive).toHaveBeenCalledTimes(1))
+    expect(mock.profiles).toHaveBeenCalledTimes(1)
+    expect(mock.saveRun.mock.calls[1]).toEqual(first)
+    expect(mock.download).not.toHaveBeenCalled()
+    const entries = unzipSync(mock.archive.mock.calls[0][0])
+    expect(Object.keys(entries).filter(path => path.startsWith('Andy/'))).toHaveLength(2)
+    expect(Object.keys(entries).filter(path => path.startsWith('Dan/'))).toHaveLength(2)
+    for (const [path, data] of Object.entries(entries)) {
+      if (path.startsWith('Andy/')) expect(strFromU8(data)).toContain('S16000 M03')
+      if (path.startsWith('Dan/')) expect(strFromU8(data)).toContain('S18000 M03')
+    }
+  })
+  it('blocks sheet export when paired profiles cannot be loaded', async () => {
+    mock.profiles.mockRejectedValue(new Error('Both machine profiles are required'))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export Sheets' }))
+    expect(await screen.findByText(/Export blocked: Both machine profiles/)).toBeInTheDocument()
+    expect(mock.saveRun).not.toHaveBeenCalled(); expect(mock.archive).not.toHaveBeenCalled()
+  })
   it('keeps V1 as the default and offers V2 with its retained-waste spacing', async () => {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: 'Sheet' }))

@@ -1,3 +1,4 @@
+import type { ProgramSettings } from '../gcode/programSettings'
 import { physicalSheet, sheetMaterial, stockLabel, stockErrors, type SheetMaterial } from '../models/stockMaterial'
 import { buildPartLabels, type PartLabel } from '../labels/partLabels'
 import type { MarketplaceItem } from '../models/Item'
@@ -15,7 +16,9 @@ import { cutSideErrors, sheetCutSide, type SheetCutSide } from '../models/cutSid
 export type MachineStatus = 'waiting' | 'cutting' | 'completed' | 'cancelled'
 export const machineStatusNames: Record<MachineStatus, string> = { waiting: 'Waiting to cut', cutting: 'Cutting', completed: 'Completed', cancelled: 'Cancelled' }
 export interface MachineFile { sheetIndices?: number[]; filename: string; gcode: string; sha256: string; estimatedSeconds: number }
+export interface MachineVariant { key: 'andy' | 'dan'; label: string; programs: ProgramSettings; files: MachineFile[] }
 export interface ExportSnapshot {
+  machineVariants?: MachineVariant[]
   skipFinishingPass?: boolean
   version: 1
   jobId?: string
@@ -45,6 +48,7 @@ export async function ncHash(gcode: string): Promise<string> {
 }
 
 export async function buildExportSnapshot(input: {
+  machineVariants?: Array<Omit<MachineVariant, 'files'> & { files: Array<{ sheetIndices?: number[]; filename: string; gcode: string; simulation: { estimatedSeconds: number } }> }>
   jobId?: string
   items?: MarketplaceItem[]
   mode: ExportSnapshot['mode']; parts: Part[]; sheet: Sheet
@@ -52,6 +56,7 @@ export async function buildExportSnapshot(input: {
   summary: { deepestCutMm?: number; exportWarnings: string[] }
 }): Promise<ExportSnapshot> {
   // Detach before the first await: later editor changes must never alter a saved export.
+  const variants = structuredClone(input.machineVariants)
   const sheet = structuredClone(input.sheet)
   const sideErrors = [...cutSideErrors(input.parts, sheet), ...stockErrors(input.parts, sheet)]
   if (sideErrors.length) throw new Error(sideErrors.join(' '))
@@ -74,7 +79,15 @@ export async function buildExportSnapshot(input: {
   if (input.files.length !== (input.mode === 'combined' ? 1 : new Set(sheet.instances.map(i => i.sheetIndex)).size)) throw new Error('Export file count does not match the sheet layout.')
   const files: MachineFile[] = []
   for (const file of input.files) files.push({ sheetIndices: file.sheetIndices, filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
+  const machineVariants: MachineVariant[] | undefined = variants ? [] : undefined
+  for (const variant of variants ?? []) {
+    if (variant.files.length !== files.length || variant.files.some((file, index) => JSON.stringify(file.sheetIndices) !== JSON.stringify(files[index].sheetIndices))) throw new Error('Machine profile sheet coverage differs.')
+    const variantFiles: MachineFile[] = []
+    for (const file of variant.files) variantFiles.push({ sheetIndices: file.sheetIndices, filename: file.filename, gcode: file.gcode, sha256: await ncHash(file.gcode), estimatedSeconds: file.simulation.estimatedSeconds })
+    machineVariants!.push({ ...variant, files: variantFiles })
+  }
   return {
+    ...(machineVariants ? { machineVariants } : {}),
     version: 1, skipFinishingPass: sheet.skipFinishingPass, jobId: input.jobId, labels: buildPartLabels(input.parts, input.items ?? [], sheet), materialProfile: sheet.materialProfile, mode: input.mode, map, sheets, files, safeZ,
     material: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => s.materialSetup?.stockMaterial ? stockLabel(s.materialSetup.stockMaterial) : s.materialSetup?.material?.trim() || 'Not specified'))].join('; '),
     thickness: [...new Set(sheets.filter(s => sheet.instances.some(i => i.sheetIndex === s.index)).map(s => materialProfiles.find(profile => profile.id === s.materialSetup?.materialProfile)?.label ?? 'Original NC - verify stock thickness'))].join('; '),
