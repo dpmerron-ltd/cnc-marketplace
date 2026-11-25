@@ -37,8 +37,8 @@ export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:Job
    }
    throw Error('Too many matching orders. Use the exact order number.')
   }
- },async(chatId,text)=>{
-  const response=await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(15000)})
+ },async(chatId,text,options)=>{
+  const response=await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'HTML',...options,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(15000)})
   const data=await response.json()
   if(!response.ok||!data.ok)throw Error('Telegram could not deliver the message. Retry shortly.')
  })
