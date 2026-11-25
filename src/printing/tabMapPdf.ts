@@ -7,7 +7,7 @@ import { cutSideLabel } from '../models/cutSide'
 const black = rgb(0.08, 0.1, 0.12), grey = rgb(0.6, 0.63, 0.66), white = rgb(1, 1, 1), gold = rgb(0.96, 0.78, 0.3)
 const pageWidth = 595.28, pageHeight = 841.89
 
-export async function createTabMapPdf(map: TabMap, fontBytes: Uint8Array): Promise<Uint8Array> {
+export async function createTabMapPdf(map: TabMap, fontBytes: Uint8Array, sheetIndices?: number[]): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
   const font = await pdf.embedFont(fontBytes, { subset: true })
@@ -73,6 +73,7 @@ export async function createTabMapPdf(map: TabMap, fontBytes: Uint8Array): Promi
     text(page, details ? 'Same orientation as the sheet / X right, Y up' : 'X0 Y0 at bottom-left / X right, Y up', box.x, box.y - 15, 8)
   }
   for (let sheetIndex = 0; sheetIndex < map.sheetCount; sheetIndex++) {
+    if (sheetIndices && !sheetIndices.includes(sheetIndex)) continue
     const parts = map.parts.filter(part => part.sheetIndex === sheetIndex)
     const count = parts.reduce((total, part) => total + part.tabs.length, 0)
     const overview = page(`Tab map | Sheet ${sheetIndex + 1} of ${map.sheetCount}`, `${map.width} x ${map.height} mm stock | ${parts.length} parts | ${count} tab locations${map.cutSides ? ` | ${cutSideLabel(map.cutSides[sheetIndex])}` : ''}`)

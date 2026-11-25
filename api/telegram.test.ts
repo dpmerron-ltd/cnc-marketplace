@@ -48,3 +48,11 @@ it('escapes product markup and keeps table messages self-contained',async()=>{
   expect((card.match(/<pre>/g)??[]).length).toBe((card.match(/<\/pre>/g)??[]).length)
  }
 })
+
+it('authorises tab buttons using the clicking user and fixed chat before any lookup',async()=>{
+ const f=fixture();f.store.tabRuns=vi.fn(async()=>[])
+ const callback=(chat:string,user:number,data='tabs:')=>f.bot.handle(new Request('https://example.com',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':config.secret},body:JSON.stringify({callback_query:{id:'callback',data,from:{id:user},message:{from:{is_bot:true,id:1},chat:{id:chat,type:chat.startsWith('-')?'group':'private'}}}})}))
+ await callback('99',99);await callback('-999',42);await callback('-123',42,'delete:all')
+ expect(f.send).not.toHaveBeenCalled();expect(f.store.tabRuns).not.toHaveBeenCalled()
+ await callback('-123',42);expect(f.send.mock.calls[0][1]).toContain('Tab maps are unavailable')
+})

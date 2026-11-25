@@ -25,7 +25,7 @@ export function planMessages(workspace:SheetWorkspace):string[]{
   if(!cuts.length)messages.push(`⚙️ <b>MACHINE ${machine}</b>\nNo cuts scheduled.`)
  }
  for(const group of pages(plan.issues,5))messages.push(`⚠️ <b>Needs attention</b>\n\n${group.map(issue=>'• '+html(short(issue,350))).join('\n\n')}`)
- messages.push(`🔎 <b>Find what you need</b>\n/today — saved day plan\n/orders — live saved progress\n/order 1047 — order details\n/scan — open the QR scanner\n\n<a href="${siteUrl}">Open Cutting Jobs ↗</a>`)
+ messages.push(`🔎 <b>Find what you need</b>\n/today — saved day plan\n/orders — live saved progress\n/order 1047 — order details\n/tabs — saved sheet tab maps\n/scan — open the QR scanner\n\n<a href="${siteUrl}">Open Cutting Jobs ↗</a>`)
  return messages
 }
 export function progressMessage(workspace:SheetWorkspace,number?:string):string {

@@ -16,7 +16,7 @@ let shopify: ShopifyReader | undefined
 const repo = supabaseRepository(db)
 const getShopify = () => shopify ??= shopifyReader(Deno.env.get('CNC_SHOPIFY_CONNECTIONS') ?? '[]')
 const rawTelegram = Deno.env.get('CNC_TELEGRAM_CONFIG')
-const telegram = rawTelegram ? telegramRuntime(db, JSON.parse(rawTelegram) as TelegramConfig, repo, getShopify) : undefined
+const telegram = rawTelegram ? telegramRuntime(db, JSON.parse(rawTelegram) as TelegramConfig, repo, getShopify, decodeBase64(__PDF_FONT_BASE64__)) : undefined
 const api = createApi(repo, decodeBase64(__PDF_FONT_BASE64__), getShopify, telegram?.publish)
 Deno.serve(request => new URL(request.url).pathname.endsWith('/telegram/webhook')
   ? telegram ? telegram.handle(request) : Promise.resolve(new Response('Not configured', { status: 503 }))

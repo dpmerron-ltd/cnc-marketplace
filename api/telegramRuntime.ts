@@ -4,8 +4,10 @@ import type { SheetWorkspace } from '../src/jobs/production'
 import type { ShopifyReader } from './shopify'
 import { orderService } from './orderAssignments'
 import type { JobRepository } from './handler'
-export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:JobRepository,getShopify:()=>ShopifyReader){
+export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:JobRepository,getShopify:()=>ShopifyReader,font:Uint8Array){
  return createTelegram(config,{
+  async tabRuns(offset){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at').eq('owner_id',config.ownerId).order('created_at',{ascending:false}).order('id').range(offset,offset+9);if(error)throw Error('Could not load saved exports. Try again shortly.');return data??[]},
+  async tabRun(id){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at,snapshot').eq('owner_id',config.ownerId).eq('id',id).maybeSingle();if(error)throw Error('Could not load the saved tab map. Try again shortly.');return data??undefined},
   async workspace(){const {data,error}=await db.from('sheet_projects').select('workspace').eq('owner_id',config.ownerId).eq('id',config.ownerId).maybeSingle();if(error)throw Error('Could not load saved cutting progress. Try again shortly.');return data?.workspace as SheetWorkspace|undefined},
   async component(id){const {data,error}=await db.from('cnc_components').select('name,sku').eq('id',id).maybeSingle();return !error&&data?`${data.name} (${data.sku??''})`:'Component metadata unavailable'},
   async exportedPart(id){
@@ -38,8 +40,12 @@ export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:Job
    throw Error('Too many matching orders. Use the exact order number.')
   }
  },async(chatId,text,options)=>{
+  if(options?.document){
+   const body=new FormData();body.set('chat_id',chatId);body.set('caption',text);body.set('parse_mode','HTML');body.set('document',new Blob([new Uint8Array(options.document.bytes)],{type:'application/pdf'}),options.document.filename)
+   const response=await fetch(`https://api.telegram.org/bot${config.token}/sendDocument`,{method:'POST',body,signal:AbortSignal.timeout(45000)});const data=await response.json();if(!response.ok||!data.ok)throw Error('Telegram could not deliver the tab map. Retry shortly.');return
+  }
   const response=await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'HTML',...options,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(15000)})
   const data=await response.json()
   if(!response.ok||!data.ok)throw Error('Telegram could not deliver the message. Retry shortly.')
- })
+ },{font,async acknowledge(id){await fetch(`https://api.telegram.org/bot${config.token}/answerCallbackQuery`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({callback_query_id:id}),signal:AbortSignal.timeout(5000)})}})
 }
