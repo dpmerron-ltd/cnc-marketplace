@@ -17,7 +17,7 @@ export function planMessages(workspace:SheetWorkspace):string[]{
  for(const group of pages(materials.materials,10))messages.push(`🪵 <b>Material to prepare</b>\n1220 × 1220 mm squares\n\n${group.map(m=>`▪️ <b>${m.squares} ×</b> ${html(short(m.material))}${m.reviewSheets?`\n   ⚠️ ${m.reviewSheets} layouts need stock review`:''}`).join('\n')}\n\n<b>Total confirmed squares: ${materials.totalSquares}</b>`)
  for(const group of pages(plan.orders,16)){
   const table=['Order     Today  Cut  Left  Plan',...group.map(o=>`${column(o.name,10)}${column(o.scheduled,7)}${column(o.cut,5)}${column(o.waiting+o.cutting+o.pending,6)}${o.pending?'Check':o.scheduled?(o.waiting||o.cutting?'Part':'All'):o.cut&&!o.waiting&&!o.cutting?'Cut':'Wait'}`)].join('\n')
-  messages.push(`📦 <b>Orders in the plan</b>\n<pre>${html(table)}</pre>All = all remaining planned today\nPart = partial today · Check = needs allocation\n<i>Counts are components; planned completion is not confirmation of cutting.</i>`)
+  messages.push(`📦 <b>Orders in the plan</b>\n<pre>${html(table)}</pre>\n\nAll = all remaining planned today\nPart = partial today · Check = needs allocation\n<i>Counts are components; planned completion is not confirmation of cutting.</i>`)
  }
  for(const machine of [1,2]){
   const cuts=plan.cuts.filter(c=>c.machine===machine)
@@ -36,7 +36,7 @@ export function progressMessage(workspace:SheetWorkspace,number?:string):string 
 export function progressCards(workspace:SheetWorkspace):string[]{
  const rows=orderProgress(workspace.jobs)
  if(!rows.length)return ['📦 <b>No saved cutting parts yet</b>']
- return pages(rows,18).map(group=>`📦 <b>Saved order progress</b>\n<pre>${html(['Order      Cut Total  Left',...group.map(o=>`${column(o.name,11)}${column(o.cut,4)}${column(o.cut+o.waiting+o.cutting+o.pending,7)}${o.waiting+o.cutting+o.pending}`)].join('\n'))}</pre>✅ Left = 0: all planned components cut\n🟡 Left &gt; 0: work remains\n\nUse /order 1047 for items and details.`)
+ return pages(rows,18).map(group=>`📦 <b>Saved order progress</b>\n<pre>${html(['Order      Cut Total  Left',...group.map(o=>`${column(o.name,11)}${column(o.cut,4)}${column(o.cut+o.waiting+o.cutting+o.pending,7)}${o.waiting+o.cutting+o.pending}`)].join('\n'))}</pre>\n\n✅ Left = 0: all planned components cut\n🟡 Left &gt; 0: work remains\n\nUse /order 1047 for items and details.`)
 }
 export function orderCards(order:ShopifyOrder,progress:string):string[]{
  const title=`📦 <b>ORDER ${html(short(order.name,60))}</b>`
