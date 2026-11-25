@@ -1,3 +1,4 @@
+import type { ReportPlanningProgress } from './jobs/planningProgress'
 import { DailyPlanDialog } from './ui/DailyPlanDialog'
 import { planDay } from './jobs/planDay'
 import { loadOpenOrders } from './orders/loadOpenOrders'
@@ -1250,17 +1251,24 @@ function App() {
     setStatus(`Added ${prepared.count} components for order ${request.order.name}. Review the sheet before cutting.`)
   }
 
-  async function prepareDailyPlan(signal: AbortSignal): Promise<SheetWorkspace> {
+  async function prepareDailyPlan(signal: AbortSignal, onProgress: ReportPlanningProgress): Promise<SheetWorkspace> {
     const owner = userId, before = workspaceRef.current, epoch = componentEpoch.current
     if (!owner || accountRef.current !== owner || loadedAccountId !== owner || workspaceSaveError || !programs) throw new Error('Wait for the account and program settings to load and sync before planning.')
     const catalogue = orderSheetInputs.current.items
-    const { shop, orders } = await loadOpenOrders(owner, signal)
+    const { shop, orders } = await loadOpenOrders(owner, signal, onProgress)
     const required = new Set(orders.flatMap(order => Object.values(matchDailyOrderItems(order, catalogue, owner))).filter(Boolean))
-    for (const id of required) { signal.throwIfAborted(); await ensureItemComponents(id) }
-    await loadJobParts(before.jobs.filter(job => !job.archived))
+    let loaded = 0
+    onProgress({ percent: 20, message: `Loading cutting components for ${required.size} items…` })
+    for (const id of required) {
+      signal.throwIfAborted(); await ensureItemComponents(id)
+      onProgress({ percent: 20 + 15 * ++loaded / required.size, message: `Loaded components for ${loaded} of ${required.size} items` })
+    }
+    onProgress({ percent: 35, message: 'Loading existing cutting jobs…' })
+    await loadJobParts(before.jobs.filter(job => !job.archived), (completed, total) => onProgress({ percent: 35 + 10 * completed / Math.max(total, 1), message: `Loaded existing components for ${completed} of ${total} items` }))
+    onProgress({ percent: 45, message: 'Preparing material layouts…' })
     signal.throwIfAborted()
     if (workspaceRef.current !== before || accountRef.current !== owner || componentEpoch.current !== epoch || orderSheetInputs.current.items !== catalogue) throw new Error('The account, catalogue or cutting jobs changed. Plan again.')
-    const result = await planDay({ workspace: before, parts: orderSheetInputs.current.parts, items: catalogue, baseSheet: { ...defaultSheet, ...sheet, instances: [] }, orders, shop, owner, programs }, signal)
+    const result = await planDay({ workspace: before, parts: orderSheetInputs.current.parts, items: catalogue, baseSheet: { ...defaultSheet, ...sheet, instances: [] }, orders, shop, owner, programs }, signal, onProgress)
     signal.throwIfAborted()
     dailyPlanBaseline.current = { workspace: before, owner, epoch, items: catalogue, programs }
     return result
@@ -1279,13 +1287,14 @@ function App() {
     setStatus('Daily cutting plan saved. Review and export the scheduled sheets before cutting.')
   }
 
-  async function loadJobParts(jobs: ProductionJob[]) {
+  async function loadJobParts(jobs: ProductionJob[], onProgress?: (completed: number, total: number) => void) {
     const owner = userId, epoch = componentEpoch.current
     if (!owner || loadedAccountId !== owner) throw new Error('Wait for your catalogue to load.')
     const current = orderSheetInputs.current
     const ids = new Set(jobs.flatMap(job => [...job.sheet.instances, ...(job.sheet.pendingParts ?? [])].map(i => i.partId)))
     const itemIds = new Set([...current.componentIndex, ...current.parts].filter(part => ids.has(part.id)).flatMap(part => part.itemId ? [part.itemId] : []))
-    for (const id of itemIds) await ensureItemComponents(id)
+    let completed = 0
+    for (const id of itemIds) { await ensureItemComponents(id); onProgress?.(++completed, itemIds.size) }
     if (accountRef.current !== owner || componentEpoch.current !== epoch) throw new Error('Your account or catalogue changed. Try again.')
     const loaded = orderSheetInputs.current.parts
     if ([...ids].some(id => !loaded.some(part => part.id === id))) throw new Error('Some original components are unavailable. Restore them before changing the plan.')

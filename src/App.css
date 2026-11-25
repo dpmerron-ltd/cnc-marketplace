@@ -1072,3 +1072,7 @@ textarea {
 .daily-plan h4 { margin: 18px 0 8px; }
 .daily-plan table { width: 100%; }
 .daily-plan td, .daily-plan th { padding: 8px; text-align: left; }
+.day-planning-progress { margin: 16px 0; }
+.day-planning-progress > div { display: flex; justify-content: space-between; gap: 16px; }
+.day-planning-progress progress { width: 100%; height: 18px; margin-top: 8px; accent-color: #2563eb; }
+.day-planning-progress p { margin: 6px 0; }

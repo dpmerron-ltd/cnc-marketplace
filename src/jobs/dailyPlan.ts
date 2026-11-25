@@ -1,3 +1,5 @@
+import { stockSquareMm } from './dailyMaterials'
+import type { ReportPlanningProgress } from './planningProgress'
 import type { Part } from '../models/Part'
 import type { MarketplaceItem } from '../models/Item'
 import type { Sheet } from '../models/Sheet'
@@ -21,6 +23,8 @@ import { orderCuttingSheets } from '../orders/cuttingSheets'
 export interface DayCut {
   jobId: string
   sheetIndex: number
+  sheetWidthMm?: number
+  sheetHeightMm?: number
   signature: string
   orders: string[]
   material: string
@@ -98,7 +102,7 @@ export interface DailyPlanInput {
   owner: string
   programs: ProgramSettings
 }
-export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
+export function buildDailyPlan(input: DailyPlanInput, onProgress?: ReportPlanningProgress): SheetWorkspace {
   const { workspace, parts, items, baseSheet, shop, owner, programs } = input
   if (workspace.jobs.some((j) => Object.values(j.sheets).some((s) => s.stage === 'cutting')))
     throw new Error(
@@ -111,6 +115,8 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
     .sort((a, b) => (Date.parse(a.createdAt ?? '') || Infinity) - (Date.parse(b.createdAt ?? '') || Infinity))
   let staged: Sheet = {
     ...baseSheet,
+    width: stockSquareMm,
+    height: stockSquareMm,
     name: `Orders planned ${today()}`,
     instances: [],
     pendingParts: [],
@@ -123,7 +129,11 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
     unavailableSheetIndices: undefined,
     nextPartNumber: undefined
   }
-  for (const order of orders) {
+  for (const [orderIndex, order] of orders.entries()) {
+    onProgress?.({
+      percent: 45 + (25 * orderIndex) / Math.max(orders.length, 1),
+      message: `Nesting order ${orderIndex + 1} of ${orders.length}: ${order.name}`
+    })
     if (!Number.isFinite(Date.parse(order.createdAt ?? ''))) {
       issues.push(`${order.name}: order placed date is missing; excluded.`)
       continue
@@ -163,6 +173,7 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
       issues.push(`${order.name}: ${(e as Error).message}`)
     }
   }
+  onProgress?.({ percent: 70, message: 'Combining compatible waiting sheets…' })
   let jobs = staged.instances.length ? [...workspace.jobs, newProductionJob(staged)] : workspace.jobs
   // Fill compatible waiting sheets across existing jobs and newly loaded orders.
   // Unrelated/manual work and completed layouts are never pulled into this plan.
@@ -186,11 +197,24 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
     const replanned = replanWorkspace({ activeId: eligible[0].id, jobs: eligible }, parts)
     jobs = jobs.map((job) => replanned.jobs.find((j) => j.id === job.id) ?? job)
   }
+  onProgress?.({ percent: 78, message: 'Estimating sheet cutting times…' })
+  const sheetTotal = jobs
+    .filter((job) => !job.archived)
+    .reduce(
+      (n, job) =>
+        n + sheetIndices(job.sheet).filter((index) => (job.sheets[index]?.stage ?? 'waiting') === 'waiting').length,
+      0
+    )
+  let checkedSheets = 0
   const candidates: DayCut[] = []
   for (const job of jobs) {
     if (job.archived) continue
     for (const index of sheetIndices(job.sheet)) {
       if ((job.sheets[index]?.stage ?? 'waiting') !== 'waiting') continue
+      onProgress?.({
+        percent: 78 + (18 * checkedSheets++) / Math.max(sheetTotal, 1),
+        message: `Checking cutting time for sheet ${checkedSheets} of ${sheetTotal}`
+      })
       const instances = job.sheet.instances.filter((i) => i.sheetIndex === index)
       const matched = orders.filter((o) =>
         orderCuttingSheets([job], { key: `${shop}/${o.id}`, name: o.name }).sheets.some((s) => s.index === index)
@@ -227,6 +251,8 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
         candidates.push({
           jobId: job.id,
           sheetIndex: index,
+          sheetWidthMm: job.sheet.width,
+          sheetHeightMm: job.sheet.height,
           signature: sheetSignature(job.sheet, index),
           orders: matched.map((o) => o.name),
           material: stockLabel(stock),
@@ -240,6 +266,7 @@ export function buildDailyPlan(input: DailyPlanInput): SheetWorkspace {
       }
     }
   }
+  onProgress?.({ percent: 97, message: 'Assigning sheets to both machines…' })
   const scheduled = scheduleDay(candidates)
   const progress = orders.map((o) => {
     const p = orderCuttingSheets(jobs, { key: `${shop}/${o.id}`, name: o.name })

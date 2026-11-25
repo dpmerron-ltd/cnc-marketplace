@@ -164,3 +164,15 @@ describe('open orders into the daily plan', () => {
     expect(() => buildDailyPlan({ ...input(), workspace: first })).toThrow('currently cutting')
   })
 })
+
+it('plans new layouts on 1220 mm squares and reports monotonic worker milestones', () => {
+  const progress: { percent: number; message: string }[] = []
+  const planned = buildDailyPlan(input(), (next) => progress.push(next))
+  const job = planned.jobs.find((j) => j.sheet.instances.length)!
+  expect([job.sheet.width, job.sheet.height]).toEqual([1220, 1220])
+  expect(planned.dailyPlan?.cuts[0]).toMatchObject({ sheetWidthMm: 1220, sheetHeightMm: 1220 })
+  expect(progress.map((p) => p.percent)).toEqual([...progress.map((p) => p.percent)].sort((a, b) => a - b))
+  expect(progress[0].percent).toBe(45)
+  expect(progress.at(-1)?.percent).toBe(97)
+  expect(progress.some((p) => p.message.includes('Checking cutting time'))).toBe(true)
+})
