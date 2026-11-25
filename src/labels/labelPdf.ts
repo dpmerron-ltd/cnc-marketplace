@@ -1,3 +1,4 @@
+import { drawPartBarcode, partBarcodeUrl } from './partBarcode'
 // Load with the app so an open tab can still print after deployment removes old chunks.
 import { jsPDF } from 'jspdf'
 import { labelPageLayout, type LabelLayout, type PartLabel } from './partLabels'
@@ -16,7 +17,10 @@ export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout:
   ctx.fillStyle = '#000'
   ctx.textBaseline = 'top'
   const padding = 1.5
-  const width = layout.width - padding * 2
+  const hasBarcode = Boolean(partBarcodeUrl(label.instanceId))
+  const qrSize = Math.min(23, layout.height - 6)
+  const width = layout.width - padding * 2 - (hasBarcode ? qrSize + 1 : 0)
+  if (hasBarcode) drawPartBarcode(ctx, label.instanceId, layout.width - padding - qrSize, padding, qrSize)
   const unit = Math.min(1, (layout.height - padding * 2) / 22)
   function line(text: string, y: number, size: number, bold = false, maxWidth = width, x = padding) {
     const clean = text.replace(/\s+/g, ' ').trim()
@@ -29,14 +33,20 @@ export function renderLabel(canvas: HTMLCanvasElement, label: PartLabel, layout:
     }
     ctx.fillText(fitted, x, padding + y * unit)
   }
-  line(label.partNumber, 0, 4.3, true, width * 0.53)
-  line(`Sheet ${label.sheetNumber} / Cut ${label.cutOrder}`, 1, 2.1, false, width * 0.46, padding + width * 0.54)
+  line(`${label.partNumber} · S${label.sheetNumber}`, 0, 3.3, true)
   line(label.component, 4.9, 2.7, true)
   line(`Job: ${label.job}`, 8.3, 2.4)
   line(`Order: ${label.order}`, 11.3, 2.4)
   line(`SKU: ${label.sku}`, 14.3, 2.2)
   line(label.material || label.item || `X ${label.x.toFixed(1)} / Y ${label.y.toFixed(1)} mm`, 17.3, 2.2)
-  line(label.cutSide && label.cutSide !== 'either' ? cutSideLabel(label.cutSide) : `X ${label.x.toFixed(1)}  Y ${label.y.toFixed(1)} mm / ${label.rotation} deg`, 20, 1.9)
+  if (hasBarcode) {
+    ctx.font = '1.8px monospace'
+    const id = label.instanceId.toUpperCase()
+    const size = Math.min(1.8, 1.8 * (layout.width - padding * 2) / Math.max(ctx.measureText(id).width, 1))
+    ctx.font = `${size}px monospace`
+    ctx.fillText(id, padding, layout.height - 2.5)
+  }
+  line(label.cutSide && label.cutSide !== 'either' ? cutSideLabel(label.cutSide) : `X ${label.x.toFixed(1)}  Y ${label.y.toFixed(1)} mm / ${label.rotation} deg`, 19.7, 1.4)
 }
 
 export async function createLabelPdf(labels: PartLabel[], layout: LabelLayout): Promise<Blob> {
@@ -45,11 +55,12 @@ export async function createLabelPdf(labels: PartLabel[], layout: LabelLayout): 
   const pdf = new jsPDF({ orientation: page.pageWidth > page.pageHeight ? 'landscape' : 'portrait', unit: 'mm', format: [page.pageWidth, page.pageHeight], compress: true })
   pdf.setProperties({ title: `${labels[0].job} - Part labels` })
   const canvas = document.createElement('canvas')
-  labels.forEach((label, index) => {
+  for (const [index, label] of labels.entries()) {
+    if (index % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0))
     if (index > 0 && index % page.perPage === 0) pdf.addPage()
     const slot = index % page.perPage
     renderLabel(canvas, label, layout)
     pdf.addImage(canvas, 'PNG', page.margin + (slot % page.columns) * (layout.width + 2), page.margin + Math.floor(slot / page.columns) * (layout.height + 2), layout.width, layout.height, undefined, 'FAST')
-  })
+  }
   return pdf.output('blob')
 }

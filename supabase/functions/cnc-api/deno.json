@@ -5,6 +5,7 @@
     "@pdf-lib/fontkit": "npm:@pdf-lib/fontkit@1.1.1",
     "zod": "npm:zod@4.6.5",
     "dxf-parser": "npm:dxf-parser@1.1.2",
-    "clipper-lib": "npm:clipper-lib@6.4.2"
+    "clipper-lib": "npm:clipper-lib@6.4.2",
+    "qrcode": "npm:qrcode@1.5.4"
   }
 }

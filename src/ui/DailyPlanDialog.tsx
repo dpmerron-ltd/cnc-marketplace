@@ -1,3 +1,4 @@
+import { LoadingBar } from './LoadingBar'
 import type { PlanningProgress, ReportPlanningProgress } from '../jobs/planningProgress'
 import { useEffect, useRef, useState } from 'react'
 import type { SheetWorkspace } from '../jobs/production'
@@ -87,6 +88,7 @@ export function DailyPlanDialog({
           </button>
         </>
       )}
+      {saving && <LoadingBar label="Saving the plan and sharing with Telegram…" />}
       {result?.dailyPlan && (
         <>
           <DailyPlanPanel plan={result.dailyPlan} />

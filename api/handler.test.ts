@@ -415,3 +415,15 @@ describe('jobs HTTP API', () => {
     expect(f.jobs.size).toBe(1)
   })
 })
+
+it('authenticates day-plan sharing and forwards only the saved timestamp', async () => {
+  const { repo } = fixture()
+  const publish = vi.fn(async () => ({configured:true,sent:true}))
+  const api = createApi(repo, font, undefined, publish)
+  const call = (token:string, body:unknown) => api(new Request('https://example.com/cnc-api/v1/telegram/day-plan',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(body)}))
+  expect((await call('unknown',{createdAt:'2026-11-25T09:00:00.000Z'})).status).toBe(401)
+  expect((await call('alice',{createdAt:'2026-11-25T09:00:00.000Z',chatId:'other'})).status).toBe(400)
+  expect(publish).not.toHaveBeenCalled()
+  expect((await call('alice',{createdAt:'2026-11-25T09:00:00.000Z'})).status).toBe(200)
+  expect(publish).toHaveBeenCalledWith('alice','2026-11-25T09:00:00.000Z')
+})

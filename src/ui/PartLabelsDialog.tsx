@@ -1,3 +1,4 @@
+import { LoadingBar } from './LoadingBar'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import type { MarketplaceItem } from '../models/Item'
@@ -69,6 +70,7 @@ export function PartLabelsDialog({ parts, items, sheet, sheetIndex, onClose, lab
     </>}
     {(result.error || error) && <p role="alert">{result.error || error}</p>}
     {!result.error && !result.labels.length && <p>No parts on this sheet.</p>}
+    {busy && <LoadingBar label="Preparing QR labels…" />}
     <div className="modal-actions"><button type="button" className="primary icon-text-button" disabled={busy || !result.labels.length} onClick={() => void download()}><Download size={16} />{busy ? 'Preparing PDF...' : `Download ${result.labels.length} labels`}</button></div>
   </dialog>
 }
