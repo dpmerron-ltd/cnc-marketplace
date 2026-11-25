@@ -1,8 +1,10 @@
+import { dailyMaterialRequirements } from '../jobs/dailyMaterials'
 import type { DailyPlan } from '../jobs/dailyPlan'
 import { sheetHandlingMinutes } from '../jobs/dailyPlan'
 const clock = (minute: number) =>
   `${String(Math.floor(Math.ceil(minute) / 60)).padStart(2, '0')}:${String(Math.ceil(minute) % 60).padStart(2, '0')}`
 export function DailyPlanPanel({ plan, onOpen }: { plan: DailyPlan; onOpen?: (id: string, index: number) => void }) {
+  const materials = dailyMaterialRequirements(plan)
   const hours = plan.cuts.reduce((sum, c) => sum + c.seconds, 0) / 3600
   return (
     <section className="daily-plan" aria-label="Daily cutting plan">
@@ -13,6 +15,48 @@ export function DailyPlanPanel({ plan, onOpen }: { plan: DailyPlan; onOpen?: (id
         09:00–17:00 · two machines · {sheetHandlingMinutes} minutes reserved for loading and unloading each sheet. Times
         are program estimates; check stock and workholding before cutting.
       </p>
+      <h4>Material needed today</h4>
+      <p>
+        1220 × 1220 mm squares across both machines. One square per scheduled sheet, including partially filled sheets.
+        Deferred work is excluded.
+      </p>
+      {materials.materials.length ? (
+        <div className="queue-table-scroll">
+          <table className="queue-table" aria-label="Material needed today">
+            <thead>
+              <tr>
+                <th>Material / thickness / finish</th>
+                <th>1220 × 1220 mm squares</th>
+                {materials.reviewSheets > 0 && <th>Layouts to review</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {materials.materials.map((material) => (
+                <tr key={material.key}>
+                  <td>{material.material}</td>
+                  <td>{material.squares}</td>
+                  {materials.reviewSheets > 0 && <td>{material.reviewSheets}</td>}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">{materials.reviewSheets ? 'Confirmed total' : 'Total squares'}</th>
+                <td>{materials.totalSquares}</td>
+                {materials.reviewSheets > 0 && <td>{materials.reviewSheets}</td>}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
+        <p>No material needed: no cuts scheduled.</p>
+      )}
+      {materials.reviewSheets > 0 && (
+        <p role="alert">
+          {materials.reviewSheets} scheduled layouts have an unknown size or exceed 1220 × 1220 mm and are not included
+          in the square total. Review their stock size and re-plan before preparing material.
+        </p>
+      )}
       {[1, 2].map((machine) => (
         <div key={machine}>
           <h4>Machine {machine}</h4>
