@@ -176,3 +176,28 @@ it('plans new layouts on 1220 mm squares and reports monotonic worker milestones
   expect(progress.at(-1)?.percent).toBe(97)
   expect(progress.some((p) => p.message.includes('Checking cutting time'))).toBe(true)
 })
+
+it('disables screw marks and enables 1.9x finishing on new and existing waiting work',()=>{
+ const i=input();i.baseSheet={...i.baseSheet,screwMarkingEnabled:true,skipFinishingPass:true}
+ const first=buildDailyPlan(i),job=first.jobs.find(j=>j.sheet.instances.length)!
+ expect(job.sheet).toMatchObject({screwMarkingEnabled:false,skipFinishingPass:false,finishingFeedMultiplier:1.9})
+ job.sheet={...job.sheet,screwMarkingEnabled:true,finishingFeedMultiplier:undefined}
+ const oldSignature=sheetSignature(job.sheet,0)
+ job.sheets[0]={stage:'waiting',runId:'old-export',signature:oldSignature}
+ const next=buildDailyPlan({...i,workspace:first}),updated=next.jobs.find(j=>j.id===job.id)!
+ expect(updated.sheet.screwMarkingEnabled).toBe(false)
+ expect(updated.sheet.finishingFeedMultiplier).toBe(1.9)
+ expect(sheetSignature(updated.sheet,0)).not.toBe(oldSignature)
+ expect(job.sheet.screwMarkingEnabled).toBe(true)
+})
+it('keeps completed sheet signatures while splitting their waiting work into a new job',()=>{
+ const i=input(),first=buildDailyPlan(i),job=first.jobs.find(j=>j.sheet.instances.length)!
+ job.sheet={...job.sheet,screwMarkingEnabled:true,finishingFeedMultiplier:undefined,instances:job.sheet.instances.map((p,index)=>({...p,sheetIndex:index<2?0:1}))}
+ const signature=sheetSignature(job.sheet,0);job.sheets[0]={stage:'cut',runId:'completed',signature}
+ const before=JSON.stringify(first),next=buildDailyPlan({...i,workspace:first})
+ expect(sheetSignature(next.jobs.find(j=>j.id===job.id)!.sheet,0)).toBe(signature)
+ const waiting=next.jobs.find(j=>j.id!==job.id&&j.sheet.instances.length)!
+ expect(waiting.sheet.screwMarkingEnabled).toBe(false);expect(waiting.sheet.finishingFeedMultiplier).toBe(1.9)
+ expect(next.jobs.flatMap(j=>j.sheet.instances).map(p=>p.id).sort()).toEqual(job.sheet.instances.map(p=>p.id).sort())
+ expect(JSON.stringify(first)).toBe(before)
+})

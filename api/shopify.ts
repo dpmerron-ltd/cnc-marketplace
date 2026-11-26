@@ -20,6 +20,7 @@ const detailQuery = `query CncOrder($id: ID!, $after: String) { order(id: $id) {
 const filters = { all: '', open: 'status:open', unfulfilled: 'status:open (fulfillment_status:unfulfilled OR fulfillment_status:partial)', fulfilled: 'fulfillment_status:fulfilled', cancelled: 'status:cancelled' }
 
 export interface ShopifyReader {
+  readyToPack?(owner: string, id: string): Promise<void>
   connection(owner: string): ShopifyConnection
   orders(owner: string, params: URLSearchParams): Promise<ShopifyOrders>
   order(owner: string, id: string, params: URLSearchParams): Promise<ShopifyOrderDetail>
@@ -32,7 +33,7 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
   const config = connectionsSchema.safeParse(parsed)
   if (!config.success) throw new Error('Invalid server Shopify configuration.')
   const connections = new Map(config.data.map(c => [c.ownerId, c]))
-  const tokens = new Map<string, { token: string; expires: number }>()
+  const tokens = new Map<string, { token: string; expires: number; scopes: string[] }>()
   const pending = new Map<string, Promise<string>>()
   const get = (owner: string) => {
     const connection = connections.get(owner)
@@ -55,7 +56,7 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
       const result = z.object({ access_token: z.string().min(1), expires_in: z.number().positive(), scope: z.string() }).safeParse(await response.json().catch(() => null))
       if (!result.success) throw new JobError('Shopify returned an invalid authentication response.', 502)
       if (!result.data.scope.split(',').some(scope => ['read_orders', 'write_orders'].includes(scope.trim()))) throw new JobError('The Shopify app needs read_orders access. Update its scopes and installation.', 403)
-      tokens.set(c.ownerId, { token: result.data.access_token, expires: now() + result.data.expires_in * 1000 })
+      tokens.set(c.ownerId, { token: result.data.access_token, expires: now() + result.data.expires_in * 1000, scopes: result.data.scope.split(',').map(scope=>scope.trim()) })
       return result.data.access_token
     })()
     pending.set(c.ownerId, task)
@@ -86,6 +87,14 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
     return result.data
   }
   return {
+    async readyToPack(owner, id) {
+      if (!/^\d{1,30}$/.test(id)) throw new JobError('Invalid Shopify order ID.', 400)
+      const connection = get(owner)
+      await token(connection)
+      if (!tokens.get(owner)?.scopes.includes('write_orders')) throw new JobError('Enable Shopify write_orders permission to add Ready to pack tags.',403)
+      const result = z.object({ tagsAdd: z.object({ node: z.object({id:z.string()}).nullable(), userErrors: z.array(z.object({message:z.string()})) }) }).safeParse(await graphql(get(owner), 'mutation CncReadyToPack($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }', {id:`gid://shopify/Order/${id}`,tags:['Ready to pack']}))
+      if (!result.success || result.data.tagsAdd.userErrors.length || result.data.tagsAdd.node?.id !== `gid://shopify/Order/${id}`) throw new JobError('Could not add Ready to pack. Check Shopify write_orders permission and retry.',502)
+    },
     connection(owner) { const c = connections.get(owner); return { accountId: owner, connected: Boolean(c), ...(c ? { shop: c.shop } : {}) } },
     async ordersByIds(owner, ids) {
       const c = get(owner)

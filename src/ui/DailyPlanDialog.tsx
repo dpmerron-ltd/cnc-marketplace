@@ -59,6 +59,7 @@ export function DailyPlanDialog({
           Close
         </button>
       </div>
+      <p>No screw marks · finishing feed 1.9× roughing feed · 6 mm cutter. Imported NC without an identified finishing pass keeps its original feeds.</p>
       {!error && (
         <div className="day-planning-progress" aria-busy={!result}>
           <div>

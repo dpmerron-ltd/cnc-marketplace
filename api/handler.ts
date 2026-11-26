@@ -70,7 +70,7 @@ async function body(request: Request, maxBytes = 65536): Promise<unknown> {
   try { return JSON.parse(value + decoder.decode()) } catch { throw new JobError('Invalid JSON.', 400) }
 }
 
-export function createApi(repository: JobRepository, fontBytes: Uint8Array, getShopify: () => ShopifyReader = () => shopifyReader(), publishTelegram?: (owner: string, createdAt: string) => Promise<{ configured: boolean; sent: boolean }>) {
+export function createApi(repository: JobRepository, fontBytes: Uint8Array, getShopify: () => ShopifyReader = () => shopifyReader(), publishTelegram?: (owner: string, createdAt: string) => Promise<{ configured: boolean; sent: boolean }>, syncPacking?: (owner: string, ids: string[]) => Promise<unknown>) {
   return async (request: Request): Promise<Response> => {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
     const requestId = crypto.randomUUID()
@@ -87,6 +87,12 @@ export function createApi(repository: JobRepository, fontBytes: Uint8Array, getS
         if (!input.success) throw new JobError('Supply the saved plan creation timestamp.', 400)
         if (!publishTelegram) return json({ configured: false, sent: false })
         return json(await publishTelegram(owner, input.data.createdAt))
+      }
+      if (path === '/v1/shopify/packing-sync' && request.method === 'POST') {
+        const input = z.strictObject({orderIds:z.array(z.string().regex(/^\d{1,30}$/)).min(1).max(25)}).safeParse(await body(request))
+        if (!input.success) throw new JobError('Supply 1-25 Shopify order IDs.',400)
+        if (!syncPacking) throw new JobError('Packing sync is unavailable.',503)
+        return json(await syncPacking(owner,input.data.orderIds))
       }
       if (path === '/v1/boxes' && request.method === 'GET') return json({ boxes: await repository.boxes(owner) })
       if (path === '/v1/boxes' && request.method === 'POST') {

@@ -1,5 +1,5 @@
 import { copyPartIdentities } from './labels/copyPartIdentities'
-import { shareDailyPlan } from './storage/telegramStore'
+import { shareDailyPlan, syncPacking } from './storage/telegramStore'
 import { loadExportProfiles, type ExportProfile } from './storage/exportProfilesStore'
 import { machineArchive, downloadMachineArchive } from './machine/machineArchive'
 import type { ReportPlanningProgress } from './jobs/planningProgress'
@@ -485,6 +485,8 @@ function App() {
   const [allocation, setAllocation] = useState<AllocationRequest>()
   const [recoverableWorkspace, setRecoverableWorkspace] = useState<SheetWorkspace>()
   const [savedWorkspaceAt, setSavedWorkspaceAt] = useState('')
+  const [packingRetry, setPackingRetry] = useState<{owner:string;ids:string[]}>()
+  const [packingSyncing, setPackingSyncing] = useState(false)
   const workspaceRef = useRef(workspace)
   function setWorkspace(value: SetStateAction<SheetWorkspace>) {
     const updated = typeof value === 'function' ? value(workspaceRef.current) : value
@@ -1323,6 +1325,20 @@ function App() {
     } catch (error) { setStatus(errorMessage(error)) }
   }
 
+  async function syncPackingFor(owner: string, ids: string[]) {
+    if (!ids.length) return
+    setPackingSyncing(true)
+    try {
+      const results = []
+      for (let start=0;start<ids.length;start+=25) results.push(...(await syncPacking(owner,ids.slice(start,start+25))).results)
+      const failed=results.filter(r=>r.retry)
+      setPackingRetry(failed.length?{owner,ids:failed.map(r=>r.id)}:undefined)
+      const tagged=results.filter(r=>r.tagged)
+      setStatus(failed.length ? `Cutting progress saved. Packing sync needs attention: ${failed.map(r=>r.message).join(' ')}` : tagged.length ? `${tagged.map(r=>r.name??r.id).join(', ')}: Ready to pack in Shopify.` : 'Cutting progress saved. Remaining parts must be cut before packing.')
+    } catch(error) { setPackingRetry({owner,ids});setStatus(`Cutting progress saved. Shopify packing sync failed: ${errorMessage(error)}`) }
+    finally { setPackingSyncing(false) }
+  }
+
   async function updateJobSheetStage(id: string, index: number, stage: SheetStage) {
     const before = workspaceRef.current, job = before.jobs.find(job => job.id === id)!
     const updated = changeSheetStage(job, index, stage)
@@ -1330,6 +1346,14 @@ function App() {
     if (!await saveCurrentProject()) { setWorkspace(before); throw new Error('Progress could not be saved to the cloud. Reload the saved plan before continuing.') }
     if (stage === 'cut') await completeSheetRecuts(userId!, job.sheet.instances.filter(i => i.sheetIndex === index).flatMap(i => i.recutId ? [i.recutId] : []))
     setStatus(`Sheet ${index + 1} marked ${stage}. It is excluded from future nesting.`)
+    if (stage === 'cut' && userId) {
+      const ids=[...new Set(job.sheet.instances.filter(i=>i.sheetIndex===index).flatMap(i=>{
+        const key=i.orderKey??job.sheet.orderImports?.find(o=>o.instanceIds.includes(i.id))?.key
+        const id=key?.match(/\/gid:\/\/shopify\/Order\/(\d+)$/)?.[1]
+        return id?[id]:[]
+      }))]
+      await syncPackingFor(userId,ids)
+    }
   }
 
   async function openJobLabels(id: string, index: number) {
@@ -1854,6 +1878,8 @@ function App() {
         </div></>}
         {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes' || page === 'prints') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
+      {packingSyncing && <div role="status">Checking Shopify packing readiness… <progress aria-label="Checking packing readiness" /></div>}
+      {packingRetry?.owner === userId && <button disabled={packingSyncing} onClick={()=>void syncPackingFor(packingRetry.owner,packingRetry.ids)}>Retry Shopify packing sync</button>}
       {loadedAccountId === userId && <div className="workspace-save-status" role="status">{workspaceSaveError ? <>Cloud save failed: {workspaceSaveError} <button type="button" onClick={() => void saveCurrentProject()}>Retry save</button><button type="button" onClick={() => setLibraryReload(value => value + 1)}>Reload saved plan</button></> : savedWorkspaceAt === workspace.updatedAt ? 'All job tabs saved' : 'Saving job tabs…'}{recoverableWorkspace && <button type="button" onClick={() => void downloadWorkspaceRecovery()}>Download unsaved recovery</button>}</div>}
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
