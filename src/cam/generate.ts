@@ -105,7 +105,7 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
 export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
   const allowance = settings.skipFinishingPass ? 0 : finishingAllowanceMm
   const fastPeckReturn = fastPeckReturnPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
-  const rampSettings = rampPreset(settings.rampProfile)
+  const rampSettings = rampPreset(settings.rampProfile, materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   const cutFeed = cutFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   if (settings.finishingFeedMultiplier !== undefined && (!Number.isFinite(settings.finishingFeedMultiplier) || settings.finishingFeedMultiplier < 1 || settings.finishingFeedMultiplier > 2)) throw new Error('Finishing feed multiplier must be between 1 and 2.')
   const finishFeed = settings.finishingFeedMultiplier !== undefined ? cutFeed * settings.finishingFeedMultiplier : finishingFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))

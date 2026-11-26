@@ -102,7 +102,7 @@ describe('DXF review queue', () => {
     if (choice === '12-2pass-2mm-depth12p4') {
       expect(screen.getByText('2 x 6.2 mm')).toBeInTheDocument()
       expect(screen.getByText('12.4 mm')).toBeInTheDocument()
-      expect(screen.getByText('3 deg / 600 mm/min')).toBeInTheDocument()
+      expect(screen.getByText('5 deg / 1200 mm/min')).toBeInTheDocument()
       expect(screen.getAllByText('3,000 mm/min')[0]).toBeInTheDocument()
     }
     if (choice === '12-2pass-2mm-ramp20-5deg') {

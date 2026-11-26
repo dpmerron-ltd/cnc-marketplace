@@ -11,9 +11,9 @@ const id = '12-2pass-2mm-depth12p4'
 const options = { thicknessMm: 12, profilePasses: 2, drillDepthMm: 2 } as const
 const dxf = [0, 'SECTION', 2, 'HEADER', 9, '$INSUNITS', 70, 4, 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES', 0, 'LWPOLYLINE', 8, 'PROFILE', 90, 4, 70, 1, 10, 0, 20, 0, 10, 180, 20, 0, 10, 180, 20, 100, 10, 0, 20, 100, 0, 'CIRCLE', 8, 'DRILL', 10, 30, 20, 30, 40, 3, 0, 'ENDSEC', 0, 'EOF', ''].join('\n')
 
-it('generates two 6.2 mm passes, 2 mm drills, F3000 cuts and F600 ramps at up to 3 degrees', async () => {
+it('generates two 6.2 mm passes, 2 mm drills, F3000 cuts and F1200 ramps at up to 5 degrees', async () => {
   const result = await generateDxfNc({ dxf, ...options })
-  expect(result.settings).toMatchObject({ cutterDiameterMm: 6, thicknessMm: 12, passDepthsMm: [6.2, 12.4], cutDepthMm: 12.4, drillDepthMm: 2, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 600, rampDegrees: 3, clearanceMm: 20 })
+  expect(result.settings).toMatchObject({ cutterDiameterMm: 6, thicknessMm: 12, passDepthsMm: [6.2, 12.4], cutDepthMm: 12.4, drillDepthMm: 2, cutFeedMmPerMinute: 3000, rampFeedMmPerMinute: 1200, rampDegrees: 5, clearanceMm: 20 })
   expect(result.filename).toBe('component-12mm-2pass-2mm-holes-depth12p4.nc')
   expect(result.materialVariants.primaryProfile).toBe(id)
   expect(result.gcode).toContain('(Pass depth 6.2 mm)')
@@ -27,8 +27,8 @@ it('generates two 6.2 mm passes, 2 mm drills, F3000 cuts and F600 ramps at up to
   const ramps = simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < m.start.z - 0.001 && Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.001)
   expect(ramps.length).toBeGreaterThan(0)
   for (const move of ramps) {
-    expect(move.feedMmPerMinute).toBe(600)
-    expect(Math.atan((move.start.z - move.end.z) / Math.hypot(move.end.x - move.start.x, move.end.y - move.start.y)) * 180 / Math.PI).toBeLessThanOrEqual(3.01)
+    expect(move.feedMmPerMinute).toBe(1200)
+    expect(Math.atan((move.start.z - move.end.z) / Math.hypot(move.end.x - move.start.x, move.end.y - move.start.y)) * 180 / Math.PI).toBeLessThanOrEqual(5.01)
   }
   const cuts = simulation.moves.filter(m => m.type !== 'rapid' && m.end.z < 0 && Math.abs(m.start.z - m.end.z) < 0.001 && Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.001)
   expect(cuts.length).toBeGreaterThan(0)

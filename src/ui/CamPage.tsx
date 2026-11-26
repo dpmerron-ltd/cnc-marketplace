@@ -40,7 +40,7 @@ export function CamPage({ items, onSave, programs, saveJobs = [] }: { items: Mar
   const [itemId, setItemId] = useState(items[0] ? itemFamily(items[0]) : '')
   const [saved, setSaved] = useState(false)
   const [view, setView] = useState<'preview' | 'code'>('preview')
-  const ramp = rampPreset(settings.rampProfile)
+  const ramp = rampPreset(settings.rampProfile, materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   const material = materialPreset(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile)
   const passIncrements = material.passes.map((depth, index) => Number((depth - (material.passes[index - 1] ?? 0)).toFixed(4)))
   const passDescription = passIncrements.every(depth => depth === passIncrements[0]) ? `${passIncrements.length} x ${passIncrements[0]}` : passIncrements.join(' + ')

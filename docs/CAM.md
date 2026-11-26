@@ -166,3 +166,7 @@ setting: use **Use 13 mm V2 border**, then **Auto Nest**, or enter a larger bord
 that still fits the parts. A 1186.6 mm machining envelope fits 1220 mm stock at
 13 or 15 mm borders, but cannot fit at 22 mm. Oversized parts now report this
 constraint directly instead of returning an invalid layout.
+
+### FAST 12 mm: two 6.2 mm passes
+
+The `12-2pass-2mm-depth12p4` preset now ramps at **20 mm/s (F1200), up to 5 degrees**, including entries and tab re-entries. Its selector remains 12 mm stock, two passes, 2 mm drills, with `rampProfile` omitted to preserve its distinct 12.4 mm final depth. Cutting feed remains F3000, finishing F6000, with the shared 6 mm cutter, tabs, Z20 clearance and drilling unchanged. Existing saved component variants and exports must be regenerated to adopt the changed ramp geometry; a new label does not update old coordinates.
