@@ -79,7 +79,7 @@ export function createTelegram(config:TelegramConfig,store:TelegramStore,send:Te
     if(cmd==='tabs'){await tabsReply(chat,arg,store,send,extras?.font);return new Response('OK')}
     if(cmd==='scan'||cmd==='failed'){
      const failed=cmd==='failed'
-     if(message.chat?.type==='private')await send(chat,failed?'🔁 <b>Scan failed part</b>\n\nScanning queues this exact part for re-cut and removes its order from packing readiness.':'✅ <b>Scan cut part</b>\n\nScanning confirms each part is cut. A green tick confirms it saved; keep scanning. The final part triggers a PACK ORDER alert.',{reply_markup:{inline_keyboard:[[{text:failed?'🔁 Scan failed QR':'✅ Scan cut QR',web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?mode='+(failed?'failed':'cut')}}]]}})
+     if(message.chat?.type==='private')await send(chat,failed?'🔁 <b>Scan failed part</b>\n\nScanning queues this exact part for re-cut and removes its order from packing readiness.':'✅ <b>Scan cut part</b>\n\nScanning confirms each part is cut. A green tick confirms it saved; keep scanning. The final part triggers a PACK ORDER alert.',{reply_markup:{inline_keyboard:[[{text:failed?'🔁 Scan failed QR':'✅ Scan cut QR',web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?v=continuous-1&mode='+(failed?'failed':'cut')}}]]}})
      else await send(chat,'📷 <b>Scan a part</b>\n\nOpen the scanner in the bot’s private chat, then tap <b>Scan part QR</b>. Telegram requires the scanner launch button in a private chat.',{reply_markup:{inline_keyboard:[[{text:'📷 Open scanner',url:`https://t.me/${config.username}?start=${failed?'failed':'scan'}`}]]}})
      return new Response('OK')
     }
