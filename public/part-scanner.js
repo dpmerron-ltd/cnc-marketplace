@@ -1,73 +1,81 @@
 (() => {
   const app = window.Telegram?.WebApp
-  const scan = document.getElementById('scan')
-  const lookup = document.getElementById('lookup')
-  const status = document.getElementById('status')
-  const loading = document.getElementById('loading')
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  const mode=new URLSearchParams(location.search).get('mode')
-  const action=mode==='failed'?'part_failed':mode==='cut'?'part_cut':'part_lookup'
-  document.getElementById('mode-description').textContent=mode==='failed'?'🔁 Scanning queues this part for re-cut.':mode==='cut'?'✅ Scanning confirms this part is cut.':'🔎 Read-only part lookup.'
-  document.querySelector('h1').textContent=mode==='failed'?'Scan failed part':mode==='cut'?'Scan cut part':'Look up part'
-  let sent = false
-  let scanning = false
-  function partId(raw) {
-    const text = String(raw).trim()
-    if (uuid.test(text)) return text.toLowerCase()
-    if (/^CNC:PART:/i.test(text) && uuid.test(text.slice(9))) return text.slice(9).toLowerCase()
-    try {
-      const url = new URL(text)
-      if (url.protocol !== 'https:' || url.hostname !== 't.me' || url.pathname !== '/tripleeightgroup_bot') return
-      const payload = url.searchParams.get('start')
-      if (payload?.startsWith('part_') && uuid.test(payload.slice(5))) return payload.slice(5).toLowerCase()
-    } catch { /* A different barcode is never followed as a link. */ }
+  const get = id => document.getElementById(id)
+  const video=get('camera'),canvas=get('frame'),status=get('status'),loading=get('loading'),confirmation=get('confirmation'),scan=get('scan'),lookup=get('lookup')
+  const context=canvas.getContext('2d',{willReadFrequently:true})
+  const requested=new URLSearchParams(location.search).get('mode')
+  const mode=['cut','failed'].includes(requested)?requested:'lookup'
+  const endpoint='https://bsnndtwbvgrthddmbhoa.supabase.co/functions/v1/cnc-api/telegram/scan'
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  let busy=false,stream,starting=false,lastId='',lastSeen=0,cooldown=0,lastFrame=0,confirmed=0,overlayTimer
+  document.querySelector('h1').textContent=mode==='failed'?'Scan failed parts':mode==='cut'?'Scan cut parts':'Look up parts'
+  get('mode-description').textContent=mode==='failed'?'🔁 FAILED MODE · Each scan queues that part for re-cut.':mode==='cut'?'✅ CUT MODE · Each scan confirms that part is cut.':'🔎 LOOKUP MODE · No cutting status changes.'
+  document.body.dataset.mode=mode
+  function partId(raw){
+    const text=String(raw).trim()
+    if(uuid.test(text))return text.toLowerCase()
+    if(/^CNC:PART:/i.test(text)&&uuid.test(text.slice(9)))return text.slice(9).toLowerCase()
+    try{const url=new URL(text);if(url.protocol==='https:'&&url.hostname==='t.me'&&url.pathname==='/tripleeightgroup_bot'){const value=url.searchParams.get('start');if(value?.startsWith('part_')&&uuid.test(value.slice(5)))return value.slice(5).toLowerCase()}}catch{ /* Ignore unrelated QR payloads. */ }
   }
-  const inTelegram = Boolean(app && app.platform !== 'unknown' && typeof app.sendData === 'function')
-  function submit(raw) {
-    if (sent) return true
-    const id = partId(raw)
-    if (!id) { status.textContent = 'That is not a CNC part QR code or full part ID. Try another label.'; return false }
-    if (!inTelegram) { status.textContent = 'Open /scan in the Telegram bot, then tap Scan part QR.'; return false }
-    try {
-      sent = true; scan.disabled = true; lookup.disabled = true; loading.hidden = false
-      status.textContent = 'Saving scan in the bot…'
-      app.sendData(JSON.stringify({ type: action, id }))
-      return true
-    } catch {
-      sent = false; scan.disabled = false; lookup.disabled = false; loading.hidden = true
-      status.textContent = 'Could not return to Telegram. Reopen /scan from the bot keyboard and try again.'
-      return false
+  function feedback(kind,text){
+    clearTimeout(overlayTimer)
+    confirmation.dataset.kind=kind;confirmation.hidden=false
+    get('confirmation-icon').textContent=kind==='success'?'✓':kind==='warning'?'!':'✕'
+    get('confirmation-text').textContent=kind==='success'?(mode==='failed'?'Re-cut recorded':mode==='cut'?'Cut confirmed':'Part found'):kind==='warning'?'Saved — needs attention':'Not confirmed'
+    status.textContent=text
+    app?.HapticFeedback?.notificationOccurred(kind==='success'?'success':kind==='warning'?'warning':'error')
+    overlayTimer=setTimeout(()=>{confirmation.hidden=true},kind==='error'?2500:1100)
+  }
+  async function submit(raw){
+    if(busy)return
+    const id=partId(raw)
+    if(!id){feedback('error','Not a CNC part QR or full ID. Try its part label.');return}
+    if(!app?.initData){feedback('error','Reopen the scanner using the newest Scan cut part or Scan failed part button in the bot.');return}
+    busy=true;lookup.disabled=true;loading.hidden=false;lastId=id;status.textContent='Saving scan…'
+    try{
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:app.initData,id,mode}),signal:AbortSignal.timeout(90000)})
+      const result=await response.json()
+      if(!response.ok||typeof result.message!=='string')throw Error(result.error||'Could not confirm the scan. Move this label away and back to retry.')
+      confirmed++;get('count').textContent=`${confirmed} scan${confirmed===1?'':'s'} confirmed this session`
+      feedback(result.warning?'warning':'success',result.message+'\nReady for the next part.')
+      get('part-id').value=''
+    }catch(error){feedback('error',error instanceof Error&&error.name!=='TimeoutError'?error.message:'No confirmation received. Move this label away and back to retry. Repeat scans are safe.')}
+    finally{busy=false;lookup.disabled=false;loading.hidden=true;cooldown=Date.now()+1200}
+  }
+  function frame(timestamp){
+    if(!stream)return
+    if(timestamp-lastFrame>=150&&!document.hidden&&video.readyState>=2){
+      lastFrame=timestamp
+      const width=Math.min(720,video.videoWidth),height=Math.round(video.videoHeight*width/video.videoWidth)
+      if(width&&height&&context){
+        canvas.width=width;canvas.height=height;context.drawImage(video,0,0,width,height)
+        const pixels=context.getImageData(0,0,width,height)
+        const code=window.jsQR(pixels.data,width,height,{inversionAttempts:'attemptBoth'})
+        const id=code&&partId(code.data),now=Date.now()
+        if(id){lastSeen=now;if(!busy&&now>=cooldown&&id!==lastId)void submit(id)}
+        else if(!busy&&now-lastSeen>800)lastId=''
+      }
     }
+    requestAnimationFrame(frame)
   }
-  function start() {
-    if (sent || scanning) return
-    if (!inTelegram) { status.textContent = 'Open /scan in the Telegram bot, then tap Scan part QR.'; return }
-    if (!['android', 'android_x', 'ios'].includes(app.platform) || !app.isVersionAtLeast?.('7.7')) {
-      status.textContent = 'Use Telegram on an updated iPhone or Android phone for the camera scanner. You can enter the part ID below on this device.'
-      return
-    }
-    try {
-      scanning = true
-      status.textContent = 'Point the camera at one part QR. If the camera does not open, check Telegram’s camera permission or enter the ID below.'
-      app.showScanQrPopup({text:'Point the camera at one CNC part QR label'}, data => {
-        const id = partId(data)
-        if (!id) { status.textContent = 'Not a CNC part QR code. Try the code on a part label.'; return false }
-        app.closeScanQrPopup(); scanning = false
-        return submit(id)
-      })
-    } catch {
-      scanning = false
-      status.textContent = 'Camera scanning is unavailable here. Check Telegram’s camera permission, or enter the part ID below.'
-    }
+  async function start(){
+    if(starting||stream)return
+    if(!app?.initData){status.textContent='Use the newest scanner button in the bot’s private chat to start a secure scanning session.';scan.disabled=true;lookup.disabled=true;return}
+    if(!navigator.mediaDevices?.getUserMedia||!context||!window.jsQR){status.textContent='Camera unavailable on this device. Enter the part ID below.';return}
+    starting=true;scan.disabled=true;status.textContent='Opening camera…'
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false})
+      video.srcObject=stream;await video.play();scan.hidden=true;get('camera-box').hidden=false
+      status.textContent='Point at a part QR. Wait for the tick, then move to the next part.'
+      requestAnimationFrame(frame)
+    }catch{stop();status.textContent='Allow camera access, then tap Start camera. You can also enter a part ID below.'}
+    finally{starting=false;scan.disabled=false}
   }
-  scan.addEventListener('click', start)
-  document.getElementById('manual').addEventListener('submit', event => { event.preventDefault(); submit(document.getElementById('part-id').value) })
-  if (inTelegram) {
-    app.ready(); app.expand()
-    app.onEvent('scanQrPopupClosed', () => { scanning = false; if (!sent) status.textContent = 'Scanner closed. Tap the camera button to try again, or enter the ID below.' })
-    start()
-  } else {
-    status.textContent = 'Open /scan in @tripleeightgroup_bot, then tap Scan part QR.'
-    scan.disabled = true; lookup.disabled = true
-  }
+  function stop(){stream?.getTracks().forEach(track=>track.stop());stream=undefined;video.srcObject=null;scan.hidden=false}
+  scan.addEventListener('click',start)
+  get('manual').addEventListener('submit',event=>{event.preventDefault();void submit(get('part-id').value)})
+  window.addEventListener('pagehide',stop)
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else void start()})
+  if(app){app.ready();app.expand()}
+  void start()
 })()

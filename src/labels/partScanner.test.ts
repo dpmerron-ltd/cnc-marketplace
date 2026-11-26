@@ -3,34 +3,31 @@ import { afterEach, expect, it, vi } from 'vitest'
 const script=readFileSync('public/part-scanner.js','utf8')
 const markup=readFileSync('public/part-scanner.html','utf8')
 const id='a72ac365-51c7-4aab-a674-2fa1caf874a6'
-function setup(platform='ios'){
+function setup(initData='signed-session'){
  document.body.innerHTML=markup.match(/<body>([\s\S]*)<\/body>/)![1]
- const app={platform,ready:vi.fn(),expand:vi.fn(),onEvent:vi.fn((_event:string,_callback:()=>void)=>{}),isVersionAtLeast:vi.fn(()=>true),showScanQrPopup:vi.fn((_p:unknown,_callback:(data:string)=>boolean)=>{}),closeScanQrPopup:vi.fn(),sendData:vi.fn()}
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({} as CanvasRenderingContext2D)
+ const app={initData,ready:vi.fn(),expand:vi.fn(),sendData:vi.fn(),close:vi.fn()}
  Object.assign(window,{Telegram:{WebApp:app}})
+ const fetch=vi.fn(async()=>({ok:true,json:async()=>({message:'Found part'})}))
+ vi.stubGlobal('fetch',fetch)
  new Function('window','document',script)(window,document)
- return app
+ const submit=(value:string)=>{(document.getElementById('part-id') as HTMLInputElement).value=value;document.getElementById('manual')!.dispatchEvent(new Event('submit',{cancelable:true}))}
+ return {app,fetch,submit}
 }
-afterEach(()=>{delete (window as unknown as {Telegram?:unknown}).Telegram;document.body.innerHTML=''})
-it('opens the native scanner and returns only a valid part identity once',()=>{
- const app=setup();expect(app.showScanQrPopup).toHaveBeenCalledOnce()
- const callback=app.showScanQrPopup.mock.calls[0][1]
- expect(callback('https://example.com/?start=part_'+id)).toBe(false);expect(app.sendData).not.toHaveBeenCalled()
- expect(callback('https://t.me/tripleeightgroup_bot?start=part_'+id)).toBe(true)
- expect(app.closeScanQrPopup).toHaveBeenCalledOnce()
- expect(app.sendData).toHaveBeenCalledWith(JSON.stringify({type:'part_lookup',id}))
- callback(id);expect(app.sendData).toHaveBeenCalledOnce()
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();delete (window as unknown as {Telegram?:unknown}).Telegram;document.body.innerHTML=''})
+it('ignores foreign QR links and accepts the bot label without sending data or closing',async()=>{
+ const f=setup();f.submit('https://example.com/?start=part_'+id);expect(f.fetch).not.toHaveBeenCalled()
+ f.submit('https://t.me/tripleeightgroup_bot?start=part_'+id)
+ await vi.waitFor(()=>expect(document.getElementById('confirmation-icon')!.textContent).toBe('✓'))
+ expect(JSON.parse((f.fetch.mock.calls[0] as any)[1].body)).toEqual({initData:'signed-session',mode:'lookup',id})
+ expect(f.app.sendData).not.toHaveBeenCalled();expect(f.app.close).not.toHaveBeenCalled()
 })
-it('supports manual lookup on desktop without requesting an unsupported camera',()=>{
- const app=setup('tdesktop');expect(app.showScanQrPopup).not.toHaveBeenCalled()
- expect(document.getElementById('status')!.textContent).toContain('iPhone or Android')
- ;(document.getElementById('part-id') as HTMLInputElement).value=id
- document.getElementById('manual')!.dispatchEvent(new Event('submit',{cancelable:true}))
- expect(app.sendData).toHaveBeenCalledWith(JSON.stringify({type:'part_lookup',id}))
+it('retains manual entry when camera access is unavailable',async()=>{
+ const f=setup();expect(document.getElementById('status')!.textContent).toContain('Camera unavailable')
+ f.submit(id);await vi.waitFor(()=>expect(document.getElementById('status')!.textContent).toContain('Ready for the next part'))
+ expect((document.getElementById('lookup') as HTMLButtonElement).disabled).toBe(false)
 })
-it('handles cancellation and permission failures without getting stuck',()=>{
- const app=setup();const closed=app.onEvent.mock.calls[0][1] as ()=>void;closed()
- expect(document.getElementById('status')!.textContent).toContain('Scanner closed')
- app.showScanQrPopup.mockImplementationOnce(()=>{throw Error('denied')})
- document.getElementById('scan')!.click()
- expect(document.getElementById('status')!.textContent).toContain('permission')
+it('requires a signed launch from the current bot button',()=>{
+ const f=setup('');expect(document.getElementById('status')!.textContent).toContain('newest scanner button')
+ f.submit(id);expect(f.fetch).not.toHaveBeenCalled()
 })
