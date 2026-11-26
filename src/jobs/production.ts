@@ -6,6 +6,8 @@ import { numberSheetParts } from '../labels/partLabels'
 
 export type SheetStage = 'waiting' | 'cutting' | 'cut'
 export interface ProductionSheet {
+  failedPartIds?: string[]
+  scannedPartIds?: string[]
   stage: SheetStage
   runId?: string
   combined?: boolean
@@ -19,7 +21,7 @@ export interface ProductionJob {
   sheet: Sheet
   sheets: Record<number, ProductionSheet>
 }
-export interface SheetWorkspace { dailyPlan?: import('./dailyPlan').DailyPlan; updatedAt?: string; activeId: string; jobs: ProductionJob[] }
+export interface SheetWorkspace { failedParts?: Record<string,string>; packingAlerts?: Record<string, string>; dailyPlan?: import('./dailyPlan').DailyPlan; updatedAt?: string; activeId: string; jobs: ProductionJob[] }
 export function today(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
@@ -125,11 +127,12 @@ export function replanWorkspace(workspace: SheetWorkspace, parts: Part[]): Sheet
 export function orderProgress(jobs: ProductionJob[]) {
   const orders = new Map<string, { name: string; pending: number; waiting: number; cutting: number; cut: number }>()
   for (const job of jobs) for (const [instances, pending] of [[job.sheet.instances, false], [job.sheet.pendingParts ?? [], true]] as const) for (const instance of instances) {
+    if(job.sheets[instance.sheetIndex]?.failedPartIds?.includes(instance.id))continue
     const imported = job.sheet.orderImports?.find(order => order.instanceIds.includes(instance.id))
     const key = instance.orderKey ?? imported?.key ?? instance.orderName
     if (!key) continue
     const progress = orders.get(key) ?? { name: instance.orderName ?? imported?.name ?? key, pending: 0, waiting: 0, cutting: 0, cut: 0 }
-    progress[pending ? 'pending' : job.sheets[instance.sheetIndex]?.stage ?? 'waiting']++
+    progress[pending ? 'pending' : job.sheets[instance.sheetIndex]?.scannedPartIds?.includes(instance.id) ? 'cut' : job.sheets[instance.sheetIndex]?.stage ?? 'waiting']++
     orders.set(key, progress)
   }
   return [...orders.entries()].map(([key, progress]) => ({ key, ...progress }))

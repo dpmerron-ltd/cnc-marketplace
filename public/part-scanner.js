@@ -5,6 +5,10 @@
   const status = document.getElementById('status')
   const loading = document.getElementById('loading')
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const mode=new URLSearchParams(location.search).get('mode')
+  const action=mode==='failed'?'part_failed':mode==='cut'?'part_cut':'part_lookup'
+  document.getElementById('mode-description').textContent=mode==='failed'?'🔁 Scanning queues this part for re-cut.':mode==='cut'?'✅ Scanning confirms this part is cut.':'🔎 Read-only part lookup.'
+  document.querySelector('h1').textContent=mode==='failed'?'Scan failed part':mode==='cut'?'Scan cut part':'Look up part'
   let sent = false
   let scanning = false
   function partId(raw) {
@@ -26,8 +30,8 @@
     if (!inTelegram) { status.textContent = 'Open /scan in the Telegram bot, then tap Scan part QR.'; return false }
     try {
       sent = true; scan.disabled = true; lookup.disabled = true; loading.hidden = false
-      status.textContent = 'Opening this part in the bot chat…'
-      app.sendData(JSON.stringify({ type: 'part_lookup', id }))
+      status.textContent = 'Saving scan in the bot…'
+      app.sendData(JSON.stringify({ type: action, id }))
       return true
     } catch {
       sent = false; scan.disabled = false; lookup.disabled = false; loading.hidden = true

@@ -11,13 +11,27 @@ export function cutOrderParts(workspace: SheetWorkspace, key: string): Map<strin
     const matches = (i: typeof job.sheet.instances[number]) => (i.orderKey ?? job.sheet.orderImports?.find(o => o.instanceIds.includes(i.id))?.key) === key
     if (!job.archived && job.sheet.pendingParts?.some(matches)) return
     for (const part of job.sheet.instances.filter(matches)) {
+      if(workspace.failedParts?.[part.id])continue
       if (job.archived && job.sheets[part.sheetIndex]?.stage !== 'cut') continue
-      if (job.sheets[part.sheetIndex]?.stage !== 'cut' || sheetNeedsExport(job, part.sheetIndex) || seen.has(part.id)) return
+      if ((job.sheets[part.sheetIndex]?.stage !== 'cut' && !job.sheets[part.sheetIndex]?.scannedPartIds?.includes(part.id)) || sheetNeedsExport(job, part.sheetIndex) || seen.has(part.id)) return
       seen.add(part.id); counts.set(part.partId, (counts.get(part.partId) ?? 0) + 1)
     }
   }
   return counts.size ? counts : undefined
 }
+export function unresolvedFailedOrderKeys(workspace:SheetWorkspace):Set<string> {
+ const entries=workspace.jobs.flatMap(job=>job.sheet.instances.map(part=>({job,part})))
+ const resolved=(recutId:string,seen=new Set<string>()):boolean=>{
+  if(seen.has(recutId))return false
+  const next=new Set([...seen,recutId])
+  return entries.some(({job,part})=>part.recutId===recutId&&(workspace.failedParts?.[part.id]?resolved(workspace.failedParts[part.id],next):!sheetNeedsExport(job,part.sheetIndex)&&(job.sheets[part.sheetIndex]?.stage==='cut'||Boolean(job.sheets[part.sheetIndex]?.scannedPartIds?.includes(part.id)))))
+ }
+ return new Set(entries.flatMap(({job,part})=>{
+  const recutId=workspace.failedParts?.[part.id],key=part.orderKey??job.sheet.orderImports?.find(o=>o.instanceIds.includes(part.id))?.key
+  return recutId&&key&&!resolved(recutId)?[key]:[]
+ }))
+}
+
 export function coversRequiredParts(cut: Map<string, number>, required: Map<string, number>) {
   return required.size > 0 && [...required].every(([id, count]) => Number.isSafeInteger(count) && count > 0 && (cut.get(id) ?? 0) >= count)
 }
@@ -49,6 +63,7 @@ export function packingRuntime(db: SupabaseClient, repo: JobRepository, getShopi
           order.lineItems.nodes.push(...next.order.lineItems.nodes); order.lineItems.pageInfo = next.order.lineItems.pageInfo
         }
         if (order.cancelledAt || order.closedAt) throw Error('Order is cancelled or closed; no packing tag added.')
+        if(unresolvedFailedOrderKeys(saved.workspace).has(`${connection.shop}/gid://shopify/Order/${id}`))throw Error('A failed part still needs its replacement confirmed cut.')
         const required = new Map<string,number>()
         for (const line of order.lineItems.nodes.filter(l => l.currentQuantity > 0)) {
           if (!line.sku?.trim()) throw Error('An order item has no matched CNC SKU; packing readiness needs review.')

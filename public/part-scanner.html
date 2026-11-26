@@ -35,10 +35,10 @@
       <form id="manual">
         <label for="part-id">Full ID printed below the QR code</label>
         <input id="part-id" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-        <button id="lookup" type="submit">Look up part</button>
+        <button id="lookup" type="submit">Submit part ID</button>
       </form>
     </details>
-    <p class="muted">🔎 Read-only. Scanning does not mark a part cut.</p>
+    <p id="mode-description" class="muted">Preparing scan mode…</p>
   </main>
   <script src="./part-scanner.js"></script>
 </body>

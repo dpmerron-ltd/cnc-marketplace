@@ -1,3 +1,5 @@
+import { unresolvedFailedOrderKeys } from './packing'
+import { scanRuntime } from './telegramScans'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createTelegram, type TelegramConfig } from './telegram'
 import type { SheetWorkspace } from '../src/jobs/production'
@@ -6,6 +8,23 @@ import { orderService } from './orderAssignments'
 import type { JobRepository } from './handler'
 export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:JobRepository,getShopify:()=>ShopifyReader,font:Uint8Array){
  return createTelegram(config,{
+  scanPart:scanRuntime(db,config.ownerId,repo,getShopify),
+  async pendingPacking(page){
+   if(await repo.orderAdmin()!==config.ownerId)throw Error('Packing list requires the workshop administrator.')
+   const reader=getShopify(),shop=reader.connection(config.ownerId).shop
+   if(!shop||!reader.pendingPacking)throw Error('Shopify packing list unavailable.')
+   const {data:saved,error}=await db.from('sheet_projects').select('workspace').eq('owner_id',config.ownerId).eq('id',config.ownerId).maybeSingle()
+   if(error)throw Error('Could not verify failed-part status. Retry shortly.')
+   const blocked=saved?.workspace?unresolvedFailedOrderKeys(saved.workspace):new Set<string>()
+   let after:string|undefined
+   for(let index=0;index<=page;index++){
+    const result=await reader.pendingPacking(config.ownerId,after)
+    if(index===page)return {...result,orders:result.orders.filter(o=>!blocked.has(`${shop}/${o.id}`)),hasNext:result.pageInfo.hasNextPage,shop}
+    if(!result.pageInfo.hasNextPage)return {orders:[],hasNext:false,shop}
+    const next=result.pageInfo.endCursor;if(!next||next===after)throw Error('Incomplete packing list.');after=next
+   }
+   throw Error('Invalid packing page.')
+  },
   async tabRuns(offset){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at').eq('owner_id',config.ownerId).order('created_at',{ascending:false}).order('id').range(offset,offset+9);if(error)throw Error('Could not load saved exports. Try again shortly.');return data??[]},
   async tabRun(id){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at,snapshot').eq('owner_id',config.ownerId).eq('id',id).maybeSingle();if(error)throw Error('Could not load the saved tab map. Try again shortly.');return data??undefined},
   async workspace(){const {data,error}=await db.from('sheet_projects').select('workspace').eq('owner_id',config.ownerId).eq('id',config.ownerId).maybeSingle();if(error)throw Error('Could not load saved cutting progress. Try again shortly.');return data?.workspace as SheetWorkspace|undefined},
