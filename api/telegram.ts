@@ -1,3 +1,4 @@
+import { miniAppHandler } from './telegramMiniApp'
 import type { TabRun, TabRunSummary } from './telegramTabs'
 import { tabsReply } from './telegramTabs'
 import type { SheetWorkspace } from '../src/jobs/production'
@@ -29,6 +30,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function createTelegram(config:TelegramConfig,store:TelegramStore,send:TelegramSender, extras?: { font: Uint8Array; acknowledge(id: string): Promise<void> }){
  async function reply(chat:string,text:string){for(const chunk of chunks(text))await send(chat,html(chunk))}
  return {
+  scan:miniAppHandler(config,store,async name=>{await send(config.chatId,`📦 <b>PACK ORDER ${html(name)}</b>\n\n✅ All required parts confirmed cut.\n🏷 Ready to pack`,{reply_markup:workshopMenu})}),
   async publish(owner:string,createdAt:string){
    if(owner!==config.ownerId)return {configured:false,sent:false}
    const workspace=await store.workspace()
@@ -77,7 +79,7 @@ export function createTelegram(config:TelegramConfig,store:TelegramStore,send:Te
     if(cmd==='tabs'){await tabsReply(chat,arg,store,send,extras?.font);return new Response('OK')}
     if(cmd==='scan'||cmd==='failed'){
      const failed=cmd==='failed'
-     if(message.chat?.type==='private')await send(chat,failed?'🔁 <b>Scan failed part</b>\n\nScanning queues this exact part for re-cut and removes its order from packing readiness.':'✅ <b>Scan cut part</b>\n\nScanning confirms this part is cut. The final part triggers a PACK ORDER alert.',{reply_markup:{keyboard:[[{text:failed?'🔁 Scan failed QR':'✅ Scan cut QR',web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?mode='+(failed?'failed':'cut')}}]],resize_keyboard:true,is_persistent:true}})
+     if(message.chat?.type==='private')await send(chat,failed?'🔁 <b>Scan failed part</b>\n\nScanning queues this exact part for re-cut and removes its order from packing readiness.':'✅ <b>Scan cut part</b>\n\nScanning confirms each part is cut. A green tick confirms it saved; keep scanning. The final part triggers a PACK ORDER alert.',{reply_markup:{inline_keyboard:[[{text:failed?'🔁 Scan failed QR':'✅ Scan cut QR',web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?mode='+(failed?'failed':'cut')}}]]}})
      else await send(chat,'📷 <b>Scan a part</b>\n\nOpen the scanner in the bot’s private chat, then tap <b>Scan part QR</b>. Telegram requires the scanner launch button in a private chat.',{reply_markup:{inline_keyboard:[[{text:'📷 Open scanner',url:`https://t.me/${config.username}?start=${failed?'failed':'scan'}`}]]}})
      return new Response('OK')
     }

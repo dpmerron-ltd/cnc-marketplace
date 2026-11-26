@@ -29,7 +29,7 @@ it('offers a private keyboard scanner and a group deep-link launcher',async()=>{
  const f=fixture();await f.call('/scan')
  expect(f.send.mock.calls[0][2]).toMatchObject({reply_markup:{inline_keyboard:[[{url:'https://t.me/tripleeightgroup_bot?start=scan'}]]}})
  await f.call('/start scan','42')
- expect(f.send.mock.calls[1][2]).toMatchObject({reply_markup:{keyboard:[[{web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?mode=cut'}}]]}})
+ expect(f.send.mock.calls[1][2]).toMatchObject({reply_markup:{inline_keyboard:[[{web_app:{url:'https://dpmerron-ltd.github.io/cnc-marketplace/part-scanner.html?mode=cut'}}]]}})
 })
 it('treats authenticated Mini App scan results as read-only part lookups',async()=>{
  const f=fixture(),before=JSON.stringify(f.workspace)
@@ -75,5 +75,5 @@ it('routes packing buttons and separates cut and failure scans with operator aut
  await f.call('/cut '+id);expect(f.store.scanPart).toHaveBeenCalledWith(id,false,expect.any(Function))
  expect(f.send.mock.calls.some(([chat,text])=>chat==='-123'&&text.includes('PACK ORDER #1063'))).toBe(true)
  await f.call('/failedpart '+id);expect(f.store.scanPart).toHaveBeenLastCalledWith(id,true,expect.any(Function))
- await f.call('/failed','42');expect(f.send.mock.calls.at(-1)?.[2]).toMatchObject({reply_markup:{keyboard:[[{web_app:{url:expect.stringContaining('mode=failed')}}]]}})
+ await f.call('/failed','42');expect(f.send.mock.calls.at(-1)?.[2]).toMatchObject({reply_markup:{inline_keyboard:[[{web_app:{url:expect.stringContaining('mode=failed')}}]]}})
 })

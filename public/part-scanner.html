@@ -20,16 +20,33 @@
     summary { cursor: pointer; }
     #status { min-height: 48px; }
     progress { width: 100%; }
+    [hidden] { display: none !important; }
+    #camera-box { position: relative; overflow: hidden; border-radius: 18px; background: #111827; aspect-ratio: 1; }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    #confirmation { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: white; background: #15803de8; pointer-events: none; }
+    #confirmation[data-kind="error"] { background: #b91c1ce8; }
+    #confirmation[data-kind="warning"] { background: #92400ee8; }
+    #confirmation-icon { font-size: 110px; line-height: 1; }
+    #confirmation-text { font-size: 24px; font-weight: 750; margin-top: 12px; }
+    #status { white-space: pre-line; }
+    #mode-description { padding: 12px; border-radius: 10px; background: #15803d22; font-weight: 650; }
+    body[data-mode="failed"] #mode-description { background: #b4530922; border: 2px solid #b45309; }
+    #count { font-size: 14px; }
   </style>
 </head>
 <body>
   <main>
     <div class="icon" aria-hidden="true">📷</div>
     <h1>Scan a part</h1>
-    <p class="muted">Point your phone at the QR code on one part label. Its order and cutting details will appear in the bot chat.</p>
-    <button id="scan" type="button">Open camera scanner</button>
+    <p id="mode-description">Preparing scan mode…</p>
+    <section id="camera-box" aria-label="Live QR camera" hidden>
+      <video id="camera" autoplay muted playsinline></video>
+      <div id="confirmation" role="status" aria-live="polite" hidden><span id="confirmation-icon"></span><span id="confirmation-text"></span></div>
+    </section>
+    <canvas id="frame" hidden></canvas>
+    <button id="scan" type="button">Start camera</button>
     <p id="status" role="status" aria-live="polite">Preparing the scanner…</p>
-    <progress id="loading" aria-label="Opening part details" hidden></progress>
+    <progress id="loading" aria-label="Saving scan" hidden></progress>
     <details>
       <summary>Enter an ID instead</summary>
       <form id="manual">
@@ -38,8 +55,9 @@
         <button id="lookup" type="submit">Submit part ID</button>
       </form>
     </details>
-    <p id="mode-description" class="muted">Preparing scan mode…</p>
+    <p id="count" class="muted">Ready for your first scan</p>
   </main>
+  <script src="./qr-decoder.js"></script>
   <script src="./part-scanner.js"></script>
 </body>
 </html>

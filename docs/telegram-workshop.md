@@ -52,3 +52,9 @@ Cut and failed scans are restricted to configured workshop operator IDs. The cam
 Once the complete current order BOM is verified, the bot adds `Ready to pack` and posts **PACK ORDER #…** to the workshop group. A saved per-order alert claim suppresses repeat-scan alerts. A delivery error clears the claim for a retry; a process crash after claiming but before delivery can require manual alert recovery.
 
 Failed scans queue the exact saved export/part in the existing Re-cut queue, remove packing readiness, and exclude the failed physical ID from usable quantities. Add the queued replacement to a cutting job in the site; it receives a new QR identity. Confirm that replacement after cutting. The failed original label cannot complete the replacement. Failures of replacements can themselves be queued. No shipment or Shopify fulfillment is created by scans.
+
+## Continuous scanner
+
+Use the latest private-chat **Scan cut QR** or **Scan failed QR** inline button. The Mini App keeps its own rear-camera preview open, decodes QR frames locally, and posts only the part ID/mode with Telegram's signed `initData` to `/telegram/scan`. Camera images never leave the device. The server verifies the HMAC, a 12-hour session age, and the configured operator ID before reading or changing progress. Old keyboard launches lack this signed session and ask the operator to reopen from the latest button.
+
+A green tick and haptic feedback appear only after the server acknowledges the scan; amber indicates saved progress with a packing warning; red indicates no successful acknowledgement. The next different part scans automatically after a brief confirmation interval. A held QR is suppressed until removed or replaced. No `sendData` or app close call is used. Camera access may need initial device permission; if unavailable, manual ID entry remains available. The camera stops when the app is hidden or closed.
