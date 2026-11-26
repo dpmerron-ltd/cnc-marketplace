@@ -102,10 +102,14 @@ function prepareProfile(f: CamFeature, settings: CamSettings) {
   return { path, intervals, roughPath, roughIntervals: onLine || settings.skipFinishingPass ? intervals : roughingTabs(path, roughPath, intervals), centers, warnings, onLine }
 }
 
-export function generateCam(drawing: CamDrawing, settings: CamSettings): CamResult {
+// Compatibility is limited to the previous FAST breakthrough ramp preset.
+// Callers must verify saved machining before using it for regeneration.
+export function generateCam(drawing: CamDrawing, settings: CamSettings, compatibility?: { legacyBreakthroughRamp: true }): CamResult {
   const allowance = settings.skipFinishingPass ? 0 : finishingAllowanceMm
   const fastPeckReturn = fastPeckReturnPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
-  const rampSettings = rampPreset(settings.rampProfile, materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
+  const profileId = materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest)
+  const rampSettings = compatibility?.legacyBreakthroughRamp && profileId === '12-2pass-2mm-depth12p4'
+    ? rampPreset() : rampPreset(settings.rampProfile, profileId)
   const cutFeed = cutFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
   if (settings.finishingFeedMultiplier !== undefined && (!Number.isFinite(settings.finishingFeedMultiplier) || settings.finishingFeedMultiplier < 1 || settings.finishingFeedMultiplier > 2)) throw new Error('Finishing feed multiplier must be between 1 and 2.')
   const finishFeed = settings.finishingFeedMultiplier !== undefined ? cutFeed * settings.finishingFeedMultiplier : finishingFeedPreset(materialProfileId(settings.thickness, settings.profilePasses, settings.drillDepthMm, settings.rampProfile, settings.efficiencyTest))
