@@ -42,3 +42,13 @@ When an order administrator marks a sheet cut in Cutting Jobs and the cloud save
 The Shopify app needs `write_orders`. Failures preserve cutting progress and show a retry button. The bot scanner remains read-only; scanning a label does not confirm cutting. A packing tag records readiness at the time of confirmation; later order edits or recut requests need packing review.
 
 The workshop menu uses inline buttons for Today's cuts, Orders, Find order, Tab maps and Scan a part. Buttons use authenticated callback updates with the same group/private-user restrictions. Find order prompts for a reply containing the order number; arbitrary group messages are not interpreted as lookups. Existing slash commands remain available.
+
+## Packing and failure scans
+
+The menu includes **Pending packing**, **Scan cut part**, and **Scan failed part**. Pending packing reads open Shopify orders tagged `Ready to pack`, excludes fulfilled orders and unresolved failed parts, and pages oldest first.
+
+Cut and failed scans are restricted to configured workshop operator IDs. The camera opens in the bot's private chat. Each mode is explicitly labelled; older lookup links remain read-only. Cut scans save individual physical IDs against the exported layout, lock partially confirmed sheets, and mark the sheet cut when all its parts have been recorded. Saved workspace version checks prevent concurrent scans and stale browser saves from overwriting each other. Reload an already-open site after scanning.
+
+Once the complete current order BOM is verified, the bot adds `Ready to pack` and posts **PACK ORDER #…** to the workshop group. A saved per-order alert claim suppresses repeat-scan alerts. A delivery error clears the claim for a retry; a process crash after claiming but before delivery can require manual alert recovery.
+
+Failed scans queue the exact saved export/part in the existing Re-cut queue, remove packing readiness, and exclude the failed physical ID from usable quantities. Add the queued replacement to a cutting job in the site; it receives a new QR identity. Confirm that replacement after cutting. The failed original label cannot complete the replacement. Failures of replacements can themselves be queued. No shipment or Shopify fulfillment is created by scans.

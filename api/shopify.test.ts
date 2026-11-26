@@ -99,3 +99,15 @@ it('requires write_orders before attempting a packing mutation',async()=>{
  await expect(reader.readyToPack!(alice,'123')).rejects.toThrow('write_orders')
  expect(fetcher).toHaveBeenCalledTimes(1)
 })
+
+it('lists ready-to-pack orders oldest first with a fixed query and cursor, and removes only the packing tag',async()=>{
+ const {reader,fetcher}=fixture()
+ fetcher.mockResolvedValueOnce(response({access_token:'t',expires_in:86400,scope:'write_orders'})).mockResolvedValueOnce(response({data:{orders:{nodes:[{id:order.id,name:order.name,createdAt:order.createdAt}],pageInfo}}}))
+ expect((await reader.pendingPacking!(alice,'next')).orders[0].name).toBe('#1001')
+ const sent=JSON.parse(String(fetcher.mock.calls[1][1]?.body))
+ expect(sent.query).toContain('tag:\\"Ready to pack\\"');expect(sent.query).toContain('reverse:false');expect(sent.variables.after).toBe('next')
+ fetcher.mockResolvedValueOnce(response({data:{tagsRemove:{userErrors:[]}}}))
+ await reader.removeReadyToPack!(alice,'123')
+ expect(String(fetcher.mock.calls.at(-1)?.[1]?.body)).toContain('tagsRemove')
+ await expect(reader.pendingPacking!(bob)).rejects.toMatchObject({status:404})
+})

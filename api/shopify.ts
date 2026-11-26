@@ -20,6 +20,8 @@ const detailQuery = `query CncOrder($id: ID!, $after: String) { order(id: $id) {
 const filters = { all: '', open: 'status:open', unfulfilled: 'status:open (fulfillment_status:unfulfilled OR fulfillment_status:partial)', fulfilled: 'fulfillment_status:fulfilled', cancelled: 'status:cancelled' }
 
 export interface ShopifyReader {
+  removeReadyToPack?(owner:string,id:string):Promise<void>
+  pendingPacking?(owner: string, after?: string): Promise<{orders: Array<{id:string;name:string;createdAt:string}>; pageInfo:{hasNextPage:boolean;endCursor:string|null}} >
   readyToPack?(owner: string, id: string): Promise<void>
   connection(owner: string): ShopifyConnection
   orders(owner: string, params: URLSearchParams): Promise<ShopifyOrders>
@@ -87,6 +89,16 @@ export function shopifyReader(raw = '[]', fetcher: typeof fetch = fetch, now = D
     return result.data
   }
   return {
+    async removeReadyToPack(owner,id) {
+      if(!/^\d+$/.test(id))throw Error('Invalid order ID.')
+      const result=await graphql(get(owner),'mutation($id:ID!){tagsRemove(id:$id,tags:["Ready to pack"]){userErrors{message}}}',{id:`gid://shopify/Order/${id}`}) as {tagsRemove?:{userErrors:unknown[]}}
+      if(!result.tagsRemove||result.tagsRemove.userErrors.length)throw Error('Could not remove packing tag.')
+    },
+    async pendingPacking(owner, after) {
+      const result = z.object({orders:z.object({nodes:z.array(z.object({id:z.string().regex(/^gid:\/\/shopify\/Order\/\d+$/),name:z.string(),createdAt:z.string()})),pageInfo})}).safeParse(await graphql(get(owner), `query CncPacking($after:String){orders(first:10,after:$after,sortKey:CREATED_AT,reverse:false,query:"status:open tag:\\"Ready to pack\\" (fulfillment_status:unfulfilled OR fulfillment_status:partial)"){nodes{id name createdAt}pageInfo{hasNextPage endCursor}}}`, {after}))
+      if(!result.success)throw new JobError('Could not load pending packing orders.',502)
+      return {orders:result.data.orders.nodes,pageInfo:result.data.orders.pageInfo}
+    },
     async readyToPack(owner, id) {
       if (!/^\d{1,30}$/.test(id)) throw new JobError('Invalid Shopify order ID.', 400)
       const connection = get(owner)
