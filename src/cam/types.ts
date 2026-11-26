@@ -24,6 +24,7 @@ export interface CamFeature {
 export interface CamDrawing { features: CamFeature[]; warnings: string[]; errors: string[]; units: 'mm' | 'inches' | 'unknown' }
 export interface OperationOverride { kind?: OperationKind; depthMm?: number; tabs?: number; cornerOvercuts?: boolean }
 export interface CamSettings {
+  finishingFeedMultiplier?: number
   skipFinishingPass?: boolean
   efficiencyTest?: boolean
   thickness: 6 | 12 | 13 | 14 | 15 | 18

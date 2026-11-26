@@ -427,3 +427,13 @@ it('authenticates day-plan sharing and forwards only the saved timestamp', async
   expect((await call('alice',{createdAt:'2026-11-25T09:00:00.000Z'})).status).toBe(200)
   expect(publish).toHaveBeenCalledWith('alice','2026-11-25T09:00:00.000Z')
 })
+
+it('authenticates packing sync and accepts only order IDs, never client completion claims',async()=>{
+ const {repo}=fixture(),sync=vi.fn(async()=>({results:[]})),api=createApi(repo,font,undefined,undefined,sync)
+ const call=(token:string,input:unknown)=>api(new Request('https://example.com/cnc-api/v1/shopify/packing-sync',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(input)}))
+ expect((await call('unknown',{orderIds:['123']})).status).toBe(401)
+ expect((await call('alice',{orderIds:['123'],allCut:true})).status).toBe(400)
+ expect(sync).not.toHaveBeenCalled()
+ expect((await call('alice',{orderIds:['123']})).status).toBe(200)
+ expect(sync).toHaveBeenCalledWith('alice',['123'])
+})

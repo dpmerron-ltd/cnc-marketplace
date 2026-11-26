@@ -34,7 +34,7 @@ const sources = new WeakMap<Part, Map<string, SharedSource | null>>()
 // Missing DXFs, edited NC, old cutters and unknown overrides retain V1 cuts.
 export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined {
   const id = sheet.materialProfile ?? part.metadata.materialVariants?.primaryProfile
-  const key = JSON.stringify([id, sheet.gcodeSettings, part.gcode.includes(noFinishingMarker)])
+  const key = JSON.stringify([id, sheet.gcodeSettings, sheet.finishingFeedMultiplier, part.gcode.includes(noFinishingMarker)])
   let cache = sources.get(part)
   if (!cache) { cache = new Map(); sources.set(part, cache) }
   if (cache.has(key)) return cache.get(key) ?? undefined
@@ -48,7 +48,7 @@ export function sharedSource(part: Part, sheet: Sheet): SharedSource | undefined
     const drawing = readDxf(part.dxf, 'mm')
     if (drawing.errors.length || drawing.features.length > 100) return
     const provenance = part.metadata as typeof part.metadata & { rackingRegeneration?: { sourceLayerOverrides?: Record<string, OperationOverride> } }
-    const settings: CamSettings = { skipFinishingPass: part.gcode.includes(noFinishingMarker), efficiencyTest: 'efficiencyTest' in profile, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
+    const settings: CamSettings = { finishingFeedMultiplier: sheet.finishingFeedMultiplier, skipFinishingPass: part.gcode.includes(noFinishingMarker), efficiencyTest: 'efficiencyTest' in profile, thickness: profile.thickness, profilePasses: [12, 13, 14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, units: 'mm', operations: provenance.rackingRegeneration?.sourceLayerOverrides ?? {}, programs: sheet.gcodeSettings }
     let features = drawing.features.map(f => ({ ...f, ...settings.operations[f.id] })).filter(f => f.kind !== 'ignore')
     const outer = features.filter(f => f.kind === 'outside')
     if (outer.length !== 1 || outer[0].circle || !outer[0].closed) return
@@ -146,8 +146,8 @@ export function generatePair(a: SharedSource, b: SharedSource, key?: string): Pa
   // Each face gets its own 0.3 mm full-depth finish, with no duplicate spring pass.
   if (!a.settings.skipFinishingPass) for (const [face, finishX] of [['left', x - finishingAllowanceMm], ['right', x + finishingAllowanceMm]] as const) {
     lines.push(`(Shared edge finishing ${face}: ${n(finishingAllowanceMm)} mm allowance / full depth ${depth} mm)`)
-    move(start, depth, finishingFeedPreset(a.profile.id), finishX)
-    move(end, depth, finishingFeedPreset(a.profile.id), finishX)
+    move(start, depth, (a.settings.finishingFeedMultiplier ? cutFeedPreset(a.profile.id) * a.settings.finishingFeedMultiplier : finishingFeedPreset(a.profile.id)), finishX)
+    move(end, depth, (a.settings.finishingFeedMultiplier ? cutFeedPreset(a.profile.id) * a.settings.finishingFeedMultiplier : finishingFeedPreset(a.profile.id)), finishX)
     ;[start, end] = [end, start]
   }
   lines.push('G00 Z20', '(End shared edge)')

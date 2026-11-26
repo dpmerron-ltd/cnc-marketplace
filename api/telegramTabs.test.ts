@@ -14,7 +14,7 @@ function fixture(){
 }
 it('lists exports then only occupied physical sheets with stable export IDs',async()=>{
  const f=fixture();await tabsReply('42','',f.store,f.send,font)
- expect(f.send.mock.calls[0][2]).toMatchObject({reply_markup:{inline_keyboard:[[{callback_data:`tabs:${id}`}]]}})
+ expect(f.send.mock.calls[0][2]).toMatchObject({reply_markup:{inline_keyboard:expect.arrayContaining([[{text:expect.any(String),callback_data:`tabs:${id}`}]])}})
  await tabsReply('42',id,f.store,f.send,font)
  expect(f.send.mock.calls[1][1]).toContain('Rack &lt;12mm&gt;')
  expect(f.send.mock.calls[1][2]).toMatchObject({reply_markup:{inline_keyboard:[[{callback_data:`tabs:${id} 1`}],[{callback_data:`tabs:${id} 3`}]]}})

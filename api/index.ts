@@ -1,3 +1,4 @@
+import { packingRuntime } from './packing'
 import { telegramRuntime } from './telegramRuntime'
 import type { TelegramConfig } from './telegram'
 import { createClient } from '@supabase/supabase-js'
@@ -17,7 +18,7 @@ const repo = supabaseRepository(db)
 const getShopify = () => shopify ??= shopifyReader(Deno.env.get('CNC_SHOPIFY_CONNECTIONS') ?? '[]')
 const rawTelegram = Deno.env.get('CNC_TELEGRAM_CONFIG')
 const telegram = rawTelegram ? telegramRuntime(db, JSON.parse(rawTelegram) as TelegramConfig, repo, getShopify, decodeBase64(__PDF_FONT_BASE64__)) : undefined
-const api = createApi(repo, decodeBase64(__PDF_FONT_BASE64__), getShopify, telegram?.publish)
+const api = createApi(repo, decodeBase64(__PDF_FONT_BASE64__), getShopify, telegram?.publish, packingRuntime(db, repo, getShopify))
 Deno.serve(request => new URL(request.url).pathname.endsWith('/telegram/webhook')
   ? telegram ? telegram.handle(request) : Promise.resolve(new Response('Not configured', { status: 503 }))
   : api(request))

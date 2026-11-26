@@ -298,3 +298,15 @@ it('blocks skip-finishing export when saved machining cannot be reproduced',()=>
  sheet.skipFinishingPass=false
  expect(exportCombinedGCode([part],{...sheet,nestingMethod:'v1'},defaultProgramSettings).errors).toEqual([])
 })
+
+it('uses the daily finishing multiplier on shared faces and ordinary contours',()=>{
+ const parts=[rectanglePart('fast-a'),rectanglePart('fast-b')],sheet=withProfile(parts,pairSheet(parts))
+ sheet.finishingFeedMultiplier=1.9
+ sheet.instances=autoNest(parts,sheet)
+ const result=exportCombinedGCode(parts,sheet,defaultProgramSettings)
+ expect(result.errors).toEqual([])
+ expect(result.gcode).toContain('Shared edge finishing left')
+ const shared=result.gcode.slice(result.gcode.indexOf('(Shared edge finishing left'))
+ expect(shared).toContain('F5700');expect(result.gcode).toContain('F3000')
+ expect(camPreset.diameter).toBe(6)
+})

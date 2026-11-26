@@ -32,3 +32,13 @@ Only recognised part UUIDs or this bot’s QR deep links are accepted. The scann
 Maps come from the immutable `cnc_machine_runs.snapshot.map`, scoped to the configured owner, not a newly regenerated workspace layout. Match the export and NC file to the physical sheet; later edits require a new export. Source/inference warnings are preserved. The PDF links to that saved export's interactive sheet view. No cutting state or NC is changed.
 
 The webhook must enable `message` and `callback_query` updates. Buttons use the same fixed workshop-group/allowed-private-user access rules as commands. Old or deleted exports and missing sheets fail explicitly rather than guessing another layout.
+
+### Daily-plan machining and packing
+
+Fresh daily plans disable sheet workholding screw marks and use 1.9x the roughing feed on explicitly identified level finishing moves. Ramps, drilling, tab lifts and geometry retain their existing settings. Unclassified imported NC without an identified finish keeps its original feeds; known non-6-mm source programs require regeneration. Completed sheets retain their original settings; waiting work is separated before applying new settings. Existing exports are not rewritten and changed waiting settings require a fresh export.
+
+When an order administrator marks a sheet cut in Cutting Jobs and the cloud save succeeds, the app checks the order's readiness through `/v1/shopify/packing-sync`. The server reads saved progress, verifies current exported-sheet signatures, all required component identities and quantities against the live order and published catalogue, and adds only `Ready to pack` with Shopify `tagsAdd`. Unknown SKUs, missing components, edited orders, pending parts and incomplete sheets cannot qualify. Historical component revisions requiring reconciliation are reported for review. Shipping and payment statuses are unchanged.
+
+The Shopify app needs `write_orders`. Failures preserve cutting progress and show a retry button. The bot scanner remains read-only; scanning a label does not confirm cutting. A packing tag records readiness at the time of confirmation; later order edits or recut requests need packing review.
+
+The workshop menu uses inline buttons for Today's cuts, Orders, Find order, Tab maps and Scan a part. Buttons use authenticated callback updates with the same group/private-user restrictions. Find order prompts for a reply containing the order number; arbitrary group messages are not interpreted as lookups. Existing slash commands remain available.

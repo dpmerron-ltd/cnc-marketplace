@@ -48,6 +48,7 @@ export interface DailyPlan {
   warnings: string[]
   orders: { name: string; scheduled: number; waiting: number; cutting: number; cut: number; pending: number }[]
 }
+export const dailyCutSettings = { screwMarkingEnabled: false, skipFinishingPass: false, finishingFeedMultiplier: 1.9 } as const
 export const dayCutBudgetSeconds = 12 * 60 * 60
 export const sheetHandlingMinutes = 15
 
@@ -115,6 +116,7 @@ export function buildDailyPlan(input: DailyPlanInput, onProgress?: ReportPlannin
     .sort((a, b) => (Date.parse(a.createdAt ?? '') || Infinity) - (Date.parse(b.createdAt ?? '') || Infinity))
   let staged: Sheet = {
     ...baseSheet,
+    ...dailyCutSettings,
     width: stockSquareMm,
     height: stockSquareMm,
     name: `Orders planned ${today()}`,
@@ -177,7 +179,7 @@ export function buildDailyPlan(input: DailyPlanInput, onProgress?: ReportPlannin
   let jobs = staged.instances.length ? [...workspace.jobs, newProductionJob(staged)] : workspace.jobs
   // Fill compatible waiting sheets across existing jobs and newly loaded orders.
   // Unrelated/manual work and completed layouts are never pulled into this plan.
-  const eligible = jobs.filter(
+  let eligible = jobs.filter(
     (job) =>
       !job.archived &&
       job.sheet.instances.some((i) => (job.sheets[i.sheetIndex]?.stage ?? 'waiting') === 'waiting') &&
@@ -193,6 +195,23 @@ export function buildDailyPlan(input: DailyPlanInput, onProgress?: ReportPlannin
           )
         })
   )
+  // Split waiting work from completed sheets before changing machining settings.
+  // Completed sheet signatures and saved exports must remain unchanged.
+  const eligibleIds = new Set(eligible.map(job => job.id))
+  const planningIds = new Set<string>()
+  jobs = jobs.flatMap(job => {
+    if (!eligibleIds.has(job.id)) return [job]
+    const waiting = job.sheet.instances.filter(i => (job.sheets[i.sheetIndex]?.stage ?? 'waiting') === 'waiting')
+    const retained = job.sheet.instances.filter(i => (job.sheets[i.sheetIndex]?.stage ?? 'waiting') !== 'waiting')
+    if (!retained.length) {
+      planningIds.add(job.id)
+      return [{ ...job, sheet: { ...job.sheet, ...dailyCutSettings } }]
+    }
+    const fresh = newProductionJob({ ...job.sheet, ...dailyCutSettings, instances: waiting, pendingParts: [] })
+    planningIds.add(fresh.id)
+    return [{ ...job, sheet: { ...job.sheet, instances: retained } }, fresh]
+  })
+  eligible = jobs.filter(job => planningIds.has(job.id))
   if (eligible.length > 1) {
     const replanned = replanWorkspace({ activeId: eligible[0].id, jobs: eligible }, parts)
     jobs = jobs.map((job) => replanned.jobs.find((j) => j.id === job.id) ?? job)

@@ -18,6 +18,7 @@ export interface GCodePreset {
 }
 
 export interface Sheet {
+  finishingFeedMultiplier?: number
   skipFinishingPass?: boolean
   nestingMethod?: 'v1' | 'v2'
 

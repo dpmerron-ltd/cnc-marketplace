@@ -56,3 +56,13 @@ it('authorises tab buttons using the clicking user and fixed chat before any loo
  expect(f.send).not.toHaveBeenCalled();expect(f.store.tabRuns).not.toHaveBeenCalled()
  await callback('-123',42);expect(f.send.mock.calls[0][1]).toContain('Tab maps are unavailable')
 })
+
+it('offers menu buttons and accepts an order number only in reply to its prompt',async()=>{
+ const f=fixture();await f.call('/help');expect(f.send.mock.calls[0][2]).toMatchObject({reply_markup:{inline_keyboard:expect.any(Array)}})
+ f.send.mockClear()
+ await f.bot.handle(new Request('https://example.com',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':config.secret},body:JSON.stringify({callback_query:{id:'c',data:'menu:findorder',from:{id:42},message:{chat:{id:'-123',type:'group'},from:{is_bot:true}}}})}))
+ expect(f.send.mock.calls[0][2]).toMatchObject({reply_markup:{force_reply:true}})
+ const prompt=f.send.mock.calls[0][1]
+ await f.bot.handle(new Request('https://example.com',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':config.secret},body:JSON.stringify({message:{text:'1047',from:{id:42},chat:{id:'-123',type:'group'},reply_to_message:{text:prompt,from:{is_bot:true,username:config.username}}}})}))
+ expect(f.store.order).toHaveBeenCalledWith('1047')
+})

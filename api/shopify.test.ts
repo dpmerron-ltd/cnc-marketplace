@@ -85,3 +85,17 @@ describe('Shopify order access', () => {
     await expect(f.reader.orders(alice, new URLSearchParams())).rejects.toThrow('complete order data')
   })
 })
+
+it('adds only Ready to pack and never fulfills or replaces existing tags',async()=>{
+ const {reader,fetcher}=fixture()
+ fetcher.mockResolvedValueOnce(response({access_token:'token',expires_in:86400,scope:'write_orders'})).mockResolvedValueOnce(response({data:{tagsAdd:{node:{id:order.id},userErrors:[]}}}))
+ await reader.readyToPack!(alice,'123')
+ const request=JSON.parse(String(fetcher.mock.calls[1][1]?.body))
+ expect(request.variables).toEqual({id:order.id,tags:['Ready to pack']})
+ expect(request.query).toContain('tagsAdd');expect(request.query).not.toMatch(/fulfillment|orderUpdate|email/i)
+})
+it('requires write_orders before attempting a packing mutation',async()=>{
+ const {reader,fetcher}=fixture()
+ await expect(reader.readyToPack!(alice,'123')).rejects.toThrow('write_orders')
+ expect(fetcher).toHaveBeenCalledTimes(1)
+})

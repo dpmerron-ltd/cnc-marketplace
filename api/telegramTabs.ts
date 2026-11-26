@@ -16,6 +16,7 @@ export async function tabsReply(chat: string, arg: string, store: TelegramStore,
     if (!runs.length) { await send(chat, '📌 No saved CNC exports on this page. Export the sheet’s NC first, then use /tabs.'); return }
     const buttons = runs.map(run => [{ text: `${short(run.name)} · ${run.created_at.slice(0, 10)} · ${run.status} · ${run.id.slice(0, 8)}`, callback_data: `tabs:${run.id}` }])
     if (offset) buttons.push([{ text: '← Newer exports', callback_data: `tabs:page ${Math.max(0, offset - 10)}` }])
+    buttons.push([{text:'🪚 Workshop menu',callback_data:'menu:help'}])
     if (runs.length === 10) buttons.push([{ text: 'Older exports →', callback_data: `tabs:page ${offset + 10}` }])
     await send(chat, '📌 <b>Sheet tab maps</b>\n\nChoose the saved CNC export you are cutting. Then choose a sheet.\n\nMaps match that export; later layout edits are not included.', { reply_markup: { inline_keyboard: buttons } })
     return
