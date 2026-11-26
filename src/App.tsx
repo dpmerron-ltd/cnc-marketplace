@@ -30,6 +30,7 @@ import { ProfilePage } from './ui/ProfilePage'
 import { loadProgramSettings, saveProgramSettings } from './storage/programSettingsStore'
 import type { ProgramSettings } from './gcode/programSettings'
 import { numberSheetParts } from './labels/partLabels'
+import { LabelsPage } from './ui/LabelsPage'
 import { PartLabelsDialog } from './ui/PartLabelsDialog'
 import { TabMapDownload } from './ui/TabMapDownload'
 import { QueuePage } from './ui/QueuePage'
@@ -94,7 +95,7 @@ import { selectMaterialParts } from './gcode/materialSelection'
 
 const CamPage = lazy(() => import('./ui/CamPage').then(module => ({ default: module.CamPage })))
 const PrintablesPage = lazy(() => import('./ui/PrintablesPage').then(module => ({ default: module.PrintablesPage })))
-const pageFromHash = () => window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#queue' || window.location.hash.startsWith('#queue/') ? 'queue' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
+const pageFromHash = () => window.location.hash === '#labels' ? 'labels' as const : window.location.hash.startsWith('#machine') ? 'machine' as const : window.location.hash === '#queue' || window.location.hash.startsWith('#queue/') ? 'queue' as const : window.location.hash === '#prints' ? 'prints' as const : 'marketplace' as const
 
 const defaultSheet: Sheet = {
   name: today(),
@@ -465,7 +466,7 @@ function findDuplicatePlacement(part: Part, source: PartInstance, parts: Part[],
 function App() {
   const initialState = useMemo(() => projectToAppState(undefined), [])
   const [navigationHash, setNavigationHash] = useState(() => window.location.hash)
-  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine' | 'prints'>(pageFromHash)
+  const [page, setPage] = useState<'marketplace' | 'sheet' | 'history' | 'queue' | 'generate' | 'profile' | 'orders' | 'boxes' | 'machine' | 'prints' | 'labels'>(pageFromHash)
   useEffect(() => {
     const navigate = () => { setNavigationHash(window.location.hash); const next = pageFromHash(); if (next !== 'marketplace') setPage(next) }
     window.addEventListener('hashchange', navigate)
@@ -1765,6 +1766,7 @@ function App() {
           <button type="button" className={page === 'queue' ? 'active-nav' : ''} onClick={() => setPage('queue')}>Queue</button>
           <button type="button" className={page === 'orders' ? 'active-nav' : ''} onClick={() => setPage('orders')}>Orders</button>
           <button type="button" className={page === 'boxes' ? 'active-nav' : ''} onClick={() => setPage('boxes')}>Boxes</button>
+          <button type="button" className={page === 'labels' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'labels'; setPage('labels') }}>Labels</button>
           <button type="button" className={page === 'prints' ? 'active-nav' : ''} onClick={() => { window.location.hash = 'prints'; setPage('prints') }}>3D Prints</button>
           <button type="button" className={page === 'generate' ? 'active-nav' : ''} onClick={() => setPage('generate')}>Generate</button>
           <button type="button" className={page === 'profile' ? 'active-nav icon-text-button' : 'icon-text-button'} onClick={() => setPage('profile')}><UserRound size={16} />Profile</button>
@@ -1876,7 +1878,7 @@ function App() {
           <button type="button" className="primary" disabled={exportBusy} onClick={() => void prepareExport('combined')}>Export Combined</button>
           <button type="button" onClick={() => void signOut()}>Sign Out</button>
         </div></>}
-        {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes' || page === 'prints') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
+        {(page === 'machine' || page === 'queue' || page === 'generate' || page === 'marketplace' || page === 'profile' || page === 'orders' || page === 'boxes' || page === 'prints' || page === 'labels') && <button type="button" onClick={() => void signOut()}>Sign Out</button>}
       </header>
       {packingSyncing && <div role="status">Checking Shopify packing readiness… <progress aria-label="Checking packing readiness" /></div>}
       {packingRetry?.owner === userId && <button disabled={packingSyncing} onClick={()=>void syncPackingFor(packingRetry.owner,packingRetry.ids)}>Retry Shopify packing sync</button>}
@@ -1884,7 +1886,7 @@ function App() {
       <ComponentSaveQueue jobs={componentSaves.jobs} onRetry={componentSaves.retry} onClear={componentSaves.clearSaved} />
 
       {allocation && <MaterialAllocationDialog name={allocation.name} parts={allocation.parts} sheet={allocation.sheet} additions={allocation.additions} startIndex={allocation.startIndex} onApply={allocation.apply} onCancel={allocation.cancel} />}
-      {page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} onPlanDay={() => setDailyPlanOpen(true)} workspace={workspace} programs={programs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage onPlanDay={() => setDailyPlanOpen(true)} key={userId} userId={userId!} cuttingJobs={loadedAccountId === userId ? workspace.jobs : undefined} onOpenSheet={openJob} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
+      {page === 'labels' ? <LabelsPage /> : page === 'prints' ? <Suspense fallback={<main>Loading 3D prints...</main>}><PrintablesPage key={userId} userId={userId} items={catalogueItems(items)} /></Suspense> : page === 'machine' ? navigationHash.startsWith('#machine/') ? <MachinePage key={userId} userId={userId} jobs={workspace.jobs} onCurrentLabels={openJobLabels} syncBlocked={Boolean(workspaceSaveError) || loadedAccountId !== userId} /> : <CuttingJobsPage jobs={workspace.jobs} components={catalogueComponents} onOpen={openJob} onNew={addJob} onRemove={removeJob} onStage={updateJobSheetStage} onLabels={openJobLabels} onReplan={replanWaitingJobs} onPlanDay={() => setDailyPlanOpen(true)} workspace={workspace} programs={programs} /> : page === 'boxes' ? <BoxStockPage key={userId} userId={userId!} items={catalogueItems(items)} parts={catalogueComponents} /> : page === 'orders' ? <OrdersPage onPlanDay={() => setDailyPlanOpen(true)} key={userId} userId={userId!} cuttingJobs={loadedAccountId === userId ? workspace.jobs : undefined} onOpenSheet={openJob} sheetTarget={{ items: items.filter(defaultItem), parts: catalogueComponents, sheetName: sheet.name, onAdd: addOrderToSheet }} /> : page === 'profile' ? <ProfilePage key={`${userId}:${programState.loading}:${programReload}`} email={userEmail} programs={programs} loading={programState.loading || programState.ownerId !== userId} error={programState.error} onRetry={reloadAccountPrograms} onSave={saveAccountPrograms} /> : page === 'generate' ? programs ? <Suspense fallback={<main>Loading generator...</main>}><CamPage key={userId} items={items.filter(editableItem)} onSave={saveGeneratedComponent} saveJobs={componentSaves.jobs} programs={programs} /></Suspense> : <main className="profile-page"><div className="profile-heading"><h2>{programState.loading ? 'Loading program settings...' : 'CNC program setup required'}</h2><button type="button" onClick={() => setPage('profile')}>User Profile</button></div></main> : page === 'queue' ? <QueuePage key={userId} userId={userId!} onAddRecut={addRecutToSheet} addedRecuts={workspace.jobs.flatMap(job => job.sheet.instances.flatMap(i => i.recutId ? [i.recutId] : []))} sheetName={`${activeJob.name} · ${materialProfiles.find(p => p.id === sheet.materialProfile)?.label ?? "Original NC"}`} /> : page === 'marketplace' ? (
         <MarketplacePage
           key={userId}
           items={items}
@@ -2105,7 +2107,7 @@ function App() {
         </div>
       )}
 
-      {page !== 'prints' && page !== 'machine' && page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
+      {page !== 'labels' && page !== 'prints' && page !== 'machine' && page !== 'queue' && page !== 'generate' && page !== 'profile' && <section className="bottom-bar">
         <div>
           <strong>Status:</strong> {status}
         </div>
