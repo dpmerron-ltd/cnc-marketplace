@@ -8,7 +8,7 @@ const snapshot = { version: 1, files: [{ gcode: 'G21\nG90\nM30' }], map: { sheet
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.clearAllMocks(); mock.getUser.mockResolvedValue({ data: { user: { id: 'owner' } } }); mock.rpc.mockResolvedValue({ data: 'export-id', error: null }) })
 describe('large immutable export saves', () => {
   it('uploads bounded chunks that reconstruct the exact snapshot, then verifies its hash', async () => {
-    const large = { material: 'x'.repeat(1024 * 1024 - 14) + '🪵', ...snapshot, files: [{ gcode: 'G21\n'.repeat(500000) }] } as ExportSnapshot
+    const large = { material: 'x'.repeat(1024 * 1024 - 14) + '🪵', version: snapshot.version, map: snapshot.map, files: [{ gcode: 'G21\n'.repeat(500000) }] } as ExportSnapshot
     await saveMachineRun('export-id', 'owner', large)
     const uploads = mock.rpc.mock.calls.filter(([name]) => name === 'upload_cnc_machine_run_chunk')
     expect(uploads.length).toBeGreaterThan(2)
