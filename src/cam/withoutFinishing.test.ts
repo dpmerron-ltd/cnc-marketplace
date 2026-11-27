@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import fixture from './fixtures/legacy-breakthrough.json'
+import originalFinishFixture from './fixtures/legacy-breakthrough-original-finishing.json'
 import { withoutFinishing } from './withoutFinishing'
 import { createPartFromGCode } from '../gcode/importPart'
 import { simulateGCode } from '../gcode/simulator'
@@ -79,4 +80,32 @@ it('exports V2 sheets using legacy components with finishing skipped', async () 
   expect(simulateGCode(output.gcode).deepestCutMm).toBe(12.4)
   expect(output.gcode).not.toContain('(Finishing pass:')
   expect(simulateGCode(output.gcode).errors).toEqual([])
+})
+
+// Captured saved tray component: both the original 3-degree ramp and F3000 finish.
+it('accepts historical FAST machining with the original finishing feed', () => {
+  const source = createPartFromGCode('tray.nc', originalFinishFixture.gcode, originalFinishFixture.dxf)
+  const result = withoutFinishing(source, profile)
+  expect(result.gcode).toContain('(Ramp 5 degrees F1200 / cutting F3000')
+  expect(result.gcode).toContain('(Roughing: leave 0 mm on walls)')
+  expect(result.gcode).not.toContain('(Finishing pass:')
+  expect(result.gcode).toContain('(Tab 4)')
+  expect(simulateGCode(result.gcode).errors).toEqual([])
+  expect(simulateGCode(result.gcode).deepestCutMm).toBe(12.4)
+  expect(source.gcode).toBe(originalFinishFixture.gcode)
+})
+
+it('accepts the current ramp with the historical finishing feed', () => {
+  const generated = generateCam(readDxf(fixture.dxf, 'mm'), { thickness: 12, profilePasses: 2, drillDepthMm: 2, finishingFeedMultiplier: 1, units: 'mm', operations: {} })
+  expect(generated.errors).toEqual([])
+  expect(() => withoutFinishing(createPartFromGCode('new-ramp.nc', generated.gcode, fixture.dxf), profile)).not.toThrow()
+})
+
+it.each([
+  (code: string) => code.replace('F3000', 'F2700'),
+  (code: string) => code.replaceAll('Z-12.4 ', 'Z-12.6 '),
+  (code: string) => code.replace('G01 X', 'G01 X9'),
+])('rejects modified historical programs even with the original finishing feed', edit => {
+  const source = createPartFromGCode('edited.nc', edit(originalFinishFixture.gcode), originalFinishFixture.dxf)
+  expect(() => withoutFinishing(source, profile)).toThrow('could not be reproduced')
 })

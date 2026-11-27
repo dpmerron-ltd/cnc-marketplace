@@ -30,11 +30,22 @@ export function withoutFinishing(part: Part, profileId?: string): Part {
   if (!operations) throw new Error('Cannot recover the saved machining operations. Regenerate from DXF before skipping finishing.')
   const settings: CamSettings = { thickness: profile.thickness, profilePasses: [12,13,14].includes(profile.thickness) ? profile.profilePasses : undefined, drillDepthMm: profile.drillDepthMm, rampProfile: profile.rampProfile, efficiencyTest: 'efficiencyTest' in profile, units: 'mm', operations }
   const signature = machiningSignature(part.gcode)
-  let original = generateCam(drawing, settings)
-  if (id === '12-2pass-2mm-depth12p4' && /\(Ramp 3 degrees F600 \/ cutting F3000 \//.test(part.gcode) && (original.errors.length || machiningSignature(original.gcode) !== signature)) {
-    original = generateCam(drawing, settings, { legacyBreakthroughRamp: true })
+  // Historical FAST programs used either the original cutting feed for finishing
+  // or the later doubled finishing feed, independently of the ramp update.
+  // Try only those known presets and require every machining word to match.
+  const candidates: Array<{ settings: CamSettings; legacyRamp: boolean }> = [{ settings, legacyRamp: false }]
+  if (id === '12-2pass-2mm-depth12p4') {
+    const originalFinish = { ...settings, finishingFeedMultiplier: 1 }
+    candidates.push({ settings: originalFinish, legacyRamp: false })
+    if (/\(Ramp 3 degrees F600 \/ cutting F3000 \//.test(part.gcode)) {
+      candidates.push({ settings, legacyRamp: true }, { settings: originalFinish, legacyRamp: true })
+    }
   }
-  if (!signature || original.errors.length || machiningSignature(original.gcode) !== signature) throw new Error('Saved machining could not be reproduced. Regenerate this component before skipping finishing.')
+  const reproduced = signature && candidates.some(candidate => {
+    const original = generateCam(drawing, candidate.settings, candidate.legacyRamp ? { legacyBreakthroughRamp: true } : undefined)
+    return !original.errors.length && machiningSignature(original.gcode) === signature
+  })
+  if (!reproduced) throw new Error('Saved machining could not be reproduced. Regenerate this component before skipping finishing.')
   // Regenerate from source using the current preset; never relabel saved coordinates.
   const next = generateCam(drawing, { ...settings, skipFinishingPass: true })
   if (next.errors.length) throw new Error(next.errors.join(' '))
