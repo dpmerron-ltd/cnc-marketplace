@@ -8,7 +8,7 @@ Each account configures its own start, spindle-start and end programs under **Pr
 
 ## Large export saves
 
-Machine exports use `save_cnc_machine_run` to store the immutable snapshot and return only its ID. This authenticated, MFA-protected RPC has a bounded 60-second transaction timeout for large multi-sheet payloads; unrelated API requests retain the normal timeout. Successful saves return the inserted ID without reading the large snapshot back into memory. Retries compare snapshots inside SQL and return only a boolean match. Retries use the same ID and exact snapshot, never overwrite a saved program or reset its status. A reused ID with different content is rejected. Apply `supabase/schema.sql` before deploying this client.
+Machine exports use `save_cnc_machine_run` to store the immutable snapshot and return only its ID. This authenticated, MFA-protected RPC has a bounded 60-second transaction timeout for large multi-sheet payloads; unrelated API requests retain the normal timeout. Export snapshots upload in bounded chunks with an end-to-end SHA-256 check, so large jobs do not require a single oversized PostgREST request. Only a complete verified upload creates a machine run; retries preserve the same ID and programs. Successful saves return the inserted ID without reading the large snapshot back into memory. Retries compare snapshots inside SQL and return only a boolean match. Retries use the same ID and exact snapshot, never overwrite a saved program or reset its status. A reused ID with different content is rejected. Apply `supabase/schema.sql` before deploying this client.
 
 ## Ignore pattern sides
 

@@ -439,6 +439,77 @@ end $$;
 revoke all on function public.save_cnc_machine_run(uuid,jsonb) from public, anon;
 grant execute on function public.save_cnc_machine_run(uuid,jsonb) to authenticated;
 
+-- Bound each API request instead of decoding a whole multi-sheet export at once.
+create table if not exists public.cnc_machine_run_chunks (
+  export_id uuid not null,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  chunk_index integer not null check (chunk_index between 0 and 255),
+  chunk_count integer not null check (chunk_count between 1 and 256),
+  payload_hash text not null check (payload_hash ~ '^[0-9a-f]{64}$'),
+  content text not null check (octet_length(content) <= 4194304),
+  created_at timestamptz not null default now(),
+  primary key (export_id, chunk_index),
+  check (chunk_index < chunk_count)
+);
+alter table public.cnc_machine_run_chunks enable row level security;
+revoke all on public.cnc_machine_run_chunks from public, anon, authenticated;
+grant select, insert, delete on public.cnc_machine_run_chunks to authenticated;
+drop policy if exists "export chunk access" on public.cnc_machine_run_chunks;
+create policy "export chunk access" on public.cnc_machine_run_chunks for all to authenticated
+ using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+ with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+drop policy if exists "export chunk account guard" on public.cnc_machine_run_chunks;
+create policy "export chunk account guard" on public.cnc_machine_run_chunks as restrictive for all
+ using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
+ with check (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2');
+
+create or replace function public.upload_cnc_machine_run_chunk(p_id uuid, p_index integer, p_count integer, p_hash text, p_content text)
+returns uuid language plpgsql security invoker set search_path = '' as $$
+begin
+ if auth.uid() is null or coalesce(auth.jwt()->>'aal','') <> 'aal2' then
+  raise exception 'Verified sign-in required' using errcode='42501';
+ end if;
+ insert into public.cnc_machine_run_chunks(export_id,owner_id,chunk_index,chunk_count,payload_hash,content)
+ values(p_id,auth.uid(),p_index,p_count,p_hash,p_content) on conflict do nothing;
+ if not exists(select 1 from public.cnc_machine_run_chunks where export_id=p_id and chunk_index=p_index
+  and owner_id=auth.uid() and chunk_count=p_count and payload_hash=p_hash and content=p_content) then
+  raise exception 'Export upload differs from the original. Reopen export.' using errcode='23505';
+ end if;
+ return p_id;
+end $$;
+revoke all on function public.upload_cnc_machine_run_chunk(uuid,integer,integer,text,text) from public,anon;
+grant execute on function public.upload_cnc_machine_run_chunk(uuid,integer,integer,text,text) to authenticated;
+
+create or replace function public.finish_cnc_machine_run_upload(p_id uuid, p_count integer, p_hash text)
+returns uuid language plpgsql security invoker set search_path = '' set statement_timeout = '60s' as $$
+declare payload text; result uuid;
+begin
+ if auth.uid() is null or coalesce(auth.jwt()->>'aal','') <> 'aal2' then
+  raise exception 'Verified sign-in required' using errcode='42501';
+ end if;
+ if p_count is null or p_count not between 1 and 256 or p_hash is null or p_hash !~ '^[0-9a-f]{64}$' then
+  raise exception 'Invalid export upload' using errcode='22023';
+ end if;
+ if (select count(*) from public.cnc_machine_run_chunks where export_id=p_id and owner_id=auth.uid()
+  and chunk_count=p_count and payload_hash=p_hash) <> p_count then
+  raise exception 'Export upload is incomplete. Retry to upload the same programs.' using errcode='22023';
+ end if;
+ if (select sum(octet_length(content)) from public.cnc_machine_run_chunks where export_id=p_id and owner_id=auth.uid()) > 134217728 then
+  raise exception 'Export exceeds 128 MiB' using errcode='22023';
+ end if;
+ select string_agg(content,'' order by chunk_index) into payload from public.cnc_machine_run_chunks
+ where export_id=p_id and owner_id=auth.uid() and chunk_count=p_count and payload_hash=p_hash;
+ if encode(sha256(convert_to(payload,'UTF8')),'hex') <> p_hash then
+  raise exception 'Export upload checksum mismatch. Retry.' using errcode='22023';
+ end if;
+ result := public.save_cnc_machine_run(p_id,payload::jsonb);
+ delete from public.cnc_machine_run_chunks where export_id=p_id and owner_id=auth.uid();
+ return result;
+end $$;
+revoke all on function public.finish_cnc_machine_run_upload(uuid,integer,text) from public,anon;
+grant execute on function public.finish_cnc_machine_run_upload(uuid,integer,text) to authenticated;
+
+
 -- Replacement requests refer to the exact part in an immutable machine export.
 create table if not exists public.cnc_machine_recuts (
   id uuid primary key default gen_random_uuid(),

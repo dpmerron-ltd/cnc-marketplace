@@ -76,6 +76,7 @@ jobs:
           psql --set ON_ERROR_STOP=on --file supabase/tests/box-stock-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/component-program-protection.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/machine-export-isolation.sql
+          psql --set ON_ERROR_STOP=on --file supabase/tests/machine-export-chunks.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/machine-recut-isolation.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/job-names.sql
           psql --set ON_ERROR_STOP=on --file supabase/tests/cutting-workspace.sql

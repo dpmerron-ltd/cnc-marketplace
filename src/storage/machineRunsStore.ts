@@ -1,3 +1,4 @@
+import { ncHash } from '../machine/exportSnapshot'
 import { supabase } from './supabaseClient'
 import type { ExportSnapshot, MachineRun, MachineRunSummary, MachineStatus } from '../machine/exportSnapshot'
 
@@ -11,10 +12,26 @@ async function clientFor(ownerId: string) {
 
 export async function saveMachineRun(id: string, ownerId: string, snapshot: ExportSnapshot): Promise<void> {
   const client = await clientFor(ownerId)
-  // Send the large immutable snapshot once through a bounded export-only RPC.
-  // Its transaction timeout includes PostgREST body decoding; the normal table
-  // endpoint uses the authenticated role's eight-second limit.
-  const { data, error } = await client.rpc('save_cnc_machine_run', { p_id: id, p_snapshot: snapshot })
+  const payload = JSON.stringify(snapshot)
+  if (new TextEncoder().encode(payload).byteLength > 128 * 1024 * 1024) throw new Error('Export exceeds 128 MiB. Export fewer sheets at a time.')
+  // JSON escapes lone surrogates. Avoid splitting a valid surrogate pair between
+  // requests, so the server receives exactly the UTF-8 bytes we hashed.
+  const chunks: string[] = []
+  for (let start = 0; start < payload.length;) {
+    let end = Math.min(start + 1024 * 1024, payload.length)
+    const last = payload.charCodeAt(end - 1)
+    if (end < payload.length && last >= 0xd800 && last <= 0xdbff) end--
+    chunks.push(payload.slice(start, end))
+    start = end
+  }
+  const hash = await ncHash(payload)
+  for (const [index, content] of chunks.entries()) {
+    const { data, error } = await client.rpc('upload_cnc_machine_run_chunk', {
+      p_id: id, p_index: index, p_count: chunks.length, p_hash: hash, p_content: content,
+    })
+    if (error || data !== id) throw new Error(error?.message ?? 'The export upload was not saved.')
+  }
+  const { data, error } = await client.rpc('finish_cnc_machine_run_upload', { p_id: id, p_count: chunks.length, p_hash: hash })
   if (error || data !== id) throw new Error(error?.message ?? 'The exported sheet was not saved.')
 }
 
