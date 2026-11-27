@@ -407,7 +407,7 @@ returns uuid language plpgsql security invoker
 set search_path = '' set statement_timeout = '60s' as $$
 declare
   account uuid := auth.uid();
-  saved jsonb;
+  inserted_id uuid;
 begin
   if account is null or coalesce(auth.jwt()->>'aal', '') <> 'aal2' then
     raise exception 'Verified sign-in required' using errcode = '42501';
@@ -417,26 +417,25 @@ begin
       and jsonb_typeof(p_snapshot->'map'->'parts') = 'array') is not true then
     raise exception 'Invalid export snapshot' using errcode = '22023';
   end if;
-  -- Retries never rewrite the snapshot or reset a cutting status.
-  select snapshot into saved from public.cnc_machine_runs where id = p_id and owner_id = account;
-  if found then
-    if saved is distinct from p_snapshot then
-      raise exception 'This export ID already contains different files. Reopen export.' using errcode = '23505';
-    end if;
-    return p_id;
-  end if;
+  -- Do not copy the large saved JSONB into a PL/pgSQL variable or read it back
+  -- after a successful INSERT. The request already holds the complete snapshot.
   insert into public.cnc_machine_runs(id,owner_id,name,order_number,material,thickness,sheet_count,part_count,snapshot)
   values (p_id,account,p_snapshot->'map'->>'name',p_snapshot->'map'->>'order',
     p_snapshot->>'material',p_snapshot->>'thickness',(p_snapshot->'map'->>'sheetCount')::integer,
     jsonb_array_length(p_snapshot->'map'->'parts'),p_snapshot)
-  on conflict (id) do nothing;
-  select snapshot into saved from public.cnc_machine_runs where id = p_id and owner_id = account;
-  if not found then raise exception 'Export could not be saved to this account' using errcode = '42501'; end if;
-  if saved is distinct from p_snapshot then
+  on conflict (id) do nothing returning id into inserted_id;
+  if inserted_id is not null then return inserted_id; end if;
+  -- A retry or concurrent INSERT must still match the same owner's immutable
+  -- snapshot. Compare inside SQL and return only a boolean, never the payload.
+  if not exists (select 1 from public.cnc_machine_runs where id = p_id and owner_id = account) then
+    raise exception 'Export could not be saved to this account' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.cnc_machine_runs where id = p_id and owner_id = account and snapshot = p_snapshot) then
     raise exception 'This export ID already contains different files. Reopen export.' using errcode = '23505';
   end if;
   return p_id;
 end $$;
+
 revoke all on function public.save_cnc_machine_run(uuid,jsonb) from public, anon;
 grant execute on function public.save_cnc_machine_run(uuid,jsonb) to authenticated;
 

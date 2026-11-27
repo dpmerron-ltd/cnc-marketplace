@@ -66,6 +66,7 @@ begin
   if octet_length(payload::text)<10000000 then raise exception 'Large-export fixture too small'; end if;
   result := public.save_cnc_machine_run(export_id,payload);
   if result<>export_id then raise exception 'Wrong returned export ID'; end if;
+  if not exists(select 1 from public.cnc_machine_runs where id=export_id and snapshot=payload and status='waiting') then raise exception 'Initial save did not preserve snapshot'; end if;
   update public.cnc_machine_runs set status='cutting' where id=export_id;
   perform public.save_cnc_machine_run(export_id,payload);
   if (select count(*) from public.cnc_machine_runs where id=export_id)<>1 then raise exception 'Duplicate retry'; end if;
