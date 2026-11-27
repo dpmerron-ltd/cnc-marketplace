@@ -25,8 +25,12 @@ begin
   end if;
  end loop;
  perform public.finish_cnc_machine_run_upload(eid,chunks,hash);
- if not exists(select 1 from public.cnc_machine_runs where id=eid and snapshot=payload::jsonb) then raise exception 'Snapshot mismatch'; end if;
- if exists(select 1 from public.cnc_machine_run_chunks where export_id=eid) then raise exception 'Chunks not cleaned'; end if;
+ if not exists(select 1 from public.cnc_machine_runs where id=eid and snapshot->>'storage'='chunks-v1' and snapshot->>'sha256'=hash) then raise exception 'Snapshot mismatch'; end if;
+ if (select string_agg(c.content,'' order by c.chunk_index) from public.cnc_machine_run_chunks c where c.export_id=eid) <> payload then raise exception 'Saved chunks differ'; end if;
+ begin
+  delete from public.cnc_machine_run_chunks where export_id=eid;
+  raise exception 'Saved chunks deleted';
+ exception when insufficient_privilege then null; end;
  -- Retrying after a lost success response must retain the same row and status.
  update public.cnc_machine_runs set status='cutting' where id=eid;
  for idx in 0..chunks-1 loop

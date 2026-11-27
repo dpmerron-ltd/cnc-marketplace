@@ -1,3 +1,4 @@
+import { hydrateExportSnapshot } from '../src/storage/chunkedSnapshot'
 import { unresolvedFailedOrderKeys } from './packing'
 import { scanRuntime } from './telegramScans'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -26,7 +27,7 @@ export function telegramRuntime(db:SupabaseClient,config:TelegramConfig,repo:Job
    throw Error('Invalid packing page.')
   },
   async tabRuns(offset){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at').eq('owner_id',config.ownerId).order('created_at',{ascending:false}).order('id').range(offset,offset+9);if(error)throw Error('Could not load saved exports. Try again shortly.');return data??[]},
-  async tabRun(id){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at,snapshot').eq('owner_id',config.ownerId).eq('id',id).maybeSingle();if(error)throw Error('Could not load the saved tab map. Try again shortly.');return data??undefined},
+  async tabRun(id){const {data,error}=await db.from('cnc_machine_runs').select('id,name,status,created_at,snapshot').eq('owner_id',config.ownerId).eq('id',id).maybeSingle();if(error)throw Error('Could not load the saved tab map. Try again shortly.');return data ? {...data,snapshot:await hydrateExportSnapshot(db,config.ownerId,id,data.snapshot)} : undefined},
   async workspace(){const {data,error}=await db.from('sheet_projects').select('workspace').eq('owner_id',config.ownerId).eq('id',config.ownerId).maybeSingle();if(error)throw Error('Could not load saved cutting progress. Try again shortly.');return data?.workspace as SheetWorkspace|undefined},
   async component(id){const {data,error}=await db.from('cnc_components').select('name,sku').eq('id',id).maybeSingle();return !error&&data?`${data.name} (${data.sku??''})`:'Component metadata unavailable'},
   async exportedPart(id){

@@ -1,3 +1,4 @@
+import { hydrateExportSnapshot } from './chunkedSnapshot'
 import { ncHash } from '../machine/exportSnapshot'
 import { supabase } from './supabaseClient'
 import type { ExportSnapshot, MachineRun, MachineRunSummary, MachineStatus } from '../machine/exportSnapshot'
@@ -48,8 +49,7 @@ export async function loadMachineRun(ownerId: string, id: string, signal: AbortS
   const client = await clientFor(ownerId)
   const { data, error } = await client.from('cnc_machine_runs').select(`${summaryColumns},snapshot`).eq('owner_id', ownerId).eq('id', id).abortSignal(signal).single()
   if (error || !data) throw new Error(error?.message ?? 'Exported sheet not found.')
-  if (data.snapshot?.version !== 1) throw new Error('Unsupported export snapshot. Reload the app.')
-  return data
+  return { ...data, snapshot: await hydrateExportSnapshot(client, ownerId, id, data.snapshot, signal) }
 }
 
 export async function changeMachineRunStatus(ownerId: string, run: MachineRun, status: MachineStatus): Promise<void> {

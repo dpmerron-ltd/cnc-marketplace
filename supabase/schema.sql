@@ -453,7 +453,7 @@ create table if not exists public.cnc_machine_run_chunks (
 );
 alter table public.cnc_machine_run_chunks enable row level security;
 revoke all on public.cnc_machine_run_chunks from public, anon, authenticated;
-grant select, insert, delete on public.cnc_machine_run_chunks to authenticated;
+grant select, insert on public.cnc_machine_run_chunks to authenticated;
 drop policy if exists "export chunk access" on public.cnc_machine_run_chunks;
 create policy "export chunk access" on public.cnc_machine_run_chunks for all to authenticated
  using (owner_id = auth.uid() and auth.jwt()->>'aal' = 'aal2')
@@ -480,15 +480,28 @@ end $$;
 revoke all on function public.upload_cnc_machine_run_chunk(uuid,integer,integer,text,text) from public,anon;
 grant execute on function public.upload_cnc_machine_run_chunk(uuid,integer,integer,text,text) to authenticated;
 
+-- Completed upload chunks are the immutable export payload, not temporary staging.
+drop policy if exists "retain saved export chunks" on public.cnc_machine_run_chunks;
+create policy "retain saved export chunks" on public.cnc_machine_run_chunks as restrictive for delete
+ using (not exists(select 1 from public.cnc_machine_runs r where r.id=export_id));
+grant select on public.cnc_machine_run_chunks to service_role;
+
 create or replace function public.finish_cnc_machine_run_upload(p_id uuid, p_count integer, p_hash text)
 returns uuid language plpgsql security invoker set search_path = '' set statement_timeout = '60s' as $$
-declare payload text; result uuid;
+declare payload text; header record; layout record; parts jsonb; manifest jsonb; existing jsonb;
 begin
  if auth.uid() is null or coalesce(auth.jwt()->>'aal','') <> 'aal2' then
   raise exception 'Verified sign-in required' using errcode='42501';
  end if;
  if p_count is null or p_count not between 1 and 256 or p_hash is null or p_hash !~ '^[0-9a-f]{64}$' then
   raise exception 'Invalid export upload' using errcode='22023';
+ end if;
+ select snapshot into existing from public.cnc_machine_runs where id=p_id and owner_id=auth.uid();
+ if existing->>'storage' = 'chunks-v1' then
+  if existing->>'sha256' <> p_hash or (existing->>'chunkCount')::integer <> p_count then
+   raise exception 'This export ID already contains different files. Reopen export.' using errcode='23505';
+  end if;
+  return p_id;
  end if;
  if (select count(*) from public.cnc_machine_run_chunks where export_id=p_id and owner_id=auth.uid()
   and chunk_count=p_count and payload_hash=p_hash) <> p_count then
@@ -502,12 +515,25 @@ begin
  if encode(sha256(convert_to(payload,'UTF8')),'hex') <> p_hash then
   raise exception 'Export upload checksum mismatch. Retry.' using errcode='22023';
  end if;
- result := public.save_cnc_machine_run(p_id,payload::jsonb);
- delete from public.cnc_machine_run_chunks where export_id=p_id and owner_id=auth.uid();
- return result;
+ -- Legacy completed rows remain compatible with retries.
+ if existing is not null then return public.save_cnc_machine_run(p_id,payload::jsonb); end if;
+ -- Parse as JSON text: never expand the complete geometry into a JSONB tree.
+ select * into header from json_to_record(payload::json) as x(version integer, map json, sheets json, labels json, material text, thickness text, files json);
+ if header.version is distinct from 1 or json_typeof(header.files) is distinct from 'array' or json_typeof(header.map) is distinct from 'object' then
+  raise exception 'Invalid export snapshot' using errcode='22023';
+ end if;
+ select * into layout from json_to_record(header.map) as x(name text, "order" text, "sheetCount" integer, parts json);
+ if json_typeof(layout.parts) is distinct from 'array' then raise exception 'Invalid export parts' using errcode='22023'; end if;
+ select jsonb_agg(jsonb_build_object('number',part->>'number','name',part->>'name','sheetIndex',(part->>'sheetIndex')::integer)) into parts from json_array_elements(layout.parts) part;
+ manifest := jsonb_build_object('version',1,'storage','chunks-v1','sha256',p_hash,'chunkCount',p_count,
+  'files','[]'::jsonb,'material',header.material,'thickness',header.thickness,
+  'sheets',coalesce(header.sheets::text::jsonb,'[]'::jsonb),'labels',coalesce(header.labels::text::jsonb,'[]'::jsonb),
+  'map',jsonb_build_object('name',layout.name,'order',layout."order",'sheetCount',layout."sheetCount",'parts',coalesce(parts,'[]'::jsonb)));
+ return public.save_cnc_machine_run(p_id,manifest);
 end $$;
 revoke all on function public.finish_cnc_machine_run_upload(uuid,integer,text) from public,anon;
 grant execute on function public.finish_cnc_machine_run_upload(uuid,integer,text) to authenticated;
+
 
 
 -- Replacement requests refer to the exact part in an immutable machine export.
